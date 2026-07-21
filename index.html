@@ -1526,11 +1526,32 @@ function tryLoadImage(url, timeoutMs){
 }
 function buildShotPrompt(shot, scene){
   const parts = [];
+
+  // characters selected via the checklist — this was previously missing entirely
+  if(shot.characters && shot.characters.length){
+    const bandCat = state.categories.find(c=>c.key==='band');
+    const chars = bandCat ? bandCat.items : [];
+    shot.characters.forEach(id=>{
+      const c = chars.find(x=>x.id===id);
+      if(!c) return;
+      let entry = c.name;
+      if(c.description) entry += ' (' + c.description + ')';
+      parts.push('featuring ' + entry);
+    });
+  }
+
   if(shot.description) parts.push(shot.description);
   if(shot.shotSize) parts.push(shot.shotSize.toLowerCase());
   if(shot.cameraMove && shot.cameraMove!=='Static') parts.push(shot.cameraMove.toLowerCase()+' camera movement');
   if(shot.lighting) parts.push(shot.lighting);
-  if(scene && scene.location) parts.push('at ' + scene.location);
+
+  // location — pull its saved description too, not just the name
+  if(scene && scene.location){
+    const locCat = state.categories.find(c=>c.key==='locations');
+    const loc = locCat ? locCat.items.find(l=>l.name===scene.location) : null;
+    parts.push('in ' + scene.location + (loc && loc.description ? ', ' + loc.description : ''));
+  }
+
   parts.push('cinematic still frame, film grain, music video');
   return parts.join(', ');
 }
