@@ -228,6 +228,10 @@
     background:rgba(0,0,0,.18);padding:2px 6px;border-radius:4px;
   }
   .gen-hint{font-size:11px;color:var(--text-3);margin-top:8px;line-height:1.5;}
+  .shot-preview-thumb{
+    width:100%;aspect-ratio:16/9;border-radius:6px;border:1px solid var(--line);
+    object-fit:cover;margin-bottom:10px;display:block;
+  }
   .gen-spin{
     width:12px;height:12px;border-radius:50%;border:2px solid rgba(242,185,104,.35);
     border-top-color:var(--accent-text);animation:gen-spin-rot .7s linear infinite;flex:0 0 auto;
@@ -341,8 +345,8 @@
     overflow:hidden;
   }
   .shot-thumb.focused{box-shadow:0 0 0 2px var(--accent);}
-  .shot-thumb .st-name{font-size:10px;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;}
-  .shot-thumb .st-meta{font-size:9px;color:rgba(255,255,255,.8);font-family:var(--font-mono);}
+  .shot-thumb .st-name{font-size:10px;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;text-shadow:0 1px 3px rgba(0,0,0,.6);}
+  .shot-thumb .st-meta{font-size:9px;color:rgba(255,255,255,.8);font-family:var(--font-mono);text-shadow:0 1px 3px rgba(0,0,0,.6);}
   .shot-trim{position:absolute;top:0;bottom:0;width:7px;cursor:ew-resize;z-index:2;}
   .shot-trim.left{left:0;}
   .shot-trim.right{right:0;}
@@ -450,12 +454,12 @@
 // ---------- state ----------
 const state = {
   categories: [
-    {key:'music', name:'Music', icon:'ti-music', addType:null, items:[
+    {key:'music', name:'Music', icon:'ti-music', addType:null, collapsed:true, items:[
       {name:'Enter Sandman.mp3', icon:'ti-file-music'},
     ]},
-    {key:'band', name:'Band / Characters', icon:'ti-users', addType:'character', items:[]},
-    {key:'locations', name:'Locations', icon:'ti-map-pin', addType:'generic', items:[]},
-    {key:'scenes', name:'Scenes', icon:'ti-movie', addType:'scene', items:[]},
+    {key:'band', name:'Band / Characters', icon:'ti-users', addType:'character', collapsed:true, items:[]},
+    {key:'locations', name:'Locations', icon:'ti-map-pin', addType:'generic', collapsed:true, items:[]},
+    {key:'scenes', name:'Scenes', icon:'ti-movie', addType:'scene', collapsed:true, items:[]},
   ],
   scenes: []
 };
@@ -465,12 +469,12 @@ let focus = { sceneId: null, shotId: null };
 const PX_PER_SEC = 40; // cosmetic scale for the ruler, not tied to real audio timing yet
 
 const TIMELINE_COLORS = [
-  { dot:'#5f8ad4', bg:'rgba(60,95,150,0.22)',  thumb:'linear-gradient(160deg,#3a5f8a,#1c2f45)' },
-  { dot:'#7ec463', bg:'rgba(80,140,60,0.22)',  thumb:'linear-gradient(160deg,#5f8a3a,#2f451c)' },
-  { dot:'#d873a3', bg:'rgba(150,60,110,0.22)', thumb:'linear-gradient(160deg,#8a3a5f,#451c2f)' },
-  { dot:'#e0a54f', bg:'rgba(150,110,60,0.22)', thumb:'linear-gradient(160deg,#8a6a3a,#45351c)' },
-  { dot:'#4fc4b0', bg:'rgba(58,140,125,0.22)', thumb:'linear-gradient(160deg,#3a8a7a,#1c453d)' },
-  { dot:'#a878e0', bg:'rgba(105,60,150,0.22)', thumb:'linear-gradient(160deg,#6a3a8a,#351c45)' },
+  { dot:'#5f8ad4', bg:'rgba(60,95,150,0.22)',  thumb:'linear-gradient(160deg,#3a5f8a,#1c2f45)', hexA:'#3a5f8a', hexB:'#1c2f45' },
+  { dot:'#7ec463', bg:'rgba(80,140,60,0.22)',  thumb:'linear-gradient(160deg,#5f8a3a,#2f451c)', hexA:'#5f8a3a', hexB:'#2f451c' },
+  { dot:'#d873a3', bg:'rgba(150,60,110,0.22)', thumb:'linear-gradient(160deg,#8a3a5f,#451c2f)', hexA:'#8a3a5f', hexB:'#451c2f' },
+  { dot:'#e0a54f', bg:'rgba(150,110,60,0.22)', thumb:'linear-gradient(160deg,#8a6a3a,#45351c)', hexA:'#8a6a3a', hexB:'#45351c' },
+  { dot:'#4fc4b0', bg:'rgba(58,140,125,0.22)', thumb:'linear-gradient(160deg,#3a8a7a,#1c453d)', hexA:'#3a8a7a', hexB:'#1c453d' },
+  { dot:'#a878e0', bg:'rgba(105,60,150,0.22)', thumb:'linear-gradient(160deg,#6a3a8a,#351c45)', hexA:'#6a3a8a', hexB:'#351c45' },
 ];
 
 const assetsEl = document.getElementById('assets');
@@ -597,8 +601,11 @@ function renderTimelineScenes(){
       scene.shots.forEach((shot, i)=>{
         const isFocused = focus.sceneId===scene.id && focus.shotId===shot.id;
         const wpx = Math.round(shot.duration * PX_PER_SEC);
+        const thumbBg = shot.previewImage
+          ? `background-image:url(${shot.previewImage});background-size:cover;background-position:center;`
+          : `background:${col.thumb};`;
         trackHtml += `
-          <div class="shot-thumb${isFocused?' focused':''}" data-anchor data-scene="${scene.id}" data-shot="${shot.id}" style="background:${col.thumb};width:${wpx}px;flex-basis:${wpx}px;">
+          <div class="shot-thumb${isFocused?' focused':''}" data-anchor data-scene="${scene.id}" data-shot="${shot.id}" style="${thumbBg}width:${wpx}px;flex-basis:${wpx}px;">
             <div class="shot-trim left" data-trim="${scene.id}|${shot.id}|left" title="Drag to trim"></div>
             <div class="shot-trim right" data-trim="${scene.id}|${shot.id}|right" title="Drag to trim"></div>
             <div class="block-rename" data-rename-btn-shot="${scene.id}|${shot.id}" title="Rename">${pencilSvg(9)}</div>
@@ -793,6 +800,48 @@ function wireTimelineDrag(){
 
 // ---------- main timeline-synced preview ----------
 // ---------- scene gallery (tile grid of shots, mirrors the character gallery) ----------
+// ---------- scenes overview (tile grid of all scenes) ----------
+function showScenesOverview(){
+  previewEl.classList.add('align-tl');
+  previewEl.onclick = null;
+  previewBarEl.textContent = 'Scenes';
+
+  const tiles = state.scenes.map(scene=>{
+    const col = sceneColor(scene);
+    return `
+      <div class="char-tile" data-scene-tile="${scene.id}">
+        <div class="char-tile-photo" style="background:${col.thumb};">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"></rect><circle cx="9" cy="11" r="2"></circle><path d="M21 16l-5-4-4 3-3-2-6 5"></path></svg>
+          <div class="char-tile-del" data-del-scene-tile="${scene.id}" title="Remove">${trashSvg(13)}</div>
+        </div>
+        <div class="char-tile-name">${scene.name}</div>
+        <div class="char-tile-role">${scene.shots.length} shot${scene.shots.length===1?'':'s'}</div>
+      </div>`;
+  }).join('');
+
+  previewEl.innerHTML = `
+    <div class="char-gallery">
+      <div class="char-grid">
+        ${tiles}
+        <div class="char-tile char-tile-add" id="addSceneTileOverview">
+          <div class="char-tile-photo">${plusSvg(26)}</div>
+          <div class="char-tile-name">Add scene</div>
+        </div>
+      </div>
+    </div>`;
+
+  document.getElementById('addSceneTileOverview').onclick = ()=> addScene();
+  previewEl.querySelectorAll('[data-del-scene-tile]').forEach(el=>{
+    el.onclick = (e)=>{ e.stopPropagation(); deleteScene(el.dataset.delSceneTile); showScenesOverview(); };
+  });
+  previewEl.querySelectorAll('[data-scene-tile]').forEach(tile=>{
+    tile.onclick = (e)=>{
+      if(e.target.closest('.char-tile-del')) return;
+      showSceneGallery(tile.dataset.sceneTile);
+    };
+  });
+}
+
 function showSceneGallery(sceneId){
   const scene = state.scenes.find(s=>s.id===sceneId);
   if(!scene) return;
@@ -896,11 +945,19 @@ function refreshMainPreview(){
   const col = sceneColor(scene);
 
   previewBarEl.textContent = shot ? `${scene.name} — ${shot.name}` : scene.name;
-  previewEl.innerHTML = `
-    <div class="timeline-frame" style="background:${col.thumb};border-color:transparent;">
-      <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"></rect><circle cx="9" cy="11" r="2"></circle><path d="M21 16l-5-4-4 3-3-2-6 5"></path></svg>
-      <span class="plabel" style="color:rgba(255,255,255,.75);">${shot ? shot.name + ' — awaiting generation' : (scene.shots.length + ' shot(s) — click the + on the timeline to add one')}</span>
-    </div>`;
+
+  if(shot && shot.previewImage){
+    previewEl.innerHTML = `
+      <div class="timeline-frame" style="background-image:url(${shot.previewImage});background-size:cover;background-position:center;border-color:transparent;">
+        <span class="plabel" style="color:#fff;background:rgba(0,0,0,.5);padding:3px 9px;border-radius:5px;align-self:flex-end;margin:10px;">${shot.name}</span>
+      </div>`;
+  } else {
+    previewEl.innerHTML = `
+      <div class="timeline-frame" style="background:${col.thumb};border-color:transparent;">
+        <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"></rect><circle cx="9" cy="11" r="2"></circle><path d="M21 16l-5-4-4 3-3-2-6 5"></path></svg>
+        <span class="plabel" style="color:rgba(255,255,255,.75);">${shot ? shot.name + ' — awaiting generation' : (scene.shots.length + ' shot(s) — click the + on the timeline to add one')}</span>
+      </div>`;
+  }
   renderInspectorPanel();
 }
 
@@ -966,7 +1023,11 @@ function renderInspectorPanel(){
       <div class="cf-field"><label>Description <span style="color:var(--text-3);font-weight:400;">— prompt for AI generation</span></label>
         <textarea id="shotDescInput" style="min-height:90px;" placeholder="Describe exactly what should happen in this shot...">${shot.description||''}</textarea>
       </div>
+
+      <div class="gen-section" id="shotGenSection"></div>
     </div>`;
+
+  renderShotGenSection(scene, shot);
 
   document.getElementById('shotNameInput').addEventListener('input', (e)=>{
     shot.name = e.target.value;
@@ -991,6 +1052,37 @@ function renderInspectorPanel(){
   document.getElementById('shotDescInput').addEventListener('input', (e)=>{ shot.description = e.target.value; });
 }
 
+function renderShotGenSection(scene, shot){
+  const section = document.getElementById('shotGenSection');
+  if(!section) return;
+
+  if(shot.previewImage){
+    section.innerHTML = `
+      <img class="shot-preview-thumb" src="${shot.previewImage}">
+      <button class="cf-btn" id="shotRegenBtn" style="width:100%;">Regenerate preview <span class="gen-cost">${SHOT_GEN_COST_LABEL}</span></button>`;
+    document.getElementById('shotRegenBtn').onclick = ()=> runShotGeneration(scene, shot);
+  } else {
+    section.innerHTML = `
+      <button class="gen-btn" id="shotGenBtn">Generate preview <span class="gen-cost">${SHOT_GEN_COST_LABEL}</span></button>
+      <div class="gen-hint">Generates a preview frame (via ${SHOT_GEN_MODEL_LABEL}) from this shot's parameters. Shown here, on the timeline thumbnail, and in the main preview.</div>`;
+    document.getElementById('shotGenBtn').onclick = ()=> runShotGeneration(scene, shot);
+  }
+}
+
+function runShotGeneration(scene, shot){
+  const section = document.getElementById('shotGenSection');
+  if(!section) return;
+  section.innerHTML = `<button class="gen-btn" disabled><span class="gen-spin"></span>Generating…</button>`;
+  // simulated call — real integration proxies this through a backend that holds the KIE API key
+  setTimeout(()=>{
+    shot.previewImage = generateShotPreviewImage(shot, scene);
+    renderTimelineScenes();
+    if(focus.sceneId===scene.id && focus.shotId===shot.id) refreshMainPreview();
+    else renderShotGenSection(scene, shot);
+  }, 1200);
+}
+
+
 function renderAssets(){
   assetsEl.innerHTML='';
   state.categories.forEach(cat=>{
@@ -1001,7 +1093,7 @@ function renderAssets(){
     catEl.className='cat';
 
     const head = document.createElement('div');
-    head.className='cat-head';
+    head.className='cat-head' + (cat.collapsed ? ' collapsed' : '');
     head.innerHTML = `
       <i class="ti ti-chevron-down chev"></i>
       <i class="ti ${cat.icon} folder"></i>
@@ -1011,7 +1103,7 @@ function renderAssets(){
     `;
 
     const itemsEl = document.createElement('div');
-    itemsEl.className='cat-items';
+    itemsEl.className='cat-items' + (cat.collapsed ? ' hidden' : '');
 
     if(displayItems.length===0){
       const empty = document.createElement('div');
@@ -1066,9 +1158,9 @@ function renderAssets(){
       });
     }
 
-    head.querySelector('.cat-head') ;
     head.addEventListener('click', (e)=>{
       if(e.target.closest('.cat-add')) return;
+      cat.collapsed = !cat.collapsed;
       head.classList.toggle('collapsed');
       itemsEl.classList.toggle('hidden');
     });
@@ -1077,7 +1169,7 @@ function renderAssets(){
       if(cat.addType==='character'){
         showCharacterGallery(cat);
       } else if(cat.addType==='scene'){
-        addScene();
+        showScenesOverview();
       } else {
         showGenericPlaceholder(cat);
       }
@@ -1225,6 +1317,39 @@ function applyNaturalAspect(el, dataUrl){
 // ---------- AI reference card (mocked KIE generation) ----------
 const GEN_MODEL_LABEL = 'KIE · GPT-Image-1';
 const GEN_COST_LABEL = '$0.03';
+const SHOT_GEN_MODEL_LABEL = 'KIE · Nano Banana';
+const SHOT_GEN_COST_LABEL = '$0.02';
+
+function generateShotPreviewImage(shot, scene){
+  const col = sceneColor(scene);
+  const canvas = document.createElement('canvas');
+  canvas.width = 640; canvas.height = 360;
+  const ctx = canvas.getContext('2d');
+  const grad = ctx.createLinearGradient(0, 0, 640, 360);
+  grad.addColorStop(0, col.hexA);
+  grad.addColorStop(1, col.hexB);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 640, 360);
+  // a few soft abstract shapes so every generation looks a little different
+  let seed = shot.id.split('').reduce((a,c)=>a+c.charCodeAt(0),0) + shot.duration*97;
+  function rnd(){ seed = (seed*9301+49297)%233280; return seed/233280; }
+  for(let i=0;i<5;i++){
+    ctx.beginPath();
+    const r = 40 + rnd()*120;
+    ctx.fillStyle = `rgba(255,255,255,${0.03+rnd()*0.05})`;
+    ctx.arc(rnd()*640, rnd()*360, r, 0, Math.PI*2);
+    ctx.fill();
+  }
+  ctx.fillStyle = 'rgba(0,0,0,0.28)';
+  ctx.fillRect(0, 300, 640, 60);
+  ctx.fillStyle = '#fff';
+  ctx.font = '600 20px Inter, sans-serif';
+  ctx.fillText(shot.name, 16, 335);
+  ctx.fillStyle = 'rgba(255,255,255,0.7)';
+  ctx.font = '12px "JetBrains Mono", monospace';
+  ctx.fillText(scene.name + ' · ' + shot.duration + 's', 16, 352);
+  return canvas.toDataURL('image/png');
+}
 
 function buildReferenceCardText(it){
   const lines = [];
