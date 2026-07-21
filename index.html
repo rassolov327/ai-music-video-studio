@@ -139,6 +139,11 @@
   }
   .transport-btn:hover{color:var(--text-1);border-color:#3a3e48;}
   .transport-btn.active{background:var(--accent-dim);border-color:#5a4526;color:var(--accent-text);}
+  .preview-transport{
+    display:flex;align-items:center;gap:6px;padding:6px 12px;
+    border-bottom:1px solid var(--line);flex:0 0 auto;
+  }
+  .preview-tc{font-family:var(--font-mono);font-size:11px;color:var(--text-2);margin-left:6px;}
   .preview{
     flex:1 1 auto;display:flex;align-items:center;justify-content:center;
     background:radial-gradient(ellipse at center, #23262d 0%, #16181c 78%);
@@ -363,10 +368,9 @@
     overflow:hidden;
   }
   .shot-thumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;}
-  .shot-thumb > *:not(img){position:relative;z-index:1;}
   .shot-thumb.focused{box-shadow:0 0 0 2px var(--accent);}
-  .shot-thumb .st-name{font-size:10px;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;text-shadow:0 1px 3px rgba(0,0,0,.6);}
-  .shot-thumb .st-meta{font-size:9px;color:rgba(255,255,255,.8);font-family:var(--font-mono);text-shadow:0 1px 3px rgba(0,0,0,.6);}
+  .shot-thumb .st-name{position:relative;z-index:1;font-size:10px;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;text-shadow:0 1px 3px rgba(0,0,0,.6);}
+  .shot-thumb .st-meta{position:relative;z-index:1;font-size:9px;color:rgba(255,255,255,.8);font-family:var(--font-mono);text-shadow:0 1px 3px rgba(0,0,0,.6);}
   .shot-trim{position:absolute;top:0;bottom:0;width:7px;cursor:ew-resize;z-index:2;}
   .shot-trim.left{left:0;}
   .shot-trim.right{right:0;}
@@ -464,6 +468,12 @@
         <div class="pb-right"></div>
       </div>
       <div class="preview" id="preview"></div>
+      <div class="preview-transport">
+        <button class="transport-btn" id="playBtn2" title="Play"><svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><polygon points="5,3 19,12 5,21"></polygon></svg></button>
+        <button class="transport-btn" id="pauseBtn2" title="Pause"><svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><rect x="5" y="3" width="5" height="18"></rect><rect x="14" y="3" width="5" height="18"></rect></svg></button>
+        <button class="transport-btn" id="stopBtn2" title="Stop"><svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><rect x="4" y="4" width="16" height="16"></rect></svg></button>
+        <span class="preview-tc" id="tcCurrent2">0:00</span>
+      </div>
 
       <div class="timeline-area">
         <div class="timeline-scenes" id="timelineScenes"></div>
@@ -774,8 +784,10 @@ function getActualClipDurationSec(){
 function updateTimecodeReadout(){
   const cur = document.getElementById('tcCurrent');
   const tot = document.getElementById('tcTotal');
+  const cur2 = document.getElementById('tcCurrent2');
   if(cur) cur.textContent = formatTimecode(playheadX / PX_PER_SEC);
   if(tot) tot.textContent = formatTimecode(getActualClipDurationSec());
+  if(cur2) cur2.textContent = formatTimecode(playheadX / PX_PER_SEC);
 }
 
 function renderRuler(){
@@ -895,8 +907,12 @@ let playTimer = null;
 function updateTransportButtons(){
   const playBtn = document.getElementById('playBtn');
   const pauseBtn = document.getElementById('pauseBtn');
+  const playBtn2 = document.getElementById('playBtn2');
+  const pauseBtn2 = document.getElementById('pauseBtn2');
   if(playBtn) playBtn.classList.toggle('active', isPlaying);
   if(pauseBtn) pauseBtn.classList.toggle('active', !isPlaying);
+  if(playBtn2) playBtn2.classList.toggle('active', isPlaying);
+  if(pauseBtn2) pauseBtn2.classList.toggle('active', !isPlaying);
 }
 
 function startPlayback(){
@@ -1114,6 +1130,7 @@ const CAMERA_MOVES = ['Static','Push In','Pull Out','Steadicam','Crane'];
 function renderSceneSettingsPanel(body, scene){
   const locCat = state.categories.find(c=>c.key==='locations');
   const locations = locCat ? locCat.items : [];
+  const TIME_OF_DAY = ['Morning','Day','Evening','Night'];
 
   body.innerHTML = `
     <div style="padding:14px;">
@@ -1123,6 +1140,12 @@ function renderSceneSettingsPanel(body, scene){
         <select id="sceneLocInput">
           <option value="">${locations.length===0 ? 'No locations yet' : 'Select location'}</option>
           ${locations.map(l=>`<option ${scene.location===l.name?'selected':''}>${l.name}</option>`).join('')}
+        </select>
+      </div>
+      <div class="cf-field"><label>Time of day</label>
+        <select id="sceneTimeInput">
+          <option value="">Select time of day</option>
+          ${TIME_OF_DAY.map(t=>`<option ${scene.timeOfDay===t?'selected':''}>${t}</option>`).join('')}
         </select>
       </div>
       <div class="cf-field"><label>Description</label>
@@ -1137,6 +1160,7 @@ function renderSceneSettingsPanel(body, scene){
     previewBarEl.textContent = scene.name;
   });
   document.getElementById('sceneLocInput').addEventListener('change', (e)=>{ scene.location = e.target.value; });
+  document.getElementById('sceneTimeInput').addEventListener('change', (e)=>{ scene.timeOfDay = e.target.value; });
   document.getElementById('sceneDescInput').addEventListener('input', (e)=>{ scene.description = e.target.value; });
 }
 
@@ -1555,6 +1579,7 @@ function buildShotPrompt(shot, scene){
     const loc = locCat ? locCat.items.find(l=>l.name===scene.location) : null;
     parts.push('in ' + scene.location + (loc && loc.description ? ', ' + loc.description : ''));
   }
+  if(scene && scene.timeOfDay) parts.push('during the ' + scene.timeOfDay.toLowerCase());
 
   parts.push('cinematic still frame, film grain, music video');
   return parts.join(', ');
@@ -2254,6 +2279,9 @@ document.getElementById('homeBtn').onclick = ()=>{
 document.getElementById('playBtn').onclick = startPlayback;
 document.getElementById('pauseBtn').onclick = pausePlayback;
 document.getElementById('stopBtn').onclick = stopPlayback;
+document.getElementById('playBtn2').onclick = startPlayback;
+document.getElementById('pauseBtn2').onclick = pausePlayback;
+document.getElementById('stopBtn2').onclick = stopPlayback;
 updateTransportButtons();
 window.addEventListener('keydown', (e)=>{
   if(e.code!=='Space') return;
