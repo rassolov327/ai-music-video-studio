@@ -22,6 +22,7 @@
     --accent-dim:#3a2f1e;
     --accent-text:#f2b968;
     --ok:#5fae7a;
+    --warn:#e0b23c;
     --danger:#d9695f;
     --font-ui:'Inter',sans-serif;
     --font-mono:'JetBrains Mono',monospace;
@@ -162,6 +163,13 @@
   .char-tile-del:hover{background:rgba(217,105,95,.85);opacity:1;}
   .char-tile:hover .char-tile-del{opacity:1;}
   .char-tile-del i{font-size:13px;}
+  .char-tile-status{
+    position:absolute;top:5px;left:5px;width:10px;height:10px;border-radius:50%;
+    border:1.5px solid rgba(0,0,0,.4);
+  }
+  .char-tile-status.status-green{background:var(--ok);}
+  .char-tile-status.status-yellow{background:var(--warn);}
+  .char-tile-status.status-red{background:var(--danger);}
   .char-tile-add .char-tile-photo{
     border-style:dashed;background:transparent;
   }
@@ -171,15 +179,16 @@
 
   /* ---- Character card ---- */
   .char-card{
-    width:100%;max-width:420px;background:var(--bg-panel);border:1px solid var(--line);
-    border-radius:10px;overflow:hidden;align-self:center;
+    width:100%;max-width:640px;background:var(--bg-panel);border:1px solid var(--line);
+    border-radius:10px;overflow:hidden;align-self:flex-start;display:flex;flex-direction:row;
+    max-height:calc(100vh - 220px);
   }
   .char-card-photo{
-    width:100%;aspect-ratio:4/3;max-height:360px;background:var(--bg-panel-2);background-size:cover;background-position:center;
-    display:flex;align-items:center;justify-content:center;color:var(--text-3);
+    flex:0 0 220px;width:220px;background:var(--bg-panel-2);background-size:cover;background-position:center;
+    display:flex;align-items:center;justify-content:center;color:var(--text-3);align-self:stretch;
   }
   .char-card-photo svg{width:40px;height:40px;}
-  .char-card-body{padding:16px 18px;}
+  .char-card-body{padding:16px 18px;flex:1 1 auto;min-width:0;overflow-y:auto;}
   .char-card-name{font-size:16px;font-weight:500;color:var(--text-1);margin:0 0 3px;}
   .char-card-role{
     display:inline-block;font-size:11px;color:var(--accent-text);background:var(--accent-dim);
@@ -189,7 +198,7 @@
   .char-card-section-title{font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--text-3);margin-bottom:6px;}
   .char-card-angles{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;}
   .char-card-angle{
-    width:48px;height:48px;border-radius:6px;border:1px solid var(--line);
+    width:44px;height:44px;border-radius:6px;border:1px solid var(--line);
     background-size:cover;background-position:center;background-color:var(--bg-panel-2);
   }
   .char-card-actions{display:flex;justify-content:space-between;gap:8px;}
@@ -284,7 +293,7 @@
 
   /* ---- Bottom audio track ---- */
   .timeline-area{border-top:1px solid var(--line);background:var(--bg-panel);flex:0 0 auto;}
-  .timeline-scenes{overflow-x:auto;border-bottom:1px solid var(--line-soft);}
+  .timeline-scenes{overflow-x:auto;border-bottom:1px solid var(--line-soft);position:relative;}
   .timeline-ruler{
     position:relative;height:20px;min-width:100%;
     background:var(--bg-panel-2);border-bottom:1px solid var(--line-soft);cursor:pointer;user-select:none;
@@ -293,41 +302,63 @@
     position:absolute;top:0;bottom:0;border-left:1px solid var(--line-soft);padding-left:4px;
     font-family:var(--font-mono);font-size:9.5px;color:var(--text-3);line-height:20px;white-space:nowrap;
   }
-  .timeline-track{display:flex;align-items:flex-start;gap:6px;position:relative;min-height:78px;padding:10px 12px;}
-  .scene-block{
-    flex:0 0 74px;width:74px;height:60px;background:var(--bg-elevated);border:1px solid var(--line);
-    border-radius:7px;cursor:pointer;position:relative;display:flex;flex-direction:column;
-    align-items:center;justify-content:center;gap:2px;text-align:center;padding:4px;
+  .timeline-track{display:flex;align-items:flex-start;gap:10px;position:relative;min-height:92px;padding:10px 12px;}
+  .scene-column{display:flex;flex-direction:column;gap:4px;flex:0 0 auto;}
+  .scene-label-row{display:flex;align-items:center;gap:4px;padding:0 2px;height:16px;}
+  .scene-color-dot{width:7px;height:7px;border-radius:50%;flex:0 0 auto;}
+  .scene-label-name{font-size:10.5px;color:var(--text-1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px;}
+  .scene-label-actions{display:flex;gap:2px;margin-left:2px;}
+  .scene-label-btn{
+    width:14px;height:14px;border-radius:3px;display:flex;align-items:center;justify-content:center;
+    color:var(--text-3);opacity:.6;
   }
-  .scene-block:hover{border-color:#3a3e48;}
-  .scene-block.focused{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent);}
-  .scene-name{
-    font-size:11px;color:var(--text-1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;
-  }
-  .scene-meta{font-size:9.5px;color:var(--text-3);font-family:var(--font-mono);}
+  .scene-label-btn:hover{background:var(--bg-elevated);color:var(--text-1);opacity:1;}
+  .scene-cells-row{display:flex;align-items:center;gap:3px;padding:5px;border-radius:8px;}
   .scene-rename-input{
-    width:90%;background:var(--bg-app);border:1px solid var(--accent);color:var(--text-1);
-    font-size:11px;border-radius:4px;padding:1px 3px;font-family:var(--font-ui);text-align:center;
+    background:var(--bg-app);border:1px solid var(--accent);color:var(--text-1);
+    font-size:10.5px;border-radius:4px;padding:1px 3px;font-family:var(--font-ui);width:100px;
   }
+  .insert-btn{
+    flex:0 0 16px;width:16px;height:60px;border-radius:4px;border:1px dashed rgba(255,255,255,.22);
+    display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,.4);cursor:pointer;
+  }
+  .insert-btn:hover{border-color:var(--accent);color:var(--accent-text);background:rgba(255,255,255,.06);}
+  .shot-thumb{
+    flex:0 0 72px;width:72px;height:60px;border-radius:6px;cursor:pointer;position:relative;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+    color:#fff;text-align:center;padding:4px;border:1px solid rgba(255,255,255,.12);background-size:cover;
+  }
+  .shot-thumb.focused{box-shadow:0 0 0 2px var(--accent);}
+  .shot-thumb .st-name{font-size:10px;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;}
+  .shot-thumb .st-meta{font-size:9px;color:rgba(255,255,255,.8);font-family:var(--font-mono);}
+  .empty-scene-cell{
+    flex:0 0 88px;width:88px;height:60px;border-radius:8px;border:1px dashed rgba(255,255,255,.3);
+    display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text-2);
+  }
+  .empty-scene-cell:hover{border-color:var(--accent);color:var(--accent-text);}
+  .add-scene-column{
+    flex:0 0 60px;width:60px;height:60px;align-self:flex-end;border:1px dashed var(--line);border-radius:8px;
+    display:flex;align-items:center;justify-content:center;color:var(--text-3);cursor:pointer;
+  }
+  .add-scene-column:hover{border-color:var(--accent);color:var(--accent-text);}
   .block-del{
     position:absolute;top:3px;right:3px;width:15px;height:15px;border-radius:4px;
-    display:flex;align-items:center;justify-content:center;color:var(--text-3);opacity:.55;
+    display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,.8);opacity:.6;
+    background:rgba(0,0,0,.25);
   }
-  .block-del:hover{background:var(--bg-app);color:var(--danger);opacity:1;}
+  .block-del:hover{background:rgba(0,0,0,.55);color:#fff;opacity:1;}
   .block-rename{
     position:absolute;top:3px;left:3px;width:15px;height:15px;border-radius:4px;
-    display:flex;align-items:center;justify-content:center;color:var(--text-3);opacity:.55;
+    display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,.8);opacity:.6;
+    background:rgba(0,0,0,.25);
   }
-  .block-rename:hover{background:var(--bg-app);color:var(--accent-text);opacity:1;}
-  .add-block{
-    border:1px dashed var(--line);border-radius:7px;display:flex;align-items:center;justify-content:center;
-    color:var(--text-3);cursor:pointer;flex:0 0 auto;
-  }
-  .add-block:hover{border-color:var(--accent);color:var(--accent-text);}
-  .playhead{position:absolute;top:0;bottom:0;width:2px;background:var(--accent);pointer-events:none;z-index:3;}
-  .playhead::before{
-    content:'';position:absolute;top:-4px;left:-4px;width:10px;height:8px;background:var(--accent);
-    clip-path:polygon(0 0,100% 0,50% 100%);pointer-events:auto;cursor:ew-resize;
+  .block-rename:hover{background:rgba(0,0,0,.55);color:#fff;opacity:1;}
+  .playhead-hit{position:absolute;top:0;width:16px;margin-left:-8px;z-index:5;pointer-events:none;}
+  .playhead-handle{position:absolute;top:0;left:0;width:16px;height:20px;cursor:ew-resize;pointer-events:auto;}
+  .playhead-line{position:absolute;left:7px;top:0;bottom:0;width:2px;background:var(--accent);pointer-events:none;}
+  .playhead-flag{
+    position:absolute;left:3px;top:2px;width:10px;height:8px;background:var(--accent);
+    clip-path:polygon(0 0,100% 0,50% 100%);pointer-events:none;
   }
   .timeline-frame{
     width:78%;aspect-ratio:16/9;border-radius:6px;border:1px solid var(--line);
@@ -414,10 +445,18 @@ const state = {
   scenes: []
 };
 
-let sceneSeq = 1, shotSeq = 1;
-let focus = { sceneId: null };
-let sceneEditorOpen = false;
+let sceneSeq = 1, shotSeq = 1, paletteSeq = 0;
+let focus = { sceneId: null, shotId: null };
 const PX_PER_SEC = 40; // cosmetic scale for the ruler, not tied to real audio timing yet
+
+const TIMELINE_COLORS = [
+  { dot:'#5f8ad4', bg:'rgba(60,95,150,0.22)',  thumb:'linear-gradient(160deg,#3a5f8a,#1c2f45)' },
+  { dot:'#7ec463', bg:'rgba(80,140,60,0.22)',  thumb:'linear-gradient(160deg,#5f8a3a,#2f451c)' },
+  { dot:'#d873a3', bg:'rgba(150,60,110,0.22)', thumb:'linear-gradient(160deg,#8a3a5f,#451c2f)' },
+  { dot:'#e0a54f', bg:'rgba(150,110,60,0.22)', thumb:'linear-gradient(160deg,#8a6a3a,#45351c)' },
+  { dot:'#4fc4b0', bg:'rgba(58,140,125,0.22)', thumb:'linear-gradient(160deg,#3a8a7a,#1c453d)' },
+  { dot:'#a878e0', bg:'rgba(105,60,150,0.22)', thumb:'linear-gradient(160deg,#6a3a8a,#351c45)' },
+];
 
 const assetsEl = document.getElementById('assets');
 const previewEl = document.getElementById('preview');
@@ -439,20 +478,21 @@ function formatTimecode(seconds){
   const s = Math.floor(seconds%60);
   return m + ':' + String(s).padStart(2,'0');
 }
+function sceneColor(scene){ return TIMELINE_COLORS[scene.colorIdx % TIMELINE_COLORS.length]; }
 
 // ---------- timeline: scenes ----------
 function addScene(){
   const id = 's' + (sceneSeq++);
-  state.scenes.push({ id, name: 'Scene ' + (state.scenes.length + 1), shots: [] });
-  focus = { sceneId: id };
+  state.scenes.push({ id, name: 'Scene ' + (state.scenes.length + 1), colorIdx: paletteSeq++, shots: [] });
+  focus = { sceneId: id, shotId: null };
   renderTimelineScenes();
-  showSceneEditor(id);
+  refreshMainPreview();
 }
 function deleteScene(id){
   state.scenes = state.scenes.filter(s=>s.id!==id);
-  if(focus.sceneId===id){ focus = { sceneId:null }; sceneEditorOpen = false; }
+  if(focus.sceneId===id) focus = { sceneId:null, shotId:null };
   renderTimelineScenes();
-  showTimelineFocusPreview();
+  refreshMainPreview();
 }
 function startRenameScene(id, labelEl){
   const scene = state.scenes.find(s=>s.id===id);
@@ -467,17 +507,52 @@ function startRenameScene(id, labelEl){
   function commit(){
     scene.name = input.value.trim() || scene.name;
     renderTimelineScenes();
-    if(focus.sceneId===id && !sceneEditorOpen) showTimelineFocusPreview();
-    if(focus.sceneId===id && sceneEditorOpen) showSceneEditor(id);
+    if(focus.sceneId===id) refreshMainPreview();
   }
   input.addEventListener('blur', commit);
   input.addEventListener('keydown', (e)=>{ if(e.key==='Enter') input.blur(); });
 }
-function setFocus(sceneId){
-  focus = { sceneId };
-  sceneEditorOpen = false;
+function addShotAt(sceneId, index){
+  const scene = state.scenes.find(s=>s.id===sceneId);
+  if(!scene) return;
+  const shot = { id: 'sh' + (shotSeq++), name: 'Shot ' + (scene.shots.length + 1), duration: 2 };
+  scene.shots.splice(index, 0, shot);
+  focus = { sceneId, shotId: shot.id };
   renderTimelineScenes();
-  showTimelineFocusPreview();
+  refreshMainPreview();
+}
+function deleteShot(sceneId, shotId){
+  const scene = state.scenes.find(s=>s.id===sceneId);
+  if(!scene) return;
+  scene.shots = scene.shots.filter(sh=>sh.id!==shotId);
+  if(focus.shotId===shotId) focus = { sceneId, shotId:null };
+  renderTimelineScenes();
+  refreshMainPreview();
+}
+function startRenameShot(sceneId, shotId, labelEl){
+  const scene = state.scenes.find(s=>s.id===sceneId);
+  const shot = scene && scene.shots.find(sh=>sh.id===shotId);
+  if(!shot) return;
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = shot.name;
+  input.className = 'scene-rename-input';
+  input.style.width = '64px';
+  labelEl.replaceWith(input);
+  input.focus();
+  input.select();
+  function commit(){
+    shot.name = input.value.trim() || shot.name;
+    renderTimelineScenes();
+    if(focus.shotId===shotId) refreshMainPreview();
+  }
+  input.addEventListener('blur', commit);
+  input.addEventListener('keydown', (e)=>{ if(e.key==='Enter') input.blur(); });
+}
+function setFocus(sceneId, shotId){
+  focus = { sceneId, shotId: shotId || null };
+  renderTimelineScenes();
+  refreshMainPreview();
 }
 
 function renderTimelineScenes(){
@@ -485,19 +560,38 @@ function renderTimelineScenes(){
 
   let trackHtml = '<div class="timeline-track" id="timelineTrack">';
   state.scenes.forEach(scene=>{
-    const isFocused = focus.sceneId===scene.id;
-    trackHtml += `
-      <div class="scene-block${isFocused?' focused':''}" data-scene="${scene.id}">
-        <div class="block-rename" data-rename-btn-scene="${scene.id}" title="Rename">${pencilSvg(9)}</div>
-        <div class="block-del" data-del-scene="${scene.id}" title="Delete scene">${trashSvg(10)}</div>
-        <div class="scene-name" data-rename-scene="${scene.id}">${scene.name}</div>
-        <div class="scene-meta">${scene.shots.length} shot${scene.shots.length===1?'':'s'}</div>
-      </div>`;
+    const col = sceneColor(scene);
+    trackHtml += `<div class="scene-column">
+      <div class="scene-label-row">
+        <span class="scene-color-dot" style="background:${col.dot};"></span>
+        <span class="scene-label-name" data-rename-scene="${scene.id}">${scene.name}</span>
+        <span class="scene-label-actions">
+          <span class="scene-label-btn" data-rename-btn-scene="${scene.id}" title="Rename">${pencilSvg(9)}</span>
+          <span class="scene-label-btn" data-del-scene="${scene.id}" title="Delete scene">${trashSvg(9)}</span>
+        </span>
+      </div>
+      <div class="scene-cells-row" style="background:${col.bg};">`;
+
+    if(scene.shots.length===0){
+      trackHtml += `<div class="empty-scene-cell" data-anchor data-scene="${scene.id}" data-add-at="${scene.id}|0" title="Add first shot">${plusSvg(18)}</div>`;
+    } else {
+      trackHtml += `<div class="insert-btn" data-add-at="${scene.id}|0" title="Insert shot">${plusSvg(11)}</div>`;
+      scene.shots.forEach((shot, i)=>{
+        const isFocused = focus.sceneId===scene.id && focus.shotId===shot.id;
+        trackHtml += `
+          <div class="shot-thumb${isFocused?' focused':''}" data-anchor data-scene="${scene.id}" data-shot="${shot.id}" style="background:${col.thumb};">
+            <div class="block-rename" data-rename-btn-shot="${scene.id}|${shot.id}" title="Rename">${pencilSvg(9)}</div>
+            <div class="block-del" data-del-shot="${scene.id}|${shot.id}" title="Delete shot">${trashSvg(9)}</div>
+            <span class="st-name" data-rename-shot="${scene.id}|${shot.id}">${shot.name}</span>
+            <span class="st-meta">${shot.duration}s</span>
+          </div>
+          <div class="insert-btn" data-add-at="${scene.id}|${i+1}" title="Insert shot">${plusSvg(11)}</div>`;
+      });
+    }
+    trackHtml += `</div></div>`;
   });
   trackHtml += `
-      <div class="add-block" id="addSceneBtn" style="flex:0 0 74px;width:74px;height:60px;" title="Add scene">
-        ${plusSvg(16)}
-      </div>
+      <div class="add-scene-column" id="addSceneBtn" title="Add scene">${plusSvg(18)}</div>
     </div>`;
   timelineScenesEl.innerHTML = `<div class="timeline-ruler" id="timelineRuler"></div>` + trackHtml;
 
@@ -513,13 +607,32 @@ function renderTimelineScenes(){
       if(label) startRenameScene(id, label);
     };
   });
-  timelineScenesEl.querySelectorAll('.scene-block').forEach(el=>{
-    el.onclick = ()=>{
-      const sid = el.dataset.scene;
-      focus = { sceneId: sid };
-      renderTimelineScenes();
-      showSceneEditor(sid);
+  timelineScenesEl.querySelectorAll('[data-add-at]').forEach(el=>{
+    el.onclick = (e)=>{
+      e.stopPropagation();
+      const [sid, idx] = el.dataset.addAt.split('|');
+      addShotAt(sid, parseInt(idx,10));
     };
+  });
+  timelineScenesEl.querySelectorAll('[data-del-shot]').forEach(el=>{
+    el.onclick = (e)=>{ e.stopPropagation(); const [sid,shid]=el.dataset.delShot.split('|'); deleteShot(sid,shid); };
+  });
+  timelineScenesEl.querySelectorAll('[data-rename-btn-shot]').forEach(el=>{
+    el.onclick = (e)=>{
+      e.stopPropagation();
+      const [sid,shid] = el.dataset.renameBtnShot.split('|');
+      const label = timelineScenesEl.querySelector(`[data-rename-shot="${sid}|${shid}"]`);
+      if(label) startRenameShot(sid, shid, label);
+    };
+  });
+  timelineScenesEl.querySelectorAll('.shot-thumb').forEach(el=>{
+    el.onclick = (e)=>{
+      if(e.target.closest('.block-del') || e.target.closest('.block-rename')) return;
+      setFocus(el.dataset.scene, el.dataset.shot);
+    };
+  });
+  timelineScenesEl.querySelectorAll('.empty-scene-cell').forEach(el=>{
+    // clicking the empty cell both adds a shot (via data-add-at handler above) — no separate focus needed
   });
 
   renderRuler();
@@ -543,29 +656,36 @@ function renderRuler(){
 }
 
 function positionPlayhead(){
+  const ruler = document.getElementById('timelineRuler');
   const track = document.getElementById('timelineTrack');
-  if(!track) return;
-  let old = document.getElementById('timelinePlayhead');
+  if(!ruler || !track) return;
+  const old = document.getElementById('timelinePlayhead');
   if(old) old.remove();
   if(!focus.sceneId) return;
-  const targetEl = track.querySelector(`.scene-block[data-scene="${focus.sceneId}"]`);
+  let targetEl = focus.shotId
+    ? track.querySelector(`.shot-thumb[data-shot="${focus.shotId}"]`)
+    : track.querySelector(`.empty-scene-cell[data-scene="${focus.sceneId}"]`);
   if(!targetEl) return;
+  const left = targetEl.offsetLeft + targetEl.offsetWidth/2;
+  const totalHeight = ruler.offsetHeight + track.offsetHeight;
   const marker = document.createElement('div');
-  marker.className = 'playhead';
+  marker.className = 'playhead-hit';
   marker.id = 'timelinePlayhead';
-  marker.style.left = (targetEl.offsetLeft + targetEl.offsetWidth/2) + 'px';
-  track.appendChild(marker);
+  marker.style.left = left + 'px';
+  marker.style.height = totalHeight + 'px';
+  marker.innerHTML = `<div class="playhead-handle"></div><div class="playhead-line"></div><div class="playhead-flag"></div>`;
+  timelineScenesEl.appendChild(marker);
 }
 
-function nearestSceneAtX(x){
+function nearestAnchorAtX(x){
   const track = document.getElementById('timelineTrack');
   if(!track) return null;
-  const blocks = track.querySelectorAll('.scene-block');
+  const anchors = track.querySelectorAll('[data-anchor]');
   let best = null, bestDist = Infinity;
-  blocks.forEach(el=>{
+  anchors.forEach(el=>{
     const center = el.offsetLeft + el.offsetWidth/2;
     const dist = Math.abs(center - x);
-    if(dist < bestDist){ bestDist = dist; best = el.dataset.scene; }
+    if(dist < bestDist){ bestDist = dist; best = el; }
   });
   return best;
 }
@@ -573,132 +693,46 @@ function nearestSceneAtX(x){
 function wireTimelineDrag(){
   const ruler = document.getElementById('timelineRuler');
   const track = document.getElementById('timelineTrack');
+  const marker = document.getElementById('timelinePlayhead');
+  const handle = marker ? marker.querySelector('.playhead-handle') : null;
   if(!ruler || !track) return;
 
-  function seekToClientX(clientX, openEditor){
+  function seekToClientX(clientX){
     const rect = track.getBoundingClientRect();
     const x = clientX - rect.left + track.scrollLeft;
-    const sceneId = nearestSceneAtX(x);
-    if(!sceneId) return;
-    focus = { sceneId };
-    if(openEditor){
-      renderTimelineScenes();
-      showSceneEditor(sceneId);
-    } else {
-      sceneEditorOpen = false;
-      renderTimelineScenes();
-      showTimelineFocusPreview();
-    }
+    const anchor = nearestAnchorAtX(x);
+    if(!anchor) return;
+    focus = { sceneId: anchor.dataset.scene, shotId: anchor.dataset.shot || null };
+    renderTimelineScenes();
+    refreshMainPreview();
   }
 
-  ruler.onclick = (e)=> seekToClientX(e.clientX, false);
+  ruler.onclick = (e)=> seekToClientX(e.clientX);
 
-  const marker = document.getElementById('timelinePlayhead');
-  if(marker){
-    marker.style.pointerEvents = 'auto';
-    marker.addEventListener('mousedown', (e)=>{
+  if(handle){
+    handle.addEventListener('pointerdown', (e)=>{
       e.preventDefault();
+      handle.setPointerCapture(e.pointerId);
+      document.body.style.cursor = 'ew-resize';
       const onMove = (ev)=>{
         const rect = track.getBoundingClientRect();
         const x = Math.max(0, Math.min(ev.clientX - rect.left + track.scrollLeft, track.scrollWidth));
         marker.style.left = x + 'px';
       };
       const onUp = (ev)=>{
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onUp);
-        seekToClientX(ev.clientX, false);
+        handle.removeEventListener('pointermove', onMove);
+        handle.removeEventListener('pointerup', onUp);
+        document.body.style.cursor = '';
+        seekToClientX(ev.clientX);
       };
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
+      handle.addEventListener('pointermove', onMove);
+      handle.addEventListener('pointerup', onUp);
     });
   }
 }
 
-// ---------- scene editor (shot tile grid, mirrors the character gallery) ----------
-function addSceneShot(sceneId){
-  const scene = state.scenes.find(s=>s.id===sceneId);
-  if(!scene) return;
-  const id = 'sh' + (shotSeq++);
-  scene.shots.push({ id, name: 'Shot ' + (scene.shots.length + 1), duration: 2 });
-  renderTimelineScenes();
-  showSceneEditor(sceneId);
-}
-function deleteSceneShot(sceneId, shotId){
-  const scene = state.scenes.find(s=>s.id===sceneId);
-  if(!scene) return;
-  scene.shots = scene.shots.filter(sh=>sh.id!==shotId);
-  renderTimelineScenes();
-  showSceneEditor(sceneId);
-}
-function startRenameShotTile(sceneId, shotId, labelEl){
-  const scene = state.scenes.find(s=>s.id===sceneId);
-  const shot = scene && scene.shots.find(sh=>sh.id===shotId);
-  if(!shot) return;
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.value = shot.name;
-  input.className = 'scene-rename-input';
-  input.style.width = '90%';
-  labelEl.replaceWith(input);
-  input.focus();
-  input.select();
-  function commit(){
-    shot.name = input.value.trim() || shot.name;
-    renderTimelineScenes();
-    showSceneEditor(sceneId);
-  }
-  input.addEventListener('blur', commit);
-  input.addEventListener('keydown', (e)=>{ if(e.key==='Enter') input.blur(); });
-}
-
-function showSceneEditor(sceneId){
-  sceneEditorOpen = true;
-  const scene = state.scenes.find(s=>s.id===sceneId);
-  if(!scene) return;
-  previewEl.classList.add('align-tl');
-  previewEl.onclick = null;
-  previewBarEl.textContent = scene.name;
-
-  const tiles = scene.shots.map(shot=>`
-    <div class="char-tile" data-shot="${shot.id}">
-      <div class="char-tile-photo">
-        <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"></rect><circle cx="9" cy="11" r="2"></circle><path d="M21 16l-5-4-4 3-3-2-6 5"></path></svg>
-        <div class="char-tile-del" data-del-shot="${shot.id}" title="Remove">${trashSvg(13)}</div>
-      </div>
-      <div class="char-tile-name" data-rename-shot="${shot.id}">${shot.name}</div>
-      <div class="char-tile-role">${shot.duration}s</div>
-    </div>
-  `).join('');
-
-  previewEl.innerHTML = `
-    <div class="char-gallery">
-      <button class="cf-btn" id="sceneEditorBack" style="margin-bottom:14px;">&larr; Back to timeline</button>
-      <div class="char-grid">
-        ${tiles}
-        <div class="char-tile char-tile-add" id="addShotTile">
-          <div class="char-tile-photo">${plusSvg(26)}</div>
-          <div class="char-tile-name">Add shot</div>
-        </div>
-      </div>
-    </div>`;
-
-  document.getElementById('sceneEditorBack').onclick = ()=>{
-    sceneEditorOpen = false;
-    showTimelineFocusPreview();
-  };
-  document.getElementById('addShotTile').onclick = ()=> addSceneShot(sceneId);
-  previewEl.querySelectorAll('[data-del-shot]').forEach(el=>{
-    el.onclick = (e)=>{ e.stopPropagation(); deleteSceneShot(sceneId, el.dataset.delShot); };
-  });
-  previewEl.querySelectorAll('[data-rename-shot]').forEach(el=>{
-    el.onclick = (e)=>{ e.stopPropagation(); startRenameShotTile(sceneId, el.dataset.renameShot, el); };
-  });
-
-  renderInspectorPanel();
-}
-
 // ---------- main timeline-synced preview ----------
-function showTimelineFocusPreview(){
+function refreshMainPreview(){
   previewEl.classList.remove('align-tl');
   previewEl.onclick = null;
 
@@ -707,21 +741,23 @@ function showTimelineFocusPreview(){
     previewEl.innerHTML = `
       <div class="empty-preview">
         <i class="ti ti-clapperboard"></i>
-        <div class="t1">${state.scenes.length===0 ? 'No scenes yet' : 'No scene selected'}</div>
-        <div class="t2">${state.scenes.length===0 ? 'Add your first scene from the timeline below.' : 'Click a scene on the timeline to open it.'}</div>
+        <div class="t1">${state.scenes.length===0 ? 'No scenes yet' : 'No shot selected'}</div>
+        <div class="t2">${state.scenes.length===0 ? 'Add your first scene from the timeline below.' : 'Click a shot on the timeline to preview it.'}</div>
       </div>`;
     renderInspectorPanel();
     return;
   }
 
   const scene = state.scenes.find(s=>s.id===focus.sceneId);
-  if(!scene){ focus = { sceneId:null }; return showTimelineFocusPreview(); }
+  if(!scene){ focus = { sceneId:null, shotId:null }; return refreshMainPreview(); }
+  const shot = focus.shotId ? scene.shots.find(sh=>sh.id===focus.shotId) : null;
+  const col = sceneColor(scene);
 
-  previewBarEl.textContent = scene.name;
+  previewBarEl.textContent = shot ? `${scene.name} — ${shot.name}` : scene.name;
   previewEl.innerHTML = `
-    <div class="timeline-frame">
+    <div class="timeline-frame" style="background:${col.thumb};border-color:transparent;">
       <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"></rect><circle cx="9" cy="11" r="2"></circle><path d="M21 16l-5-4-4 3-3-2-6 5"></path></svg>
-      <span class="plabel">${scene.shots.length} shot${scene.shots.length===1?'':'s'} in this scene</span>
+      <span class="plabel" style="color:rgba(255,255,255,.75);">${shot ? shot.name + ' — awaiting generation' : (scene.shots.length + ' shot(s) — click the + on the timeline to add one')}</span>
     </div>`;
   renderInspectorPanel();
 }
@@ -731,22 +767,34 @@ function renderInspectorPanel(){
   if(!body) return;
 
   if(!focus.sceneId){
-    body.innerHTML = `<div class="insp-empty">No scene selected.<br>Add a scene on the timeline to get started.</div>`;
+    body.innerHTML = `<div class="insp-empty">No shot selected.<br>Create a scene and a shot to see its parameters here.</div>`;
     return;
   }
   const scene = state.scenes.find(s=>s.id===focus.sceneId);
-  if(!scene){ body.innerHTML = `<div class="insp-empty">No scene selected.</div>`; return; }
+  if(!scene){ body.innerHTML = `<div class="insp-empty">No shot selected.</div>`; return; }
+
+  if(!focus.shotId){
+    body.innerHTML = `<div class="insp-empty">Scene selected: <span style="color:var(--text-1);">${scene.name}</span><br>Add a shot from the timeline to edit its parameters.</div>`;
+    return;
+  }
+  const shot = scene.shots.find(sh=>sh.id===focus.shotId);
+  if(!shot){ body.innerHTML = `<div class="insp-empty">No shot selected.</div>`; return; }
 
   body.innerHTML = `
     <div style="padding:14px;">
-      <div class="cf-field"><label>Scene name</label><input type="text" id="sceneNameInput" value="${scene.name}"></div>
-      <div class="insp-empty" style="padding:0;">${scene.shots.length} shot${scene.shots.length===1?'':'s'} in this scene.</div>
-      <div class="gen-hint">Open the scene from the timeline to add, rename or remove shots.</div>
+      <div class="cat-count" style="font-size:11px;margin-bottom:10px;">${scene.name}</div>
+      <div class="cf-field"><label>Name</label><input type="text" id="shotNameInput" value="${shot.name}"></div>
+      <div class="cf-field"><label>Duration (sec)</label><input type="number" id="shotDurInput" min="0.5" step="0.1" value="${shot.duration}"></div>
+      <div class="gen-hint">Camera, characters, lighting and other shot parameters will live here once shot creation is wired up.</div>
     </div>`;
-  document.getElementById('sceneNameInput').addEventListener('input', (e)=>{
-    scene.name = e.target.value;
+  document.getElementById('shotNameInput').addEventListener('input', (e)=>{
+    shot.name = e.target.value;
     renderTimelineScenes();
-    previewBarEl.textContent = scene.name;
+    previewBarEl.textContent = scene.name + ' — ' + shot.name;
+  });
+  document.getElementById('shotDurInput').addEventListener('input', (e)=>{
+    shot.duration = parseFloat(e.target.value) || shot.duration;
+    renderTimelineScenes();
   });
 }
 
@@ -850,6 +898,12 @@ function showGenericPlaceholder(cat){
 }
 
 // ---------- preview: characters gallery (tile grid) ----------
+function characterStatus(it){
+  if(!it.name || !it.photo || !it.role || !it.description) return 'red';
+  if(!it.referenceCard) return 'yellow';
+  return 'green';
+}
+
 function showCharacterGallery(cat){
   previewEl.classList.add('align-tl');
   previewEl.onclick = null;
@@ -859,6 +913,7 @@ function showCharacterGallery(cat){
     <div class="char-tile" data-idx="${idx}">
       <div class="char-tile-photo" style="${it.photo ? `background-image:url(${it.photo})` : ''}">
         ${it.photo ? '' : '<i class="ti ti-user"></i>'}
+        <div class="char-tile-status status-${characterStatus(it)}" title="${characterStatus(it)==='green'?'AI reference generated':characterStatus(it)==='yellow'?'Character complete, reference not generated':'Missing required fields'}"></div>
         <div class="char-tile-del" title="Remove"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></div>
       </div>
       <div class="char-tile-name">${it.name}</div>
@@ -1047,7 +1102,6 @@ function showCharacterCard(cat, idx){
     </div>`;
 
   renderGenSection(cat, idx);
-  if(it.photo) applyNaturalAspect(document.getElementById('cardPhoto'), it.photo);
 
   document.getElementById('cardBack').onclick = ()=> showCharacterGallery(cat);
   document.getElementById('cardEdit').onclick = ()=> showCharacterForm(cat, idx);
@@ -1268,7 +1322,7 @@ function drawWave(){
 // ---------- init ----------
 renderAssets();
 renderTimelineScenes();
-showTimelineFocusPreview();
+refreshMainPreview();
 renderTimeline();
 window.addEventListener('resize', drawWave);
 </script>
