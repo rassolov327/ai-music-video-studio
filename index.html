@@ -194,6 +194,37 @@
   }
   .char-card-actions{display:flex;justify-content:space-between;gap:8px;}
 
+  /* ---- AI reference generation ---- */
+  .gen-section{border-top:1px solid var(--line);margin-top:14px;padding-top:14px;}
+  .gen-btn{
+    width:100%;display:flex;align-items:center;justify-content:center;gap:6px;
+    padding:9px 12px;border-radius:6px;font-size:12.5px;cursor:pointer;border:1px solid #5a4526;
+    background:var(--accent-dim);color:var(--accent-text);font-family:var(--font-ui);
+  }
+  .gen-btn:hover{background:#4a381f;}
+  .gen-btn:disabled{opacity:.6;cursor:default;}
+  .gen-cost{
+    font-family:var(--font-mono);font-size:10.5px;color:var(--accent-text);opacity:.85;
+    background:rgba(0,0,0,.18);padding:2px 6px;border-radius:4px;
+  }
+  .gen-hint{font-size:11px;color:var(--text-3);margin-top:8px;line-height:1.5;}
+  .gen-spin{
+    width:12px;height:12px;border-radius:50%;border:2px solid rgba(242,185,104,.35);
+    border-top-color:var(--accent-text);animation:gen-spin-rot .7s linear infinite;flex:0 0 auto;
+  }
+  @keyframes gen-spin-rot{to{transform:rotate(360deg);}}
+  .ref-status{
+    display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--ok);margin-bottom:10px;
+  }
+  .ref-status .dot2{width:6px;height:6px;border-radius:50%;background:var(--ok);}
+  .ref-card-box{
+    background:var(--bg-elevated);border:1px solid var(--line);border-radius:6px;
+    padding:10px 12px;font-family:var(--font-mono);font-size:11px;line-height:1.6;
+    white-space:pre-wrap;color:var(--text-2);max-height:220px;overflow-y:auto;margin-bottom:10px;
+  }
+  .ref-actions{display:flex;gap:8px;}
+  .ref-actions .cf-btn{flex:1 1 auto;}
+
   /* ---- Character creation form ---- */
   .char-form{
     width:100%;max-width:420px;background:var(--bg-panel);border:1px solid var(--line);
@@ -283,7 +314,7 @@
     <div class="proj-title">New project — <b>Untitled</b></div>
     <div class="topbar-actions">
       <button class="tbtn"><i class="ti ti-device-floppy"></i>Save</button>
-      <button class="tbtn primary"><i class="ti ti-player-play"></i>Render</button>
+      <button class="tbtn primary"><i class="ti ti-player-play"></i>Render <span class="gen-cost" style="margin-left:2px;">~$0.30/shot</span></button>
     </div>
   </div>
 
@@ -531,6 +562,67 @@ function applyNaturalAspect(el, dataUrl){
   img.src = dataUrl;
 }
 
+// ---------- AI reference card (mocked KIE generation) ----------
+const GEN_MODEL_LABEL = 'KIE · GPT-Image-1';
+const GEN_COST_LABEL = '$0.03';
+
+function buildReferenceCardText(it){
+  const lines = [];
+  lines.push('# CHARACTER REFERENCE CARD');
+  lines.push('name: ' + it.name);
+  if(it.role) lines.push('role: ' + it.role);
+  lines.push('primary_photo: ' + (it.photo ? 'attached (1)' : 'none'));
+  lines.push('angle_refs: ' + ((it.angles && it.angles.length) || 0) + ' attached');
+  if(it.description) lines.push('description: ' + it.description);
+  lines.push('');
+  lines.push('consistency_rule:');
+  lines.push('  Always render this character matching the face, hair, build');
+  lines.push('  and wardrobe captured above. Only deviate when a shot');
+  lines.push('  explicitly overrides a detail (e.g. "wet", "no jacket",');
+  lines.push('  "bloodied lip") — those overrides apply to that shot only');
+  lines.push('  and reset on the next one unless carried forward.');
+  return lines.join('\n');
+}
+
+function renderGenSection(cat, idx){
+  const it = cat.items[idx];
+  const hasAllData = !!(it.name && it.photo && it.role && it.description);
+  const section = document.getElementById('genSection');
+  if(!section) return;
+
+  if(!hasAllData){
+    section.innerHTML = `<div class="gen-hint">Add a photo, role and description to generate this character's AI reference card.</div>`;
+    return;
+  }
+
+  if(it.referenceCard){
+    section.innerHTML = `
+      <div class="ref-status"><span class="dot2"></span>Reference card generated</div>
+      <div class="ref-card-box">${it.referenceCard}</div>
+      <div class="ref-actions">
+        <button class="cf-btn" id="genRegenBtn">Regenerate <span class="gen-cost">${GEN_COST_LABEL}</span></button>
+      </div>`;
+    document.getElementById('genRegenBtn').onclick = ()=> runGeneration(cat, idx);
+  } else {
+    section.innerHTML = `
+      <button class="gen-btn" id="genBtn">Generate reference card <span class="gen-cost">${GEN_COST_LABEL}</span></button>
+      <div class="gen-hint">Generates a structured, AI-readable reference (via ${GEN_MODEL_LABEL}) that future shot generations will point to, so this character stays consistent from shot to shot.</div>`;
+    document.getElementById('genBtn').onclick = ()=> runGeneration(cat, idx);
+  }
+}
+
+function runGeneration(cat, idx){
+  const section = document.getElementById('genSection');
+  if(!section) return;
+  section.innerHTML = `<button class="gen-btn" disabled><span class="gen-spin"></span>Generating…</button>`;
+  // simulated call — real integration proxies this through a backend that holds the KIE API key
+  setTimeout(()=>{
+    const it = cat.items[idx];
+    it.referenceCard = buildReferenceCardText(it);
+    renderGenSection(cat, idx);
+  }, 1200);
+}
+
 // ---------- preview: character card (detail view) ----------
 function showCharacterCard(cat, idx){
   previewEl.classList.remove('align-tl');
@@ -559,9 +651,11 @@ function showCharacterCard(cat, idx){
             <button class="cf-btn" id="cardDelete" style="color:var(--danger);">Delete</button>
           </div>
         </div>
+        <div class="gen-section" id="genSection"></div>
       </div>
     </div>`;
 
+  renderGenSection(cat, idx);
   if(it.photo) applyNaturalAspect(document.getElementById('cardPhoto'), it.photo);
 
   document.getElementById('cardBack').onclick = ()=> showCharacterGallery(cat);
