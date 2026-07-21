@@ -6,6 +6,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/2.44.0/iconfont/tabler-icons.min.css">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/utif@3.1.0/UTIF.js"></script>
 <style>
   :root{
     --bg-app:#15171b;
@@ -96,6 +97,10 @@
   .item:hover .item-del{opacity:1;}
   .item.selected{color:var(--text-1);background:var(--bg-panel-2);border-left-color:var(--accent);}
   .item i.itype{font-size:14px;color:var(--text-3);flex:0 0 auto;}
+  .item-avatar{
+    width:18px;height:18px;border-radius:50%;flex:0 0 auto;
+    background:var(--bg-elevated);background-size:cover;background-position:center;
+  }
   .item-name{flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .item .dot{width:6px;height:6px;border-radius:50%;background:var(--ok);flex:0 0 auto;}
   .item-del{
@@ -170,7 +175,7 @@
     border-radius:10px;overflow:hidden;align-self:center;
   }
   .char-card-photo{
-    width:100%;aspect-ratio:4/3;background:var(--bg-panel-2);background-size:cover;background-position:center;
+    width:100%;aspect-ratio:4/3;max-height:360px;background:var(--bg-panel-2);background-size:cover;background-position:center;
     display:flex;align-items:center;justify-content:center;color:var(--text-3);
   }
   .char-card-photo svg{width:40px;height:40px;}
@@ -197,7 +202,7 @@
   .char-form h3{margin:0 0 3px;font-size:15px;font-weight:500;color:var(--text-1);}
   .char-form .sub{margin:0 0 16px;font-size:12px;color:var(--text-3);}
   .photo-drop{
-    width:100%;aspect-ratio:16/9;border-radius:8px;border:1px dashed var(--line);
+    width:100%;aspect-ratio:4/3;max-height:340px;border-radius:8px;border:1px dashed var(--line);
     display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
     color:var(--text-3);cursor:pointer;margin-bottom:16px;background:var(--bg-panel-2);
     background-size:cover;background-position:center;position:relative;overflow:hidden;
@@ -355,14 +360,19 @@ function renderAssets(){
       cat.items.forEach((it,idx)=>{
         const row = document.createElement('div');
         row.className='item';
-        row.innerHTML = `<i class="ti ${it.icon} itype"></i><span class="item-name">${it.name}</span>
+        const iconHtml = it.photo
+          ? `<span class="item-avatar" style="background-image:url(${it.photo})"></span>`
+          : `<i class="ti ${it.icon} itype"></i>`;
+        row.innerHTML = `${iconHtml}<span class="item-name">${it.name}</span>
           ${it.live?'<span class="dot"></span>':''}
           <span class="item-del" title="Remove"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></span>`;
-        row.querySelector('.item-name').onclick = row.querySelector('.itype') ? null : null;
         row.onclick = (e)=>{
           if(e.target.closest('.item-del')) return;
           document.querySelectorAll('.item.selected').forEach(el=>el.classList.remove('selected'));
           row.classList.add('selected');
+          if(cat.addType==='character'){
+            showCharacterCard(cat, idx);
+          }
         };
         row.querySelector('.item-del').onclick = (e)=>{
           e.stopPropagation();
@@ -398,6 +408,7 @@ function renderAssets(){
 // ---------- preview: default empty state ----------
 function showEmptyPreview(){
   previewEl.classList.remove('align-tl');
+  previewEl.onclick = null;
   previewBarEl.textContent = 'Preview';
   previewEl.innerHTML = `
     <div class="empty-preview">
@@ -410,6 +421,7 @@ function showEmptyPreview(){
 // ---------- preview: generic placeholder for not-yet-built asset types ----------
 function showGenericPlaceholder(cat){
   previewEl.classList.remove('align-tl');
+  previewEl.onclick = null;
   previewBarEl.textContent = 'Add asset — ' + cat.name;
   previewEl.innerHTML = `
     <div class="empty-preview">
@@ -422,6 +434,7 @@ function showGenericPlaceholder(cat){
 // ---------- preview: characters gallery (tile grid) ----------
 function showCharacterGallery(cat){
   previewEl.classList.add('align-tl');
+  previewEl.onclick = null;
   previewBarEl.textContent = 'Characters';
 
   const tiles = cat.items.map((it,idx)=>`
@@ -469,6 +482,55 @@ function showCharacterGallery(cat){
   };
 }
 
+// ---------- helpers: image loading (with TIFF decode support) ----------
+function loadImageAsDataURL(file){
+  return new Promise((resolve, reject)=>{
+    const isTiff = /\.tiff?$/i.test(file.name) || file.type==='image/tiff' || file.type==='image/tif';
+    if(isTiff && window.UTIF){
+      const reader = new FileReader();
+      reader.onload = ()=>{
+        try{
+          const buffer = reader.result;
+          const ifds = UTIF.decode(buffer);
+          UTIF.decodeImage(buffer, ifds[0]);
+          const rgba = UTIF.toRGBA8(ifds[0]);
+          const canvas = document.createElement('canvas');
+          canvas.width = ifds[0].width;
+          canvas.height = ifds[0].height;
+          const ctx = canvas.getContext('2d');
+          const imgData = ctx.createImageData(ifds[0].width, ifds[0].height);
+          imgData.data.set(rgba);
+          ctx.putImageData(imgData, 0, 0);
+          resolve(canvas.toDataURL('image/png'));
+        } catch(err){
+          // fall back to a plain data URL if decoding fails
+          const fr2 = new FileReader();
+          fr2.onload = ()=> resolve(fr2.result);
+          fr2.onerror = reject;
+          fr2.readAsDataURL(file);
+        }
+      };
+      reader.onerror = reject;
+      reader.readAsArrayBuffer(file);
+    } else {
+      const reader = new FileReader();
+      reader.onload = ()=> resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    }
+  });
+}
+function applyNaturalAspect(el, dataUrl){
+  if(!dataUrl) return;
+  const img = new Image();
+  img.onload = ()=>{
+    if(img.naturalWidth && img.naturalHeight){
+      el.style.aspectRatio = img.naturalWidth + ' / ' + img.naturalHeight;
+    }
+  };
+  img.src = dataUrl;
+}
+
 // ---------- preview: character card (detail view) ----------
 function showCharacterCard(cat, idx){
   previewEl.classList.remove('align-tl');
@@ -481,8 +543,8 @@ function showCharacterCard(cat, idx){
     : '';
 
   previewEl.innerHTML = `
-    <div class="char-card">
-      <div class="char-card-photo" style="${it.photo ? `background-image:url(${it.photo})` : ''}">
+    <div class="char-card" id="charCard">
+      <div class="char-card-photo" id="cardPhoto" style="${it.photo ? `background-image:url(${it.photo})` : ''}">
         ${it.photo ? '' : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="8" r="4"></circle><path d="M4 21c0-4 4-6 8-6s8 2 8 6"></path></svg>'}
       </div>
       <div class="char-card-body">
@@ -492,29 +554,44 @@ function showCharacterCard(cat, idx){
         ${anglesHtml}
         <div class="char-card-actions">
           <button class="cf-btn" id="cardBack">Back to characters</button>
-          <button class="cf-btn" id="cardDelete" style="color:var(--danger);">Delete</button>
+          <div style="display:flex;gap:8px;">
+            <button class="cf-btn" id="cardEdit">Edit</button>
+            <button class="cf-btn" id="cardDelete" style="color:var(--danger);">Delete</button>
+          </div>
         </div>
       </div>
     </div>`;
 
+  if(it.photo) applyNaturalAspect(document.getElementById('cardPhoto'), it.photo);
+
   document.getElementById('cardBack').onclick = ()=> showCharacterGallery(cat);
+  document.getElementById('cardEdit').onclick = ()=> showCharacterForm(cat, idx);
   document.getElementById('cardDelete').onclick = ()=>{
     cat.items.splice(idx,1);
     renderAssets();
     showCharacterGallery(cat);
   };
+
+  // click on the surrounding empty area (not the card itself) returns to the gallery
+  previewEl.onclick = (e)=>{
+    if(e.target === previewEl) showCharacterGallery(cat);
+  };
 }
 
-// ---------- preview: character creation form ----------
-function showCharacterForm(cat){
+// ---------- preview: character creation / edit form ----------
+function showCharacterForm(cat, editIdx){
+  const isEdit = typeof editIdx === 'number';
+  const existing = isEdit ? cat.items[editIdx] : null;
+
   previewEl.classList.remove('align-tl');
-  previewBarEl.textContent = 'Add asset — Band / Characters';
+  previewEl.onclick = null;
+  previewBarEl.textContent = isEdit ? 'Edit character — ' + existing.name : 'Add asset — Band / Characters';
   previewEl.innerHTML = `
     <div class="char-form">
-      <h3>New character</h3>
-      <p class="sub">Add a band member as a digital actor for this project.</p>
+      <h3>${isEdit ? 'Edit character' : 'New character'}</h3>
+      <p class="sub">${isEdit ? 'Update the saved character details.' : 'Add a band member as a digital actor for this project.'}</p>
 
-      <label class="photo-drop" id="photoDrop" for="photoInput">
+      <label class="photo-drop${existing && existing.photo ? ' has-photo' : ''}" id="photoDrop" for="photoInput" style="${existing && existing.photo ? `background-image:url(${existing.photo})` : ''}">
         <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"></path><circle cx="12" cy="13" r="3.5"></circle></svg>
         <span>Add photo</span>
         <div class="photo-remove" id="photoRemove"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
@@ -523,15 +600,15 @@ function showCharacterForm(cat){
 
       <div class="cf-field">
         <label>Name</label>
-        <input type="text" id="cfName" placeholder="e.g. James Hetfield">
+        <input type="text" id="cfName" placeholder="e.g. James Hetfield" value="${existing ? existing.name : ''}">
       </div>
       <div class="cf-field">
         <label>Role</label>
-        <input type="text" id="cfRole" placeholder="e.g. Vocals, Lead guitar, Bass">
+        <input type="text" id="cfRole" placeholder="e.g. Vocals, Lead guitar, Bass" value="${existing && existing.role ? existing.role : ''}">
       </div>
       <div class="cf-field">
         <label>Description</label>
-        <textarea id="cfNotes" placeholder="Appearance, wardrobe, anything worth remembering"></textarea>
+        <textarea id="cfNotes" placeholder="Appearance, wardrobe, anything worth remembering">${existing && existing.description ? existing.description : ''}</textarea>
       </div>
       <div class="cf-field">
         <label>Additional angles</label>
@@ -541,12 +618,12 @@ function showCharacterForm(cat){
 
       <div class="cf-actions">
         <button class="cf-btn" id="cfCancel">Cancel</button>
-        <button class="cf-btn primary" id="cfSave" disabled>Add member</button>
+        <button class="cf-btn primary" id="cfSave" ${existing && existing.name ? '' : 'disabled'}>${isEdit ? 'Save changes' : 'Add member'}</button>
       </div>
     </div>
   `;
 
-  const anglePhotos = [];
+  const anglePhotos = (existing && existing.angles) ? existing.angles.slice() : [];
   const anglesRow = document.getElementById('anglesRow');
   const angleInput = document.getElementById('angleInput');
 
@@ -568,15 +645,14 @@ function showCharacterForm(cat){
       };
     });
   }
-  angleInput.onchange = ()=>{
+  angleInput.onchange = async ()=>{
     const file = angleInput.files[0];
     if(!file) return;
-    const reader = new FileReader();
-    reader.onload = ()=>{
-      anglePhotos.push(reader.result);
+    try{
+      const dataUrl = await loadImageAsDataURL(file);
+      anglePhotos.push(dataUrl);
       renderAngles();
-    };
-    reader.readAsDataURL(file);
+    } catch(err){}
     angleInput.value='';
   };
   renderAngles();
@@ -586,19 +662,18 @@ function showCharacterForm(cat){
   const photoRemove = document.getElementById('photoRemove');
   const nameInput = document.getElementById('cfName');
   const saveBtn = document.getElementById('cfSave');
-  let photoDataUrl = null;
+  let photoDataUrl = existing ? existing.photo || null : null;
+  if(photoDataUrl) applyNaturalAspect(photoDrop, photoDataUrl);
 
-
-  photoInput.onchange = ()=>{
+  photoInput.onchange = async ()=>{
     const file = photoInput.files[0];
     if(!file) return;
-    const reader = new FileReader();
-    reader.onload = ()=>{
-      photoDataUrl = reader.result;
+    try{
+      photoDataUrl = await loadImageAsDataURL(file);
       photoDrop.classList.add('has-photo');
       photoDrop.style.backgroundImage = `url(${photoDataUrl})`;
-    };
-    reader.readAsDataURL(file);
+      applyNaturalAspect(photoDrop, photoDataUrl);
+    } catch(err){}
   };
   photoRemove.onclick = (e)=>{
     e.preventDefault();
@@ -606,6 +681,7 @@ function showCharacterForm(cat){
     photoDataUrl = null;
     photoDrop.classList.remove('has-photo');
     photoDrop.style.backgroundImage='';
+    photoDrop.style.aspectRatio='';
     photoInput.value='';
   };
 
@@ -615,12 +691,13 @@ function showCharacterForm(cat){
   nameInput.addEventListener('input', refreshSaveState);
 
   document.getElementById('cfCancel').onclick = ()=>{
-    showCharacterGallery(cat);
+    if(isEdit) showCharacterCard(cat, editIdx);
+    else showCharacterGallery(cat);
   };
   saveBtn.onclick = ()=>{
     if(nameInput.value.trim().length===0) return;
     const roleInput = document.getElementById('cfRole');
-    cat.items.push({
+    const data = {
       name: nameInput.value.trim(),
       icon: 'ti-user',
       live: !!photoDataUrl,
@@ -628,9 +705,16 @@ function showCharacterForm(cat){
       role: roleInput.value.trim(),
       description: document.getElementById('cfNotes').value.trim(),
       angles: anglePhotos.slice(),
-    });
-    renderAssets();
-    showCharacterGallery(cat);
+    };
+    if(isEdit){
+      cat.items[editIdx] = data;
+      renderAssets();
+      showCharacterCard(cat, editIdx);
+    } else {
+      cat.items.push(data);
+      renderAssets();
+      showCharacterGallery(cat);
+    }
   };
 }
 
