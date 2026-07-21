@@ -128,6 +128,8 @@
     display:flex;align-items:center;gap:10px;padding:6px 12px;
     border-bottom:1px solid var(--line);color:var(--text-2);font-size:12px;flex:0 0 auto;
   }
+  .preview-bar #homeBtn{padding:4px 9px;}
+  .preview-bar #previewBar{font-weight:500;color:var(--text-1);}
   .preview{
     flex:1 1 auto;display:flex;align-items:center;justify-content:center;
     background:radial-gradient(ellipse at center, #23262d 0%, #16181c 78%);
@@ -333,13 +335,18 @@
   }
   .insert-btn:hover{border-color:var(--accent);color:var(--accent-text);background:rgba(255,255,255,.06);}
   .shot-thumb{
-    flex:0 0 72px;width:72px;height:60px;border-radius:6px;cursor:pointer;position:relative;
+    flex:0 0 auto;height:60px;border-radius:6px;cursor:pointer;position:relative;
     display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
     color:#fff;text-align:center;padding:4px;border:1px solid rgba(255,255,255,.12);background-size:cover;
+    overflow:hidden;
   }
   .shot-thumb.focused{box-shadow:0 0 0 2px var(--accent);}
   .shot-thumb .st-name{font-size:10px;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;}
   .shot-thumb .st-meta{font-size:9px;color:rgba(255,255,255,.8);font-family:var(--font-mono);}
+  .shot-trim{position:absolute;top:0;bottom:0;width:7px;cursor:ew-resize;z-index:2;}
+  .shot-trim.left{left:0;}
+  .shot-trim.right{right:0;}
+  .shot-trim:hover{background:rgba(255,255,255,.25);}
   .empty-scene-cell{
     flex:0 0 88px;width:88px;height:60px;border-radius:8px;border:1px dashed rgba(255,255,255,.3);
     display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text-2);
@@ -405,7 +412,6 @@
     <div class="menu"><span>File</span><span>Edit</span><span>Project</span><span>Tools</span><span>Help</span></div>
     <div class="proj-title">New project — <b>Untitled</b></div>
     <div class="topbar-actions">
-      <button class="tbtn" id="homeBtn" title="Back to main screen"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"></path><path d="M5 10v10a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V10"></path></svg>Home</button>
       <button class="tbtn primary"><i class="ti ti-player-play"></i>Render <span class="gen-cost" style="margin-left:2px;">~$0.30/shot</span></button>
     </div>
   </div>
@@ -415,7 +421,10 @@
     <div class="assets" id="assets"></div>
 
     <div class="center">
-      <div class="preview-bar" id="previewBar">Preview</div>
+      <div class="preview-bar">
+        <button class="tbtn" id="homeBtn" title="Back to main screen"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"></path><path d="M5 10v10a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V10"></path></svg>Home</button>
+        <span id="previewBar">Preview</span>
+      </div>
       <div class="preview" id="preview"></div>
 
       <div class="timeline-area">
@@ -446,11 +455,12 @@ const state = {
     ]},
     {key:'band', name:'Band / Characters', icon:'ti-users', addType:'character', items:[]},
     {key:'locations', name:'Locations', icon:'ti-map-pin', addType:'generic', items:[]},
+    {key:'scenes', name:'Scenes', icon:'ti-movie', addType:'scene', items:[]},
   ],
   scenes: []
 };
 
-let sceneSeq = 1, shotSeq = 1, paletteSeq = 0;
+let sceneSeq = 1, shotSeq = 1, paletteSeq = 0, charSeq = 1;
 let focus = { sceneId: null, shotId: null };
 const PX_PER_SEC = 40; // cosmetic scale for the ruler, not tied to real audio timing yet
 
@@ -491,12 +501,14 @@ function addScene(){
   state.scenes.push({ id, name: 'Scene ' + (state.scenes.length + 1), colorIdx: paletteSeq++, shots: [] });
   focus = { sceneId: id, shotId: null };
   renderTimelineScenes();
-  refreshMainPreview();
+  renderAssets();
+  showSceneGallery(id);
 }
 function deleteScene(id){
   state.scenes = state.scenes.filter(s=>s.id!==id);
   if(focus.sceneId===id) focus = { sceneId:null, shotId:null };
   renderTimelineScenes();
+  renderAssets();
   refreshMainPreview();
 }
 function startRenameScene(id, labelEl){
@@ -512,6 +524,7 @@ function startRenameScene(id, labelEl){
   function commit(){
     scene.name = input.value.trim() || scene.name;
     renderTimelineScenes();
+    renderAssets();
     if(focus.sceneId===id) refreshMainPreview();
   }
   input.addEventListener('blur', commit);
@@ -520,7 +533,7 @@ function startRenameScene(id, labelEl){
 function addShotAt(sceneId, index){
   const scene = state.scenes.find(s=>s.id===sceneId);
   if(!scene) return;
-  const shot = { id: 'sh' + (shotSeq++), name: 'Shot ' + (scene.shots.length + 1), duration: 2 };
+  const shot = { id: 'sh' + (shotSeq++), name: 'Shot ' + (scene.shots.length + 1), duration: 5 };
   scene.shots.splice(index, 0, shot);
   focus = { sceneId, shotId: shot.id };
   renderTimelineScenes();
@@ -583,8 +596,11 @@ function renderTimelineScenes(){
       trackHtml += `<div class="insert-btn" data-add-at="${scene.id}|0" title="Insert shot">${plusSvg(11)}</div>`;
       scene.shots.forEach((shot, i)=>{
         const isFocused = focus.sceneId===scene.id && focus.shotId===shot.id;
+        const wpx = Math.round(shot.duration * PX_PER_SEC);
         trackHtml += `
-          <div class="shot-thumb${isFocused?' focused':''}" data-anchor data-scene="${scene.id}" data-shot="${shot.id}" style="background:${col.thumb};">
+          <div class="shot-thumb${isFocused?' focused':''}" data-anchor data-scene="${scene.id}" data-shot="${shot.id}" style="background:${col.thumb};width:${wpx}px;flex-basis:${wpx}px;">
+            <div class="shot-trim left" data-trim="${scene.id}|${shot.id}|left" title="Drag to trim"></div>
+            <div class="shot-trim right" data-trim="${scene.id}|${shot.id}|right" title="Drag to trim"></div>
             <div class="block-rename" data-rename-btn-shot="${scene.id}|${shot.id}" title="Rename">${pencilSvg(9)}</div>
             <div class="block-del" data-del-shot="${scene.id}|${shot.id}" title="Delete shot">${trashSvg(9)}</div>
             <span class="st-name" data-rename-shot="${scene.id}|${shot.id}">${shot.name}</span>
@@ -632,9 +648,48 @@ function renderTimelineScenes(){
   });
   timelineScenesEl.querySelectorAll('.shot-thumb').forEach(el=>{
     el.onclick = (e)=>{
-      if(e.target.closest('.block-del') || e.target.closest('.block-rename')) return;
+      if(e.target.closest('.block-del') || e.target.closest('.block-rename') || e.target.closest('.shot-trim')) return;
       setFocus(el.dataset.scene, el.dataset.shot);
     };
+  });
+  timelineScenesEl.querySelectorAll('[data-trim]').forEach(el=>{
+    el.addEventListener('pointerdown', (e)=>{
+      e.preventDefault();
+      e.stopPropagation();
+      const [sid, shid, side] = el.dataset.trim.split('|');
+      const scene = state.scenes.find(s=>s.id===sid);
+      const shot = scene && scene.shots.find(sh=>sh.id===shid);
+      if(!shot) return;
+      const thumbEl = el.parentElement;
+      const startX = e.clientX;
+      const startDuration = shot.duration;
+      el.setPointerCapture(e.pointerId);
+      document.body.style.cursor = 'ew-resize';
+      const MIN_SEC = 0.5;
+      const onMove = (ev)=>{
+        const deltaPx = ev.clientX - startX;
+        const deltaSec = deltaPx / PX_PER_SEC;
+        const raw = side==='right' ? startDuration + deltaSec : startDuration - deltaSec;
+        const newDuration = Math.max(MIN_SEC, Math.round(raw*10)/10);
+        const wpx = Math.round(newDuration * PX_PER_SEC);
+        thumbEl.style.width = wpx + 'px';
+        thumbEl.style.flexBasis = wpx + 'px';
+        const meta = thumbEl.querySelector('.st-meta');
+        if(meta) meta.textContent = newDuration.toFixed(1) + 's';
+        thumbEl.dataset.pendingDuration = newDuration;
+      };
+      const onUp = ()=>{
+        el.removeEventListener('pointermove', onMove);
+        el.removeEventListener('pointerup', onUp);
+        document.body.style.cursor = '';
+        const pending = parseFloat(thumbEl.dataset.pendingDuration);
+        if(!isNaN(pending)) shot.duration = pending;
+        renderTimelineScenes();
+        if(focus.sceneId===sid && focus.shotId===shid) renderInspectorPanel();
+      };
+      el.addEventListener('pointermove', onMove);
+      el.addEventListener('pointerup', onUp);
+    });
   });
   timelineScenesEl.querySelectorAll('.empty-scene-cell').forEach(el=>{
     // clicking the empty cell both adds a shot (via data-add-at handler above) — no separate focus needed
@@ -737,6 +792,88 @@ function wireTimelineDrag(){
 }
 
 // ---------- main timeline-synced preview ----------
+// ---------- scene gallery (tile grid of shots, mirrors the character gallery) ----------
+function showSceneGallery(sceneId){
+  const scene = state.scenes.find(s=>s.id===sceneId);
+  if(!scene) return;
+  previewEl.classList.add('align-tl');
+  previewEl.onclick = null;
+  previewBarEl.textContent = scene.name;
+
+  function render(){
+    const tiles = scene.shots.map(shot=>`
+      <div class="char-tile" data-shot="${shot.id}">
+        <div class="char-tile-photo">
+          <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"></rect><circle cx="9" cy="11" r="2"></circle><path d="M21 16l-5-4-4 3-3-2-6 5"></path></svg>
+          <div class="char-tile-del" data-del-shot="${shot.id}" title="Remove">${trashSvg(13)}</div>
+        </div>
+        <div class="char-tile-name" data-rename-shot="${shot.id}">${shot.name}</div>
+        <div class="char-tile-role">${shot.duration}s</div>
+      </div>
+    `).join('');
+
+    previewEl.innerHTML = `
+      <div class="char-gallery">
+        <div class="char-grid">
+          ${tiles}
+          <div class="char-tile char-tile-add" id="addShotTileScene">
+            <div class="char-tile-photo">${plusSvg(26)}</div>
+            <div class="char-tile-name">Add shot</div>
+          </div>
+        </div>
+      </div>`;
+
+    document.getElementById('addShotTileScene').onclick = ()=>{
+      const shot = { id: 'sh' + (shotSeq++), name: 'Shot ' + (scene.shots.length + 1), duration: 5 };
+      scene.shots.push(shot);
+      focus = { sceneId, shotId: shot.id };
+      renderTimelineScenes();
+      renderAssets();
+      render();
+    };
+    previewEl.querySelectorAll('[data-del-shot]').forEach(el=>{
+      el.onclick = (e)=>{
+        e.stopPropagation();
+        scene.shots = scene.shots.filter(sh=>sh.id!==el.dataset.delShot);
+        if(focus.shotId===el.dataset.delShot) focus = { sceneId, shotId:null };
+        renderTimelineScenes();
+        render();
+      };
+    });
+    previewEl.querySelectorAll('[data-rename-shot]').forEach(el=>{
+      el.onclick = (e)=>{
+        e.stopPropagation();
+        const shotId = el.dataset.renameShot;
+        const shot = scene.shots.find(sh=>sh.id===shotId);
+        if(!shot) return;
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = shot.name;
+        input.className = 'scene-rename-input';
+        el.replaceWith(input);
+        input.focus();
+        input.select();
+        function commit(){
+          shot.name = input.value.trim() || shot.name;
+          renderTimelineScenes();
+          render();
+        }
+        input.addEventListener('blur', commit);
+        input.addEventListener('keydown', (ev)=>{ if(ev.key==='Enter') input.blur(); });
+      };
+    });
+    previewEl.querySelectorAll('.char-tile:not(.char-tile-add)').forEach(tile=>{
+      tile.onclick = (e)=>{
+        if(e.target.closest('.char-tile-del') || e.target.closest('[data-rename-shot]')) return;
+        focus = { sceneId, shotId: tile.dataset.shot };
+        renderTimelineScenes();
+        renderInspectorPanel();
+      };
+    });
+  }
+  render();
+}
+
 function refreshMainPreview(){
   previewEl.classList.remove('align-tl');
   previewEl.onclick = null;
@@ -767,6 +904,9 @@ function refreshMainPreview(){
   renderInspectorPanel();
 }
 
+const SHOT_SIZES = ['Detail Shot','Extreme Close-Up','Close-Up','Medium Close-Up','Medium Shot','Medium Wide Shot','Wide Shot','Extreme Wide Shot'];
+const CAMERA_MOVES = ['Static','Push In','Pull Out','Steadicam','Crane'];
+
 function renderInspectorPanel(){
   const body = document.getElementById('inspBody');
   if(!body) return;
@@ -784,14 +924,50 @@ function renderInspectorPanel(){
   }
   const shot = scene.shots.find(sh=>sh.id===focus.shotId);
   if(!shot){ body.innerHTML = `<div class="insp-empty">No shot selected.</div>`; return; }
+  if(!shot.characters) shot.characters = [];
+
+  const bandCat = state.categories.find(c=>c.key==='band');
+  const characters = bandCat ? bandCat.items : [];
 
   body.innerHTML = `
     <div style="padding:14px;">
       <div class="cat-count" style="font-size:11px;margin-bottom:10px;">${scene.name}</div>
       <div class="cf-field"><label>Name</label><input type="text" id="shotNameInput" value="${shot.name}"></div>
       <div class="cf-field"><label>Duration (sec)</label><input type="number" id="shotDurInput" min="0.5" step="0.1" value="${shot.duration}"></div>
-      <div class="gen-hint">Camera, characters, lighting and other shot parameters will live here once shot creation is wired up.</div>
+
+      <div class="field-group">
+        <div class="field-group-title">Characters</div>
+        <div class="char-list">
+          ${characters.length===0
+            ? `<div class="gen-hint" style="margin-top:0;">No characters created yet.</div>`
+            : characters.map(c=>`
+                <label class="char-row ${shot.characters.includes(c.id)?'checked':''}">
+                  <input type="checkbox" data-char-id="${c.id}" ${shot.characters.includes(c.id)?'checked':''}>${c.name}
+                </label>`).join('')
+          }
+        </div>
+      </div>
+
+      <div class="cf-field"><label>Shot size</label>
+        <select id="shotSizeInput">
+          <option value="">Select shot size</option>
+          ${SHOT_SIZES.map(s=>`<option ${shot.shotSize===s?'selected':''}>${s}</option>`).join('')}
+        </select>
+      </div>
+      <div class="cf-field"><label>Camera movement</label>
+        <select id="shotMoveInput">
+          <option value="">Select movement</option>
+          ${CAMERA_MOVES.map(s=>`<option ${shot.cameraMove===s?'selected':''}>${s}</option>`).join('')}
+        </select>
+      </div>
+      <div class="cf-field"><label>Lighting</label>
+        <input type="text" id="shotLightInput" placeholder="e.g. low key, back light, blue rim" value="${shot.lighting||''}">
+      </div>
+      <div class="cf-field"><label>Description <span style="color:var(--text-3);font-weight:400;">— prompt for AI generation</span></label>
+        <textarea id="shotDescInput" style="min-height:90px;" placeholder="Describe exactly what should happen in this shot...">${shot.description||''}</textarea>
+      </div>
     </div>`;
+
   document.getElementById('shotNameInput').addEventListener('input', (e)=>{
     shot.name = e.target.value;
     renderTimelineScenes();
@@ -801,11 +977,26 @@ function renderInspectorPanel(){
     shot.duration = parseFloat(e.target.value) || shot.duration;
     renderTimelineScenes();
   });
+  body.querySelectorAll('[data-char-id]').forEach(cb=>{
+    cb.addEventListener('change', (e)=>{
+      const id = e.target.dataset.charId;
+      if(e.target.checked){ if(!shot.characters.includes(id)) shot.characters.push(id); }
+      else { shot.characters = shot.characters.filter(x=>x!==id); }
+      e.target.closest('.char-row').classList.toggle('checked', e.target.checked);
+    });
+  });
+  document.getElementById('shotSizeInput').addEventListener('change', (e)=>{ shot.shotSize = e.target.value; });
+  document.getElementById('shotMoveInput').addEventListener('change', (e)=>{ shot.cameraMove = e.target.value; });
+  document.getElementById('shotLightInput').addEventListener('input', (e)=>{ shot.lighting = e.target.value; });
+  document.getElementById('shotDescInput').addEventListener('input', (e)=>{ shot.description = e.target.value; });
 }
 
 function renderAssets(){
   assetsEl.innerHTML='';
   state.categories.forEach(cat=>{
+    const isScenes = cat.key==='scenes';
+    const displayItems = isScenes ? state.scenes : cat.items;
+
     const catEl = document.createElement('div');
     catEl.className='cat';
 
@@ -815,18 +1006,37 @@ function renderAssets(){
       <i class="ti ti-chevron-down chev"></i>
       <i class="ti ${cat.icon} folder"></i>
       <span class="cat-name">${cat.name}</span>
-      <span class="cat-count">${cat.items.length || ''}</span>
+      <span class="cat-count">${displayItems.length || ''}</span>
       <span class="cat-add" title="Open editor"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4Z"></path></svg></span>
     `;
 
     const itemsEl = document.createElement('div');
     itemsEl.className='cat-items';
 
-    if(cat.items.length===0){
+    if(displayItems.length===0){
       const empty = document.createElement('div');
       empty.className='empty-cat';
       empty.textContent = 'No assets yet';
       itemsEl.appendChild(empty);
+    } else if(isScenes){
+      state.scenes.forEach((scene)=>{
+        const row = document.createElement('div');
+        row.className='item';
+        const col = sceneColor(scene);
+        row.innerHTML = `<span class="scene-color-dot" style="background:${col.dot};margin-right:1px;"></span><span class="item-name">${scene.name}</span>
+          <span class="item-del" title="Remove"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></span>`;
+        row.onclick = (e)=>{
+          if(e.target.closest('.item-del')) return;
+          document.querySelectorAll('.item.selected').forEach(el=>el.classList.remove('selected'));
+          row.classList.add('selected');
+          showSceneGallery(scene.id);
+        };
+        row.querySelector('.item-del').onclick = (e)=>{
+          e.stopPropagation();
+          deleteScene(scene.id);
+        };
+        itemsEl.appendChild(row);
+      });
     } else {
       cat.items.forEach((it,idx)=>{
         const row = document.createElement('div');
@@ -866,6 +1076,8 @@ function renderAssets(){
       e.stopPropagation();
       if(cat.addType==='character'){
         showCharacterGallery(cat);
+      } else if(cat.addType==='scene'){
+        addScene();
       } else {
         showGenericPlaceholder(cat);
       }
@@ -1268,6 +1480,7 @@ function showCharacterForm(cat, editIdx){
   saveBtn.onclick = ()=>{
     if(nameInput.value.trim().length===0) return;
     const data = {
+      id: existing && existing.id ? existing.id : 'c' + (charSeq++),
       name: nameInput.value.trim(),
       icon: 'ti-user',
       live: !!photoDataUrl,
