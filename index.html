@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>AI Music Video Studio — Prototype</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/2.44.0/iconfont/tabler-icons.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg-app:#15171b;
+    --bg-panel:#1b1e24;
+    --bg-panel-2:#20232a;
+    --bg-elevated:#262a32;
+    --line:#2b2f38;
+    --line-soft:#22252c;
+    --text-1:#e7e7e4;
+    --text-2:#9498a0;
+    --text-3:#5e626c;
+    --accent:#e0983c;
+    --accent-dim:#3a2f1e;
+    --accent-text:#f2b968;
+    --ok:#5fae7a;
+    --danger:#d9695f;
+    --font-ui:'Inter',sans-serif;
+    --font-mono:'JetBrains Mono',monospace;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:var(--font-ui);}
+  #app{
+    background:var(--bg-app);
+    color:var(--text-1);
+    border-radius:12px;
+    border:1px solid var(--line);
+    overflow:hidden;
+    font-size:13px;
+    display:flex;
+    flex-direction:column;
+    height:660px;
+  }
+  /* ---- Top bar ---- */
+  .topbar{
+    display:flex;align-items:center;gap:16px;
+    padding:0 14px;height:44px;flex:0 0 auto;
+    background:var(--bg-panel);border-bottom:1px solid var(--line);
+  }
+  .brand{display:flex;align-items:center;gap:8px;font-weight:500;color:var(--text-1);}
+  .brand i{color:var(--accent);font-size:18px;}
+  .menu{display:flex;gap:14px;color:var(--text-2);font-size:12.5px;}
+  .menu span:hover{color:var(--text-1);cursor:default;}
+  .proj-title{margin-left:auto;margin-right:auto;color:var(--text-2);font-size:12.5px;}
+  .proj-title b{color:var(--text-1);font-weight:500;}
+  .topbar-actions{display:flex;gap:6px;}
+  .tbtn{
+    display:flex;align-items:center;gap:6px;
+    background:transparent;border:1px solid var(--line);color:var(--text-2);
+    padding:5px 10px;border-radius:6px;font-size:12px;font-family:var(--font-ui);
+    cursor:pointer;
+  }
+  .tbtn:hover{border-color:#3a3e48;color:var(--text-1);background:var(--bg-elevated);}
+  .tbtn.primary{background:var(--accent-dim);border-color:#5a4526;color:var(--accent-text);}
+  .tbtn.primary:hover{background:#4a381f;}
+
+  /* ---- Body layout ---- */
+  .body-row{flex:1 1 auto;display:flex;min-height:0;}
+
+  /* ---- Left assets panel ---- */
+  .assets{
+    width:220px;flex:0 0 auto;background:var(--bg-panel);
+    border-right:1px solid var(--line);overflow-y:auto;padding:8px 0;
+  }
+  .cat{user-select:none;}
+  .cat-head{
+    display:flex;align-items:center;gap:6px;padding:6px 6px 6px 12px;cursor:pointer;color:var(--text-1);
+  }
+  .cat-head:hover{background:var(--bg-panel-2);}
+  .cat-head:hover .cat-add{opacity:1;}
+  .cat-head i.chev{font-size:13px;color:var(--text-3);transition:transform .12s;flex:0 0 auto;}
+  .cat-head.collapsed i.chev{transform:rotate(-90deg);}
+  .cat-head i.folder{font-size:15px;color:var(--text-2);flex:0 0 auto;}
+  .cat-name{flex:1 1 auto;}
+  .cat-count{color:var(--text-3);font-size:11px;font-family:var(--font-mono);margin-right:2px;}
+  .cat-add{
+    opacity:0;flex:0 0 auto;width:18px;height:18px;border-radius:4px;
+    display:flex;align-items:center;justify-content:center;color:var(--text-2);
+  }
+  .cat-add:hover{background:var(--bg-elevated);color:var(--accent-text);}
+  .cat-add i{font-size:14px;}
+  .cat-items{padding-left:8px;}
+  .cat-items.hidden{display:none;}
+  .item{
+    display:flex;align-items:center;gap:7px;padding:5px 8px 5px 26px;color:var(--text-2);
+    cursor:pointer;border-left:2px solid transparent;font-size:12.5px;position:relative;
+  }
+  .item:hover{background:var(--bg-panel-2);color:var(--text-1);}
+  .item:hover .item-del{opacity:1;}
+  .item.selected{color:var(--text-1);background:var(--bg-panel-2);border-left-color:var(--accent);}
+  .item i.itype{font-size:14px;color:var(--text-3);flex:0 0 auto;}
+  .item-name{flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .item .dot{width:6px;height:6px;border-radius:50%;background:var(--ok);flex:0 0 auto;}
+  .item-del{
+    opacity:0;flex:0 0 auto;width:18px;height:18px;border-radius:4px;
+    display:flex;align-items:center;justify-content:center;color:var(--text-3);
+  }
+  .item-del:hover{background:var(--bg-elevated);color:var(--danger);}
+  .item-del i{font-size:13px;}
+  .empty-cat{padding:5px 12px 8px 26px;color:var(--text-3);font-size:11.5px;font-style:italic;}
+
+  /* ---- Center column ---- */
+  .center{flex:1 1 auto;display:flex;flex-direction:column;min-width:0;}
+  .preview-bar{
+    display:flex;align-items:center;gap:10px;padding:6px 12px;
+    border-bottom:1px solid var(--line);color:var(--text-2);font-size:12px;flex:0 0 auto;
+  }
+  .preview{
+    flex:1 1 auto;display:flex;align-items:center;justify-content:center;
+    background:radial-gradient(ellipse at center, #23262d 0%, #16181c 78%);
+    position:relative;min-height:0;overflow-y:auto;padding:24px;
+  }
+  .empty-preview{
+    display:flex;flex-direction:column;align-items:center;gap:8px;color:var(--text-3);
+  }
+  .empty-preview i{font-size:34px;color:#4a4d54;}
+  .empty-preview .t1{font-size:13px;color:var(--text-2);}
+  .empty-preview .t2{font-size:12px;color:var(--text-3);}
+
+  /* ---- Character creation form ---- */
+  .char-form{
+    width:100%;max-width:420px;background:var(--bg-panel);border:1px solid var(--line);
+    border-radius:10px;padding:18px;align-self:center;
+  }
+  .char-form h3{margin:0 0 3px;font-size:15px;font-weight:500;color:var(--text-1);}
+  .char-form .sub{margin:0 0 16px;font-size:12px;color:var(--text-3);}
+  .photo-drop{
+    width:100%;aspect-ratio:16/9;border-radius:8px;border:1px dashed var(--line);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
+    color:var(--text-3);cursor:pointer;margin-bottom:16px;background:var(--bg-panel-2);
+    background-size:cover;background-position:center;position:relative;overflow:hidden;
+  }
+  .photo-drop:hover{border-color:#3a3e48;color:var(--text-2);}
+  .photo-drop i{font-size:24px;}
+  .photo-drop span{font-size:12px;}
+  .photo-drop.has-photo span, .photo-drop.has-photo i{display:none;}
+  .photo-drop .photo-remove{
+    position:absolute;top:6px;right:6px;width:22px;height:22px;border-radius:5px;
+    background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;color:#fff;
+  }
+  .photo-drop.has-photo .photo-remove{display:flex;}
+  .cf-field{margin-bottom:12px;}
+  .cf-field label{display:block;font-size:11px;color:var(--text-3);margin-bottom:4px;}
+  .cf-field input[type=text], .cf-field select, .cf-field textarea{
+    width:100%;background:var(--bg-elevated);border:1px solid var(--line);color:var(--text-1);
+    border-radius:5px;padding:7px 9px;font-size:12.5px;font-family:var(--font-ui);
+  }
+  .cf-field input:focus, .cf-field select:focus, .cf-field textarea:focus{outline:none;border-color:var(--accent);}
+  .cf-field textarea{resize:vertical;min-height:52px;line-height:1.5;}
+  .cf-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px;}
+  .cf-btn{
+    padding:7px 14px;border-radius:6px;font-size:12.5px;cursor:pointer;border:1px solid var(--line);
+    background:transparent;color:var(--text-2);
+  }
+  .cf-btn:hover{color:var(--text-1);border-color:#3a3e48;}
+  .cf-btn.primary{background:var(--accent-dim);border-color:#5a4526;color:var(--accent-text);}
+  .cf-btn.primary:hover{background:#4a381f;}
+  .cf-btn.primary:disabled{opacity:.45;cursor:default;background:var(--accent-dim);}
+
+  /* ---- Bottom audio track ---- */
+  .timeline-area{border-top:1px solid var(--line);background:var(--bg-panel);flex:0 0 auto;}
+  .waveform{display:flex;align-items:center;gap:8px;padding:10px 12px;}
+  .waveform i{color:var(--text-2);font-size:15px;}
+  .waveform .track-name{font-size:11.5px;color:var(--text-2);width:150px;flex:0 0 auto;}
+  .wave-canvas{flex:1 1 auto;height:36px;}
+  .no-track{padding:14px 12px;color:var(--text-3);font-size:12px;font-style:italic;}
+
+  /* ---- Right inspector ---- */
+  .inspector{
+    width:230px;flex:0 0 auto;background:var(--bg-panel);border-left:1px solid var(--line);
+    overflow-y:auto;
+  }
+  .insp-tabs{display:flex;border-bottom:1px solid var(--line);}
+  .insp-tab{padding:9px 12px;font-size:12px;color:var(--text-3);cursor:default;border-bottom:2px solid transparent;}
+  .insp-tab.active{color:var(--text-1);border-bottom-color:var(--accent);}
+  .insp-empty{padding:16px 14px;color:var(--text-3);font-size:12px;line-height:1.6;}
+
+  ::-webkit-scrollbar{width:8px;height:8px;}
+  ::-webkit-scrollbar-thumb{background:#33373f;border-radius:4px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <div class="topbar">
+    <div class="brand"><i class="ti ti-movie"></i>AI Music Video Studio</div>
+    <div class="menu"><span>File</span><span>Edit</span><span>Project</span><span>Tools</span><span>Help</span></div>
+    <div class="proj-title">New project — <b>Untitled</b></div>
+    <div class="topbar-actions">
+      <button class="tbtn"><i class="ti ti-device-floppy"></i>Save</button>
+      <button class="tbtn primary"><i class="ti ti-player-play"></i>Render</button>
+    </div>
+  </div>
+
+  <div class="body-row">
+
+    <div class="assets" id="assets"></div>
+
+    <div class="center">
+      <div class="preview-bar" id="previewBar">Preview</div>
+      <div class="preview" id="preview"></div>
+
+      <div class="timeline-area">
+        <div id="waveformWrap"></div>
+      </div>
+    </div>
+
+    <div class="inspector">
+      <div class="insp-tabs">
+        <div class="insp-tab active">Inspector</div>
+        <div class="insp-tab">Scene settings</div>
+      </div>
+      <div class="insp-empty">No shot selected.<br>Create a scene and a shot to see its parameters here.</div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ---------- state ----------
+const state = {
+  categories: [
+    {key:'music', name:'Music', icon:'ti-music', addType:null, items:[
+      {name:'Enter Sandman.mp3', icon:'ti-file-music'},
+    ]},
+    {key:'band', name:'Band / Characters', icon:'ti-users', addType:'character', items:[]},
+    {key:'locations', name:'Locations', icon:'ti-map-pin', addType:'generic', items:[]},
+    {key:'objects', name:'Objects', icon:'ti-cube', addType:'generic', items:[]},
+    {key:'effects', name:'Effects', icon:'ti-sparkles', addType:'generic', items:[]},
+    {key:'camera', name:'Camera & lenses', icon:'ti-aperture', addType:'generic', items:[]},
+    {key:'luts', name:'LUTs / looks', icon:'ti-color-swatch', addType:'generic', items:[]},
+  ]
+};
+
+const assetsEl = document.getElementById('assets');
+const previewEl = document.getElementById('preview');
+const previewBarEl = document.getElementById('previewBar');
+const waveformWrap = document.getElementById('waveformWrap');
+
+function renderAssets(){
+  assetsEl.innerHTML='';
+  state.categories.forEach(cat=>{
+    const catEl = document.createElement('div');
+    catEl.className='cat';
+
+    const head = document.createElement('div');
+    head.className='cat-head';
+    head.innerHTML = `
+      <i class="ti ti-chevron-down chev"></i>
+      <i class="ti ${cat.icon} folder"></i>
+      <span class="cat-name">${cat.name}</span>
+      <span class="cat-count">${cat.items.length || ''}</span>
+      <span class="cat-add" title="Add asset"><i class="ti ti-plus"></i></span>
+    `;
+
+    const itemsEl = document.createElement('div');
+    itemsEl.className='cat-items';
+
+    if(cat.items.length===0){
+      const empty = document.createElement('div');
+      empty.className='empty-cat';
+      empty.textContent = 'No assets yet';
+      itemsEl.appendChild(empty);
+    } else {
+      cat.items.forEach((it,idx)=>{
+        const row = document.createElement('div');
+        row.className='item';
+        row.innerHTML = `<i class="ti ${it.icon} itype"></i><span class="item-name">${it.name}</span>
+          ${it.live?'<span class="dot"></span>':''}
+          <span class="item-del" title="Remove"><i class="ti ti-trash"></i></span>`;
+        row.querySelector('.item-name').onclick = row.querySelector('.itype') ? null : null;
+        row.onclick = (e)=>{
+          if(e.target.closest('.item-del')) return;
+          document.querySelectorAll('.item.selected').forEach(el=>el.classList.remove('selected'));
+          row.classList.add('selected');
+        };
+        row.querySelector('.item-del').onclick = (e)=>{
+          e.stopPropagation();
+          cat.items.splice(idx,1);
+          renderAssets();
+          renderTimeline();
+        };
+        itemsEl.appendChild(row);
+      });
+    }
+
+    head.querySelector('.cat-head') ;
+    head.addEventListener('click', (e)=>{
+      if(e.target.closest('.cat-add')) return;
+      head.classList.toggle('collapsed');
+      itemsEl.classList.toggle('hidden');
+    });
+    head.querySelector('.cat-add').addEventListener('click', (e)=>{
+      e.stopPropagation();
+      if(cat.addType==='character'){
+        showCharacterForm(cat);
+      } else {
+        showGenericPlaceholder(cat);
+      }
+    });
+
+    catEl.appendChild(head);
+    catEl.appendChild(itemsEl);
+    assetsEl.appendChild(catEl);
+  });
+}
+
+// ---------- preview: default empty state ----------
+function showEmptyPreview(){
+  previewBarEl.textContent = 'Preview';
+  previewEl.innerHTML = `
+    <div class="empty-preview">
+      <i class="ti ti-clapperboard"></i>
+      <div class="t1">Empty project</div>
+      <div class="t2">Add band members, then build out locations and scenes to start storyboarding.</div>
+    </div>`;
+}
+
+// ---------- preview: generic placeholder for not-yet-built asset types ----------
+function showGenericPlaceholder(cat){
+  previewBarEl.textContent = 'Add asset — ' + cat.name;
+  previewEl.innerHTML = `
+    <div class="empty-preview">
+      <i class="ti ti-tools"></i>
+      <div class="t1">${cat.name} creation isn't built yet</div>
+      <div class="t2">This asset type will get its own creation form next.</div>
+    </div>`;
+}
+
+// ---------- preview: character creation form ----------
+function showCharacterForm(cat){
+  previewBarEl.textContent = 'Add asset — Band / Characters';
+  previewEl.innerHTML = `
+    <div class="char-form">
+      <h3>New character</h3>
+      <p class="sub">Add a band member as a digital actor for this project.</p>
+
+      <div class="photo-drop" id="photoDrop">
+        <i class="ti ti-camera-plus"></i>
+        <span>Add photo</span>
+        <div class="photo-remove" id="photoRemove"><i class="ti ti-x"></i></div>
+      </div>
+      <input type="file" id="photoInput" accept="image/*" style="display:none">
+
+      <div class="cf-field">
+        <label>Name</label>
+        <input type="text" id="cfName" placeholder="e.g. James Hetfield">
+      </div>
+      <div class="cf-field">
+        <label>Role</label>
+        <select id="cfRole">
+          <option value="">Select role</option>
+          <option>Vocals / rhythm guitar</option>
+          <option>Lead guitar</option>
+          <option>Bass</option>
+          <option>Drums</option>
+          <option>Other</option>
+        </select>
+      </div>
+      <div class="cf-field">
+        <label>Notes (optional)</label>
+        <textarea id="cfNotes" placeholder="Appearance, wardrobe, anything worth remembering"></textarea>
+      </div>
+
+      <div class="cf-actions">
+        <button class="cf-btn" id="cfCancel">Cancel</button>
+        <button class="cf-btn primary" id="cfSave" disabled>Add member</button>
+      </div>
+    </div>
+  `;
+
+  const photoDrop = document.getElementById('photoDrop');
+  const photoInput = document.getElementById('photoInput');
+  const photoRemove = document.getElementById('photoRemove');
+  const nameInput = document.getElementById('cfName');
+  const saveBtn = document.getElementById('cfSave');
+  let photoDataUrl = null;
+
+  photoDrop.onclick = (e)=>{
+    if(e.target.closest('.photo-remove')) return;
+    photoInput.click();
+  };
+  photoInput.onchange = ()=>{
+    const file = photoInput.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      photoDataUrl = reader.result;
+      photoDrop.classList.add('has-photo');
+      photoDrop.style.backgroundImage = `url(${photoDataUrl})`;
+    };
+    reader.readAsDataURL(file);
+  };
+  photoRemove.onclick = (e)=>{
+    e.stopPropagation();
+    photoDataUrl = null;
+    photoDrop.classList.remove('has-photo');
+    photoDrop.style.backgroundImage='';
+    photoInput.value='';
+  };
+
+  function refreshSaveState(){
+    saveBtn.disabled = nameInput.value.trim().length===0;
+  }
+  nameInput.addEventListener('input', refreshSaveState);
+
+  document.getElementById('cfCancel').onclick = ()=>{
+    showEmptyPreview();
+  };
+  saveBtn.onclick = ()=>{
+    if(nameInput.value.trim().length===0) return;
+    cat.items.push({
+      name: nameInput.value.trim(),
+      icon: 'ti-user',
+      live: !!photoDataUrl,
+    });
+    renderAssets();
+    showEmptyPreview();
+  };
+}
+
+// ---------- timeline / audio track ----------
+function renderTimeline(){
+  const musicCat = state.categories.find(c=>c.key==='music');
+  const track = musicCat.items[0];
+  if(!track){
+    waveformWrap.innerHTML = `<div class="no-track">No music track added. Add one from the Music library on the left.</div>`;
+    return;
+  }
+  waveformWrap.innerHTML = `
+    <div class="waveform">
+      <div class="track-name"><i class="ti ti-music"></i> ${track.name}</div>
+      <canvas class="wave-canvas" id="wave"></canvas>
+    </div>`;
+  requestAnimationFrame(drawWave);
+}
+
+function drawWave(){
+  const canvas = document.getElementById('wave');
+  if(!canvas) return;
+  const dpr = window.devicePixelRatio||1;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = w*dpr; canvas.height = h*dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr,dpr);
+  ctx.clearRect(0,0,w,h);
+  const bars = Math.floor(w/3);
+  ctx.fillStyle = '#3f6b4f';
+  let seed = 42;
+  function rnd(){ seed = (seed*9301+49297)%233280; return seed/233280; }
+  for(let i=0;i<bars;i++){
+    const amp = (Math.sin(i*0.12)*0.3+0.5) * (0.4+rnd()*0.6);
+    const bh = Math.max(2, amp*h);
+    ctx.fillRect(i*3, (h-bh)/2, 2, bh);
+  }
+}
+
+// ---------- init ----------
+renderAssets();
+showEmptyPreview();
+renderTimeline();
+window.addEventListener('resize', drawWave);
+</script>
+</body>
+</html>
