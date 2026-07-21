@@ -519,7 +519,7 @@ function showCharacterForm(cat){
         <span>Add photo</span>
         <div class="photo-remove" id="photoRemove"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
       </label>
-      <input type="file" id="photoInput" accept="image/*" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;">
+      <input type="file" id="photoInput" accept="image/*,.heic,.heif,.tiff,.tif,.bmp,.svg,.avif,.webp" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;">
 
       <div class="cf-field">
         <label>Name</label>
@@ -527,14 +527,7 @@ function showCharacterForm(cat){
       </div>
       <div class="cf-field">
         <label>Role</label>
-        <select id="cfRole">
-          <option value="">Select role</option>
-          <option>Vocals / rhythm guitar</option>
-          <option>Lead guitar</option>
-          <option>Bass</option>
-          <option>Drums</option>
-          <option>Other</option>
-        </select>
+        <input type="text" id="cfRole" placeholder="e.g. Vocals, Lead guitar, Bass">
       </div>
       <div class="cf-field">
         <label>Description</label>
@@ -543,7 +536,7 @@ function showCharacterForm(cat){
       <div class="cf-field">
         <label>Additional angles</label>
         <div class="angles-row" id="anglesRow"></div>
-        <input type="file" id="angleInput" accept="image/*" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;">
+        <input type="file" id="angleInput" accept="image/*,.heic,.heif,.tiff,.tif,.bmp,.svg,.avif,.webp" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;">
       </div>
 
       <div class="cf-actions">
@@ -626,18 +619,18 @@ function showCharacterForm(cat){
   };
   saveBtn.onclick = ()=>{
     if(nameInput.value.trim().length===0) return;
-    const roleSelect = document.getElementById('cfRole');
+    const roleInput = document.getElementById('cfRole');
     cat.items.push({
       name: nameInput.value.trim(),
       icon: 'ti-user',
       live: !!photoDataUrl,
       photo: photoDataUrl,
-      role: roleSelect.value,
+      role: roleInput.value.trim(),
       description: document.getElementById('cfNotes').value.trim(),
       angles: anglePhotos.slice(),
     });
     renderAssets();
-    showCharacterCard(cat, cat.items.length-1);
+    showCharacterGallery(cat);
   };
 }
 
