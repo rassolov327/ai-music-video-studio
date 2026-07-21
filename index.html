@@ -123,6 +123,43 @@
   .empty-preview .t1{font-size:13px;color:var(--text-2);}
   .empty-preview .t2{font-size:12px;color:var(--text-3);}
 
+  /* ---- Character gallery (tile grid) ---- */
+  .char-gallery{width:100%;max-width:760px;align-self:flex-start;margin:0 auto;}
+  .char-grid{
+    display:grid;grid-template-columns:repeat(auto-fill, 108px);gap:16px;
+  }
+  .char-tile{
+    width:108px;cursor:pointer;position:relative;
+  }
+  .char-tile-photo{
+    width:108px;height:108px;border-radius:8px;border:1px solid var(--line);
+    background:var(--bg-panel-2);background-size:cover;background-position:center;
+    display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;
+  }
+  .char-tile-photo i{font-size:32px;color:var(--text-3);}
+  .char-tile:hover .char-tile-photo{border-color:#3a3e48;}
+  .char-tile-name{
+    margin-top:6px;font-size:12px;color:var(--text-2);text-align:center;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  }
+  .char-tile-role{
+    font-size:10.5px;color:var(--text-3);text-align:center;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  }
+  .char-tile-del{
+    position:absolute;top:5px;right:5px;width:22px;height:22px;border-radius:5px;
+    background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;color:#fff;
+  }
+  .char-tile-del:hover{background:rgba(217,105,95,.85);}
+  .char-tile:hover .char-tile-del{display:flex;}
+  .char-tile-del i{font-size:13px;}
+  .char-tile-add .char-tile-photo{
+    border-style:dashed;background:transparent;
+  }
+  .char-tile-add:hover .char-tile-photo{border-color:var(--accent);}
+  .char-tile-add:hover .char-tile-photo i{color:var(--accent-text);}
+  .char-tile-add .char-tile-name{color:var(--text-3);}
+
   /* ---- Character creation form ---- */
   .char-form{
     width:100%;max-width:420px;background:var(--bg-panel);border:1px solid var(--line);
@@ -300,7 +337,7 @@ function renderAssets(){
     head.querySelector('.cat-add').addEventListener('click', (e)=>{
       e.stopPropagation();
       if(cat.addType==='character'){
-        showCharacterForm(cat);
+        showCharacterGallery(cat);
       } else {
         showGenericPlaceholder(cat);
       }
@@ -332,6 +369,47 @@ function showGenericPlaceholder(cat){
       <div class="t1">${cat.name} creation isn't built yet</div>
       <div class="t2">This asset type will get its own creation form next.</div>
     </div>`;
+}
+
+// ---------- preview: characters gallery (tile grid) ----------
+function showCharacterGallery(cat){
+  previewBarEl.textContent = 'Characters';
+
+  const tiles = cat.items.map((it,idx)=>`
+    <div class="char-tile" data-idx="${idx}">
+      <div class="char-tile-photo" style="${it.photo ? `background-image:url(${it.photo})` : ''}">
+        ${it.photo ? '' : '<i class="ti ti-user"></i>'}
+        <div class="char-tile-del" title="Remove"><i class="ti ti-trash"></i></div>
+      </div>
+      <div class="char-tile-name">${it.name}</div>
+      <div class="char-tile-role">${it.role || ''}</div>
+    </div>
+  `).join('');
+
+  previewEl.innerHTML = `
+    <div class="char-gallery">
+      <div class="char-grid">
+        ${tiles}
+        <div class="char-tile char-tile-add" id="charAddTile">
+          <div class="char-tile-photo"><i class="ti ti-plus"></i></div>
+          <div class="char-tile-name">Add member</div>
+        </div>
+      </div>
+    </div>`;
+
+  previewEl.querySelectorAll('.char-tile-del').forEach(btn=>{
+    btn.onclick = (e)=>{
+      e.stopPropagation();
+      const idx = parseInt(e.target.closest('.char-tile').dataset.idx, 10);
+      cat.items.splice(idx,1);
+      renderAssets();
+      showCharacterGallery(cat);
+    };
+  });
+
+  document.getElementById('charAddTile').onclick = ()=>{
+    showCharacterForm(cat);
+  };
 }
 
 // ---------- preview: character creation form ----------
@@ -412,17 +490,20 @@ function showCharacterForm(cat){
   nameInput.addEventListener('input', refreshSaveState);
 
   document.getElementById('cfCancel').onclick = ()=>{
-    showEmptyPreview();
+    showCharacterGallery(cat);
   };
   saveBtn.onclick = ()=>{
     if(nameInput.value.trim().length===0) return;
+    const roleSelect = document.getElementById('cfRole');
     cat.items.push({
       name: nameInput.value.trim(),
       icon: 'ti-user',
       live: !!photoDataUrl,
+      photo: photoDataUrl,
+      role: roleSelect.value,
     });
     renderAssets();
-    showEmptyPreview();
+    showCharacterGallery(cat);
   };
 }
 
