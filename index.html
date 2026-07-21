@@ -118,6 +118,7 @@
     background:radial-gradient(ellipse at center, #23262d 0%, #16181c 78%);
     position:relative;min-height:0;overflow-y:auto;padding:24px;
   }
+  .preview.align-tl{align-items:flex-start;justify-content:flex-start;}
   .empty-preview{
     display:flex;flex-direction:column;align-items:center;gap:8px;color:var(--text-3);
   }
@@ -126,7 +127,7 @@
   .empty-preview .t2{font-size:12px;color:var(--text-3);}
 
   /* ---- Character gallery (tile grid) ---- */
-  .char-gallery{width:100%;max-width:760px;align-self:flex-start;margin:0 auto;}
+  .char-gallery{width:100%;max-width:760px;}
   .char-grid{
     display:grid;grid-template-columns:repeat(auto-fill, 108px);gap:16px;
   }
@@ -163,6 +164,31 @@
   .char-tile-add:hover .char-tile-photo i{color:var(--accent-text);}
   .char-tile-add .char-tile-name{color:var(--text-3);}
 
+  /* ---- Character card ---- */
+  .char-card{
+    width:100%;max-width:420px;background:var(--bg-panel);border:1px solid var(--line);
+    border-radius:10px;overflow:hidden;align-self:center;
+  }
+  .char-card-photo{
+    width:100%;aspect-ratio:4/3;background:var(--bg-panel-2);background-size:cover;background-position:center;
+    display:flex;align-items:center;justify-content:center;color:var(--text-3);
+  }
+  .char-card-photo svg{width:40px;height:40px;}
+  .char-card-body{padding:16px 18px;}
+  .char-card-name{font-size:16px;font-weight:500;color:var(--text-1);margin:0 0 3px;}
+  .char-card-role{
+    display:inline-block;font-size:11px;color:var(--accent-text);background:var(--accent-dim);
+    padding:3px 8px;border-radius:5px;margin-bottom:12px;
+  }
+  .char-card-desc{font-size:12.5px;color:var(--text-2);line-height:1.6;margin:0 0 14px;white-space:pre-wrap;}
+  .char-card-section-title{font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--text-3);margin-bottom:6px;}
+  .char-card-angles{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;}
+  .char-card-angle{
+    width:48px;height:48px;border-radius:6px;border:1px solid var(--line);
+    background-size:cover;background-position:center;background-color:var(--bg-panel-2);
+  }
+  .char-card-actions{display:flex;justify-content:space-between;gap:8px;}
+
   /* ---- Character creation form ---- */
   .char-form{
     width:100%;max-width:420px;background:var(--bg-panel);border:1px solid var(--line);
@@ -177,9 +203,9 @@
     background-size:cover;background-position:center;position:relative;overflow:hidden;
   }
   .photo-drop:hover{border-color:#3a3e48;color:var(--text-2);}
-  .photo-drop i{font-size:24px;}
+  .photo-drop svg{flex:0 0 auto;}
   .photo-drop span{font-size:12px;}
-  .photo-drop.has-photo span, .photo-drop.has-photo i{display:none;}
+  .photo-drop.has-photo span, .photo-drop.has-photo svg{display:none;}
   .photo-drop .photo-remove{
     position:absolute;top:6px;right:6px;width:22px;height:22px;border-radius:5px;
     background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;color:#fff;
@@ -193,6 +219,23 @@
   }
   .cf-field input:focus, .cf-field select:focus, .cf-field textarea:focus{outline:none;border-color:var(--accent);}
   .cf-field textarea{resize:vertical;min-height:52px;line-height:1.5;}
+  .angles-row{display:flex;flex-wrap:wrap;gap:8px;}
+  .angle-tile{
+    width:52px;height:52px;border-radius:6px;border:1px solid var(--line);
+    background:var(--bg-panel-2);background-size:cover;background-position:center;
+    position:relative;flex:0 0 auto;
+  }
+  .angle-tile-del{
+    position:absolute;top:2px;right:2px;width:16px;height:16px;border-radius:4px;
+    background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;color:#fff;
+    opacity:.6;
+  }
+  .angle-tile-del:hover{background:rgba(217,105,95,.85);opacity:1;}
+  .angle-tile-add{
+    width:52px;height:52px;border-radius:6px;border:1px dashed var(--line);
+    display:flex;align-items:center;justify-content:center;color:var(--text-3);cursor:pointer;flex:0 0 auto;
+  }
+  .angle-tile-add:hover{border-color:var(--accent);color:var(--accent-text);}
   .cf-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px;}
   .cf-btn{
     padding:7px 14px;border-radius:6px;font-size:12.5px;cursor:pointer;border:1px solid var(--line);
@@ -297,7 +340,7 @@ function renderAssets(){
       <i class="ti ${cat.icon} folder"></i>
       <span class="cat-name">${cat.name}</span>
       <span class="cat-count">${cat.items.length || ''}</span>
-      <span class="cat-add" title="Add asset"><i class="ti ti-plus"></i></span>
+      <span class="cat-add" title="Open editor"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4Z"></path></svg></span>
     `;
 
     const itemsEl = document.createElement('div');
@@ -314,7 +357,7 @@ function renderAssets(){
         row.className='item';
         row.innerHTML = `<i class="ti ${it.icon} itype"></i><span class="item-name">${it.name}</span>
           ${it.live?'<span class="dot"></span>':''}
-          <span class="item-del" title="Remove"><i class="ti ti-trash"></i></span>`;
+          <span class="item-del" title="Remove"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></span>`;
         row.querySelector('.item-name').onclick = row.querySelector('.itype') ? null : null;
         row.onclick = (e)=>{
           if(e.target.closest('.item-del')) return;
@@ -354,6 +397,7 @@ function renderAssets(){
 
 // ---------- preview: default empty state ----------
 function showEmptyPreview(){
+  previewEl.classList.remove('align-tl');
   previewBarEl.textContent = 'Preview';
   previewEl.innerHTML = `
     <div class="empty-preview">
@@ -365,6 +409,7 @@ function showEmptyPreview(){
 
 // ---------- preview: generic placeholder for not-yet-built asset types ----------
 function showGenericPlaceholder(cat){
+  previewEl.classList.remove('align-tl');
   previewBarEl.textContent = 'Add asset — ' + cat.name;
   previewEl.innerHTML = `
     <div class="empty-preview">
@@ -376,13 +421,14 @@ function showGenericPlaceholder(cat){
 
 // ---------- preview: characters gallery (tile grid) ----------
 function showCharacterGallery(cat){
+  previewEl.classList.add('align-tl');
   previewBarEl.textContent = 'Characters';
 
   const tiles = cat.items.map((it,idx)=>`
     <div class="char-tile" data-idx="${idx}">
       <div class="char-tile-photo" style="${it.photo ? `background-image:url(${it.photo})` : ''}">
         ${it.photo ? '' : '<i class="ti ti-user"></i>'}
-        <div class="char-tile-del" title="Remove"><i class="ti ti-trash"></i></div>
+        <div class="char-tile-del" title="Remove"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></div>
       </div>
       <div class="char-tile-name">${it.name}</div>
       <div class="char-tile-role">${it.role || ''}</div>
@@ -394,7 +440,7 @@ function showCharacterGallery(cat){
       <div class="char-grid">
         ${tiles}
         <div class="char-tile char-tile-add" id="charAddTile">
-          <div class="char-tile-photo"><i class="ti ti-plus"></i></div>
+          <div class="char-tile-photo"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg></div>
           <div class="char-tile-name">Add member</div>
         </div>
       </div>
@@ -410,25 +456,70 @@ function showCharacterGallery(cat){
     };
   });
 
+  previewEl.querySelectorAll('.char-tile:not(.char-tile-add)').forEach(tile=>{
+    tile.onclick = (e)=>{
+      if(e.target.closest('.char-tile-del')) return;
+      const idx = parseInt(tile.dataset.idx, 10);
+      showCharacterCard(cat, idx);
+    };
+  });
+
   document.getElementById('charAddTile').onclick = ()=>{
     showCharacterForm(cat);
   };
 }
 
+// ---------- preview: character card (detail view) ----------
+function showCharacterCard(cat, idx){
+  previewEl.classList.remove('align-tl');
+  const it = cat.items[idx];
+  previewBarEl.textContent = 'Character card — ' + it.name;
+
+  const anglesHtml = (it.angles && it.angles.length)
+    ? `<div class="char-card-section-title">Angles</div>
+       <div class="char-card-angles">${it.angles.map(a=>`<div class="char-card-angle" style="background-image:url(${a})"></div>`).join('')}</div>`
+    : '';
+
+  previewEl.innerHTML = `
+    <div class="char-card">
+      <div class="char-card-photo" style="${it.photo ? `background-image:url(${it.photo})` : ''}">
+        ${it.photo ? '' : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="8" r="4"></circle><path d="M4 21c0-4 4-6 8-6s8 2 8 6"></path></svg>'}
+      </div>
+      <div class="char-card-body">
+        <p class="char-card-name">${it.name}</p>
+        ${it.role ? `<span class="char-card-role">${it.role}</span>` : ''}
+        ${it.description ? `<p class="char-card-desc">${it.description}</p>` : ''}
+        ${anglesHtml}
+        <div class="char-card-actions">
+          <button class="cf-btn" id="cardBack">Back to characters</button>
+          <button class="cf-btn" id="cardDelete" style="color:var(--danger);">Delete</button>
+        </div>
+      </div>
+    </div>`;
+
+  document.getElementById('cardBack').onclick = ()=> showCharacterGallery(cat);
+  document.getElementById('cardDelete').onclick = ()=>{
+    cat.items.splice(idx,1);
+    renderAssets();
+    showCharacterGallery(cat);
+  };
+}
+
 // ---------- preview: character creation form ----------
 function showCharacterForm(cat){
+  previewEl.classList.remove('align-tl');
   previewBarEl.textContent = 'Add asset — Band / Characters';
   previewEl.innerHTML = `
     <div class="char-form">
       <h3>New character</h3>
       <p class="sub">Add a band member as a digital actor for this project.</p>
 
-      <div class="photo-drop" id="photoDrop">
-        <i class="ti ti-camera-plus"></i>
+      <label class="photo-drop" id="photoDrop" for="photoInput">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"></path><circle cx="12" cy="13" r="3.5"></circle></svg>
         <span>Add photo</span>
-        <div class="photo-remove" id="photoRemove"><i class="ti ti-x"></i></div>
-      </div>
-      <input type="file" id="photoInput" accept="image/*" style="display:none">
+        <div class="photo-remove" id="photoRemove"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
+      </label>
+      <input type="file" id="photoInput" accept="image/*" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;">
 
       <div class="cf-field">
         <label>Name</label>
@@ -446,8 +537,13 @@ function showCharacterForm(cat){
         </select>
       </div>
       <div class="cf-field">
-        <label>Notes (optional)</label>
+        <label>Description</label>
         <textarea id="cfNotes" placeholder="Appearance, wardrobe, anything worth remembering"></textarea>
+      </div>
+      <div class="cf-field">
+        <label>Additional angles</label>
+        <div class="angles-row" id="anglesRow"></div>
+        <input type="file" id="angleInput" accept="image/*" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;">
       </div>
 
       <div class="cf-actions">
@@ -457,6 +553,41 @@ function showCharacterForm(cat){
     </div>
   `;
 
+  const anglePhotos = [];
+  const anglesRow = document.getElementById('anglesRow');
+  const angleInput = document.getElementById('angleInput');
+
+  function renderAngles(){
+    anglesRow.innerHTML = anglePhotos.map((src,idx)=>`
+      <div class="angle-tile" style="background-image:url(${src})" data-idx="${idx}">
+        <div class="angle-tile-del" title="Remove"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
+      </div>
+    `).join('') + `
+      <label class="angle-tile-add" for="angleInput" title="Add angle"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg></label>
+    `;
+    anglesRow.querySelectorAll('.angle-tile-del').forEach(btn=>{
+      btn.onclick = (e)=>{
+        e.preventDefault();
+        e.stopPropagation();
+        const idx = parseInt(e.target.closest('.angle-tile').dataset.idx, 10);
+        anglePhotos.splice(idx,1);
+        renderAngles();
+      };
+    });
+  }
+  angleInput.onchange = ()=>{
+    const file = angleInput.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      anglePhotos.push(reader.result);
+      renderAngles();
+    };
+    reader.readAsDataURL(file);
+    angleInput.value='';
+  };
+  renderAngles();
+
   const photoDrop = document.getElementById('photoDrop');
   const photoInput = document.getElementById('photoInput');
   const photoRemove = document.getElementById('photoRemove');
@@ -464,10 +595,7 @@ function showCharacterForm(cat){
   const saveBtn = document.getElementById('cfSave');
   let photoDataUrl = null;
 
-  photoDrop.onclick = (e)=>{
-    if(e.target.closest('.photo-remove')) return;
-    photoInput.click();
-  };
+
   photoInput.onchange = ()=>{
     const file = photoInput.files[0];
     if(!file) return;
@@ -480,6 +608,7 @@ function showCharacterForm(cat){
     reader.readAsDataURL(file);
   };
   photoRemove.onclick = (e)=>{
+    e.preventDefault();
     e.stopPropagation();
     photoDataUrl = null;
     photoDrop.classList.remove('has-photo');
@@ -504,9 +633,11 @@ function showCharacterForm(cat){
       live: !!photoDataUrl,
       photo: photoDataUrl,
       role: roleSelect.value,
+      description: document.getElementById('cfNotes').value.trim(),
+      angles: anglePhotos.slice(),
     });
     renderAssets();
-    showCharacterGallery(cat);
+    showCharacterCard(cat, cat.items.length-1);
   };
 }
 
