@@ -306,6 +306,15 @@
   }
   .angle-tile-add:hover{border-color:var(--accent);color:var(--accent-text);}
   .cf-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px;}
+  .form-tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:14px;}
+  .form-tab{
+    padding:7px 12px;font-size:12px;color:var(--text-3);cursor:pointer;border-bottom:2px solid transparent;
+  }
+  .form-tab.active{color:var(--text-1);border-bottom-color:var(--accent);}
+  .form-tab:hover{color:var(--text-1);}
+  .ai-result-img{width:100%;border-radius:8px;border:1px solid var(--line);margin-top:12px;display:block;}
+  .ai-result-actions{display:flex;gap:8px;margin-top:8px;}
+  .ai-result-actions .cf-btn{flex:1 1 auto;}
   .cf-btn{
     padding:7px 14px;border-radius:6px;font-size:12.5px;cursor:pointer;border:1px solid var(--line);
     background:transparent;color:var(--text-2);
@@ -390,7 +399,7 @@
     clip-path:polygon(0 0,100% 0,50% 100%);pointer-events:none;
   }
   .timeline-frame{
-    width:78%;aspect-ratio:16/9;border-radius:6px;border:1px solid var(--line);
+    width:70%;max-width:640px;max-height:min(56vh,400px);aspect-ratio:16/9;border-radius:6px;border:1px solid var(--line);
     background:linear-gradient(135deg,#242024 0%,#1a1a1e 55%,#101012 100%);
     display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:#6a6660;
   }
@@ -776,7 +785,7 @@ function renderRuler(){
   const totalSeconds = Math.ceil(totalWidth / PX_PER_SEC);
   let html = '';
   for(let s=0; s<=totalSeconds; s+=2){
-    html += `<div class="ruler-tick" style="left:${s*PX_PER_SEC}px;">${formatTimecode(s)}</div>`;
+    html += `<div class="ruler-tick" style="left:${s*PX_PER_SEC}px;"></div>`;
   }
   ruler.innerHTML = html;
 }
@@ -1236,13 +1245,15 @@ function runShotGeneration(scene, shot){
   const section = document.getElementById('shotGenSection');
   if(!section) return;
   section.innerHTML = `<button class="gen-btn" disabled><span class="gen-spin"></span>Generating…</button>`;
-  // simulated call — real integration proxies this through a backend that holds the KIE API key
-  setTimeout(()=>{
-    shot.previewImage = generateShotPreviewImage(shot, scene);
-    renderTimelineScenes();
-    if(focus.sceneId===scene.id && focus.shotId===shot.id) refreshMainPreview();
-    else renderShotGenSection(scene, shot);
-  }, 1200);
+  const prompt = buildShotPrompt(shot, scene);
+  tryLoadImage(buildPollinationsUrl(prompt, 640, 360))
+    .catch(()=> generateShotPreviewImage(shot, scene))
+    .then((result)=>{
+      shot.previewImage = result;
+      renderTimelineScenes();
+      if(focus.sceneId===scene.id && focus.shotId===shot.id) refreshMainPreview();
+      else renderShotGenSection(scene, shot);
+    });
 }
 
 
@@ -1494,8 +1505,35 @@ function applyNaturalAspect(el, dataUrl){
 // ---------- AI reference card (mocked KIE generation) ----------
 const GEN_MODEL_LABEL = 'KIE · GPT-Image-1';
 const GEN_COST_LABEL = '$0.03';
-const SHOT_GEN_MODEL_LABEL = 'KIE · Nano Banana';
-const SHOT_GEN_COST_LABEL = '$0.02';
+const SHOT_GEN_MODEL_LABEL = 'Pollinations.ai (free)';
+const SHOT_GEN_COST_LABEL = 'Free';
+
+// ---------- free rough-preview generation via Pollinations.ai (no key required) ----------
+function buildPollinationsUrl(prompt, w, h){
+  const seed = Math.floor(Math.random()*1000000);
+  return `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=${w}&height=${h}&nologo=true&seed=${seed}`;
+}
+function tryLoadImage(url, timeoutMs){
+  return new Promise((resolve, reject)=>{
+    const img = new Image();
+    let done = false;
+    const timer = setTimeout(()=>{ if(!done){ done=true; reject(new Error('timeout')); } }, timeoutMs || 20000);
+    img.onload = ()=>{ if(!done){ done=true; clearTimeout(timer); resolve(url); } };
+    img.onerror = ()=>{ if(!done){ done=true; clearTimeout(timer); reject(new Error('load failed')); } };
+    img.referrerPolicy = 'no-referrer';
+    img.src = url;
+  });
+}
+function buildShotPrompt(shot, scene){
+  const parts = [];
+  if(shot.description) parts.push(shot.description);
+  if(shot.shotSize) parts.push(shot.shotSize.toLowerCase());
+  if(shot.cameraMove && shot.cameraMove!=='Static') parts.push(shot.cameraMove.toLowerCase()+' camera movement');
+  if(shot.lighting) parts.push(shot.lighting);
+  if(scene && scene.location) parts.push('at ' + scene.location);
+  parts.push('cinematic still frame, film grain, music video');
+  return parts.join(', ');
+}
 
 function generateShotPreviewImage(shot, scene){
   const col = sceneColor(scene);
@@ -1935,28 +1973,46 @@ function showLocationForm(cat, editIdx){
       <h3>${isEdit ? 'Edit location' : 'New location'}</h3>
       <p class="sub">${isEdit ? 'Update the saved location details.' : 'Add a location that shots can be set in.'}</p>
 
-      <label class="photo-drop${existing && existing.photo ? ' has-photo' : ''}" id="locPhotoDrop" for="locPhotoInput" style="${existing && existing.photo ? `background-image:url(${existing.photo})` : ''}">
-        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"></path><circle cx="12" cy="13" r="3.5"></circle></svg>
-        <span>Add photo</span>
-        <div class="photo-remove" id="locPhotoRemove"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
-      </label>
-      <input type="file" id="locPhotoInput" accept="image/*,.heic,.heif,.tiff,.tif,.bmp,.svg,.avif,.webp" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;">
-
       <div class="cf-field">
         <label>Name</label>
         <input type="text" id="lfName" placeholder="e.g. Route 66 Bar" value="${existing ? existing.name : ''}">
       </div>
-      <div class="cf-field">
-        <label>Description</label>
-        <textarea id="lfNotes" placeholder="Layout, furniture, lighting style, anything worth remembering">${existing && existing.description ? existing.description : ''}</textarea>
-      </div>
-      <div class="cf-field">
-        <label>Additional views</label>
-        <div class="angles-row" id="locAnglesRow"></div>
-        <input type="file" id="locAngleInput" accept="image/*,.heic,.heif,.tiff,.tif,.bmp,.svg,.avif,.webp" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;">
+
+      <div class="form-tabs">
+        <div class="form-tab active" data-tab="details">Details</div>
+        <div class="form-tab" data-tab="ai">AI Generator</div>
       </div>
 
-      <div class="gen-section" id="locGenSectionForm"></div>
+      <div class="form-tab-panel" id="tabDetails">
+        <label class="photo-drop${existing && existing.photo ? ' has-photo' : ''}" id="locPhotoDrop" for="locPhotoInput" style="${existing && existing.photo ? `background-image:url(${existing.photo})` : ''}">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"></path><circle cx="12" cy="13" r="3.5"></circle></svg>
+          <span>Add photo</span>
+          <div class="photo-remove" id="locPhotoRemove"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
+        </label>
+        <input type="file" id="locPhotoInput" accept="image/*,.heic,.heif,.tiff,.tif,.bmp,.svg,.avif,.webp" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;">
+
+        <div class="cf-field">
+          <label>Description</label>
+          <textarea id="lfNotes" placeholder="Layout, furniture, lighting style, anything worth remembering">${existing && existing.description ? existing.description : ''}</textarea>
+        </div>
+        <div class="cf-field">
+          <label>Additional views</label>
+          <div class="angles-row" id="locAnglesRow"></div>
+          <input type="file" id="locAngleInput" accept="image/*,.heic,.heif,.tiff,.tif,.bmp,.svg,.avif,.webp" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;">
+        </div>
+
+        <div class="gen-section" id="locGenSectionForm"></div>
+      </div>
+
+      <div class="form-tab-panel" id="tabAI" style="display:none;">
+        <div class="cf-field">
+          <label>Prompt</label>
+          <textarea id="aiPromptInput" style="min-height:70px;" placeholder="Describe the location — e.g. a dim roadside bar, neon signs, wooden counter, smoke in the air">${existing && existing.description ? existing.description : ''}</textarea>
+        </div>
+        <button class="gen-btn" id="aiGenBtn">Generate free preview <span class="gen-cost">Free</span></button>
+        <div class="gen-hint">Uses Pollinations.ai — no key, no cost, rough quality. Good for blocking out the look before a real generation pass later.</div>
+        <div id="aiResultWrap"></div>
+      </div>
 
       <div class="cf-actions">
         <button class="cf-btn" id="lfCancel">Cancel</button>
@@ -1964,6 +2020,15 @@ function showLocationForm(cat, editIdx){
       </div>
     </div>
   `;
+
+  previewEl.querySelectorAll('.form-tab').forEach(tabEl=>{
+    tabEl.onclick = ()=>{
+      previewEl.querySelectorAll('.form-tab').forEach(t=>t.classList.remove('active'));
+      tabEl.classList.add('active');
+      document.getElementById('tabDetails').style.display = tabEl.dataset.tab==='details' ? '' : 'none';
+      document.getElementById('tabAI').style.display = tabEl.dataset.tab==='ai' ? '' : 'none';
+    };
+  });
 
   const anglePhotos = (existing && existing.angles) ? existing.angles.slice() : [];
   const anglesRow = document.getElementById('locAnglesRow');
@@ -2044,6 +2109,40 @@ function showLocationForm(cat, editIdx){
     photoDrop.style.aspectRatio='';
     photoInput.value='';
     refreshFormGen();
+  };
+
+  const aiGenBtn = document.getElementById('aiGenBtn');
+  const aiPromptInput = document.getElementById('aiPromptInput');
+  const aiResultWrap = document.getElementById('aiResultWrap');
+  aiGenBtn.onclick = ()=>{
+    const prompt = aiPromptInput.value.trim();
+    if(!prompt) return;
+    aiGenBtn.disabled = true;
+    aiGenBtn.innerHTML = `<span class="gen-spin"></span>Generating…`;
+    aiResultWrap.innerHTML = '';
+    tryLoadImage(buildPollinationsUrl(prompt + ', location establishing shot, cinematic', 640, 360))
+      .catch(()=> null)
+      .then((url)=>{
+        aiGenBtn.disabled = false;
+        aiGenBtn.innerHTML = `Generate free preview <span class="gen-cost">Free</span>`;
+        if(!url){
+          aiResultWrap.innerHTML = `<div class="gen-hint">Generation failed (network issue) — try again.</div>`;
+          return;
+        }
+        aiResultWrap.innerHTML = `
+          <img class="ai-result-img" src="${url}">
+          <div class="ai-result-actions">
+            <button class="cf-btn primary" id="useAiPhotoBtn">Use as main photo</button>
+          </div>`;
+        document.getElementById('useAiPhotoBtn').onclick = ()=>{
+          photoDataUrl = url;
+          photoDrop.classList.add('has-photo');
+          photoDrop.style.backgroundImage = `url(${url})`;
+          applyNaturalAspect(photoDrop, url);
+          refreshFormGen();
+          previewEl.querySelector('[data-tab="details"]').click();
+        };
+      });
   };
 
   function refreshSaveState(){
