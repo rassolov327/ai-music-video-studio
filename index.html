@@ -427,9 +427,14 @@
   .timeline-frame img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;}
   .timeline-frame i{font-size:30px;}
   .timeline-frame .plabel{font-family:var(--font-mono);font-size:11px;color:#84807a;}
-  .waveform{display:flex;align-items:center;gap:8px;padding:10px 12px;}
+  .waveform{display:flex;align-items:center;gap:0;padding:10px 12px 10px 0;}
   .waveform i{color:var(--text-2);font-size:15px;}
-  .waveform .track-name{font-size:11.5px;color:var(--text-2);width:150px;flex:0 0 auto;}
+  .waveform .track-name{font-size:11.5px;color:var(--text-2);white-space:nowrap;display:flex;align-items:center;gap:5px;}
+  .audio-sticky-label{position:sticky;left:12px;width:0;height:0;overflow:visible;z-index:6;flex:0 0 0;}
+  .audio-sticky-label-inner{
+    display:flex;align-items:center;gap:10px;white-space:nowrap;
+    background:var(--bg-panel);padding:3px 10px 3px 0;border-radius:4px;
+  }
   .timecode-row{
     display:flex;justify-content:space-between;padding:4px 12px 7px;
     font-family:var(--font-mono);font-size:10.5px;color:var(--text-3);
@@ -497,7 +502,6 @@
           <div class="mode-tab" id="modeEditBtn" data-mode="edit">Edit</div>
         </div>
         <div class="timeline-scenes" id="timelineScenes"></div>
-        <div id="waveformWrap"></div>
         <div class="timecode-row">
           <span id="tcCurrent">0:00</span>
           <span id="tcTotal">0:00</span>
@@ -558,7 +562,8 @@ const TIMELINE_COLORS = [
 const assetsEl = document.getElementById('assets');
 const previewEl = document.getElementById('preview');
 const previewBarEl = document.getElementById('previewBar');
-const waveformWrap = document.getElementById('waveformWrap');
+// waveformWrap is created fresh inside #timelineScenes on every render (see renderTimelineScenes) —
+// look it up via document.getElementById('waveformWrap') at point of use instead of caching it here.
 const timelineScenesEl = document.getElementById('timelineScenes');
 
 function trashSvg(size){
@@ -569,6 +574,9 @@ function pencilSvg(size){
 }
 function plusSvg(size){
   return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>`;
+}
+function noteSvg(size){
+  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>`;
 }
 function formatTimecode(seconds){
   const m = Math.floor(seconds/60);
@@ -726,10 +734,12 @@ function renderAssemblyModeTrack(){
   });
   trackHtml += `
       <div class="add-scene-column" id="addSceneBtn" title="Add scene">${plusSvg(18)}</div>
-    </div>`;
+    </div>
+    <div id="waveformWrap"></div>`;
   timelineScenesEl.innerHTML = `<div class="timeline-ruler" id="timelineRuler"></div>` + trackHtml;
   document.getElementById('addSceneBtn').onclick = addScene;
   wireCommonTimelineHandlers();
+  renderTimeline();
 }
 
 // Edit mode: one continuous flush strip, so clip widths line up exactly with the ruler.
@@ -776,6 +786,7 @@ function renderEditModeTrack(){
     <div class="timeline-ruler" id="timelineRuler"></div>
     <div class="edit-labels-row" style="position:relative;height:16px;width:${totalWidth}px;">${labelsHtml}</div>
     <div class="timeline-track edit-track" id="timelineTrack" style="position:relative;height:60px;width:${totalWidth}px;">${clipsHtml}</div>
+    <div id="waveformWrap"></div>
   `;
   timelineScenesEl.innerHTML = html;
   wireCommonTimelineHandlers();
@@ -785,6 +796,7 @@ function renderEditModeTrack(){
   } else {
     wireEditModeReorder();
   }
+  renderTimeline();
 }
 
 function wireCommonTimelineHandlers(){
@@ -1485,7 +1497,9 @@ function renderAssets(){
           : isLoc ? `<span class="item-status-dot status-${locationStatus(it)}"></span>` : '';
         const iconHtml = it.photo
           ? `<span class="item-avatar-wrap"><span class="item-avatar" style="background-image:url(${it.photo})"></span>${statusDot}</span>`
-          : `<span class="item-avatar-wrap"><i class="ti ${it.icon} itype"></i>${statusDot}</span>`;
+          : isMusic
+            ? `<span class="item-avatar-wrap" style="color:var(--text-3);">${noteSvg(14)}</span>`
+            : `<span class="item-avatar-wrap"><i class="ti ${it.icon} itype"></i>${statusDot}</span>`;
         row.innerHTML = `${iconHtml}<span class="item-name">${it.name}</span>
           <span class="item-del" title="Remove"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></span>`;
         if(isMusic && it.id){
@@ -2397,7 +2411,7 @@ function showMusicGallery(cat){
   const tiles = cat.items.map((it,idx)=>`
     <div class="char-tile" data-idx="${idx}">
       <div class="char-tile-photo">
-        <i class="ti ti-file-music" style="font-size:26px;"></i>
+        ${noteSvg(26)}
         ${it.id && state.timelineAudio && state.timelineAudio.trackId===it.id ? '<div class="char-tile-status status-green" title="On timeline"></div>' : ''}
         <div class="char-tile-del" data-del-idx="${idx}" title="Remove">${trashSvg(13)}</div>
       </div>
@@ -2539,10 +2553,12 @@ function setTimelineAudioTrack(trackId){
 
 function renderTimeline(){
   const musicCat = state.categories.find(c=>c.key==='music');
+  const waveformWrap = document.getElementById('waveformWrap');
+  if(!waveformWrap) return;
 
   if(state.timelineAudio){
     const track = musicCat.items.find(t=>t.id===state.timelineAudio.trackId);
-    if(track){ renderRealAudioTrack(track); return; }
+    if(track){ renderRealAudioTrack(track); wireWaveformDropZone(); return; }
     state.timelineAudio = null;
   }
 
@@ -2550,27 +2566,49 @@ function renderTimeline(){
   const track = musicCat.items.find(it=>!it.id) || musicCat.items[0];
   if(!track){
     waveformWrap.innerHTML = `<div class="no-track">No music track added. Add one from the Music library on the left, or drag a track here.</div>`;
+    wireWaveformDropZone();
     return;
   }
   waveformWrap.innerHTML = `
     <div class="waveform">
-      <div class="track-name"><i class="ti ti-music"></i> ${track.name}</div>
+      <div class="audio-sticky-label"><div class="audio-sticky-label-inner">
+        <span class="track-name"><i class="ti ti-music"></i> ${track.name}</span>
+      </div></div>
       <canvas class="wave-canvas" id="wave"></canvas>
     </div>`;
   requestAnimationFrame(drawWave);
+  wireWaveformDropZone();
+}
+
+function wireWaveformDropZone(){
+  const waveformWrap = document.getElementById('waveformWrap');
+  if(!waveformWrap) return;
+  waveformWrap.addEventListener('dragover', (e)=>{ e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+  waveformWrap.addEventListener('drop', (e)=>{
+    e.preventDefault();
+    const id = e.dataTransfer.getData('text/plain');
+    if(!id) return;
+    const musicCat = state.categories.find(c=>c.key==='music');
+    const track = musicCat.items.find(t=>t.id===id);
+    if(track) setTimelineAudioTrack(track.id);
+  });
 }
 
 function renderRealAudioTrack(track){
+  const waveformWrap = document.getElementById('waveformWrap');
+  if(!waveformWrap) return;
   const ta = state.timelineAudio;
   const clipWidth = Math.max(20, Math.round((ta.trimOut - ta.trimIn) * PX_PER_SEC));
   waveformWrap.innerHTML = `
     <div class="waveform real-audio">
-      <div class="track-name"><i class="ti ti-music"></i> ${track.name}</div>
-      <div class="vol-control" title="Volume">
-        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="4,9 8,9 12,5 12,19 8,15 4,15"></polygon><path d="M16 8a5 5 0 0 1 0 8"></path></svg>
-        <input type="range" min="0" max="150" value="${Math.round(ta.volume*100)}" id="audioVolInput">
-        <span id="audioVolLabel">${Math.round(ta.volume*100)}%</span>
-      </div>
+      <div class="audio-sticky-label"><div class="audio-sticky-label-inner">
+        <span class="track-name"><i class="ti ti-music"></i> ${track.name}</span>
+        <div class="vol-control" title="Volume">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="4,9 8,9 12,5 12,19 8,15 4,15"></polygon><path d="M16 8a5 5 0 0 1 0 8"></path></svg>
+          <input type="range" min="0" max="150" value="${Math.round(ta.volume*100)}" id="audioVolInput">
+          <span id="audioVolLabel">${Math.round(ta.volume*100)}%</span>
+        </div>
+      </div></div>
       <div class="audio-clip-wrap" id="audioClipWrap" style="width:${clipWidth}px;">
         <canvas class="wave-canvas" id="wave"></canvas>
         <div class="shot-trim left" id="audioTrimLeft" title="Trim start"></div>
@@ -2668,16 +2706,6 @@ function drawWave(){
 renderAssets();
 renderTimelineScenes();
 refreshMainPreview();
-renderTimeline();
-waveformWrap.addEventListener('dragover', (e)=>{ e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
-waveformWrap.addEventListener('drop', (e)=>{
-  e.preventDefault();
-  const id = e.dataTransfer.getData('text/plain');
-  if(!id) return;
-  const musicCat = state.categories.find(c=>c.key==='music');
-  const track = musicCat.items.find(t=>t.id===id);
-  if(track) setTimelineAudioTrack(track.id);
-});
 function goHome(){
   document.querySelectorAll('.item.selected').forEach(el=>el.classList.remove('selected'));
   pausePlayback();
