@@ -1,0 +1,24 @@
+{
+	admin off
+	persist_config off
+	auto_https off
+	servers {
+		trusted_proxies static private_ranges
+	}
+}
+
+:{$PORT:80} {
+	respond /health 200
+
+	header {
+		X-XSS-Protection "1; mode=block"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Content-Security-Policy "default-src 'self'; img-src 'self' data: https: *; style-src 'self' 'unsafe-inline' https: *; script-src 'self' 'unsafe-inline' https: *; font-src 'self' data: https: *; connect-src 'self' https: *; media-src 'self' https: * blob: data:; object-src 'none'; frame-src 'self' https: *;"
+		-Server
+	}
+
+	root * {{.STATIC_FILE_ROOT}}
+	file_server
+	try_files {path} /index.html
+}
