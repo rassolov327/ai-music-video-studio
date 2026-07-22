@@ -1099,7 +1099,7 @@ function wireTimelineDrag(){
 let isPlaying = false;
 let playRafId = null;
 let playStartPerf = 0, playStartX = 0;
-let audioEl = null, audioCtx = null, analyserNode = null, analyserData = null, audioGraphWired = false;
+let audioEl = null;
 
 function updateTransportButtons(){
   const playBtn2 = document.getElementById('playBtn2');
@@ -1114,57 +1114,23 @@ function getActiveTrack(){
   return musicCat.items.find(t=>t.id===state.timelineAudio.trackId) || null;
 }
 
-// Creates the AudioContext as early as possible (first tap/click/keypress anywhere) so it's
-// already 'running' by the time Play is pressed, instead of racing an autoplay policy then.
-function warmUpAudioContext(){
-  if(!audioCtx){
-    try{
-      const AC = window.AudioContext || window.webkitAudioContext;
-      audioCtx = new AC();
-    } catch(err){}
-  }
-  if(audioCtx && audioCtx.state==='suspended') audioCtx.resume();
-}
-
-// sets up the shared <audio> element and the one-time Web Audio graph (analyser for the VU meter)
-function ensureAudioGraph(track){
-  if(!audioEl){
-    audioEl = new Audio();
-  }
-  if(audioEl.dataset.trackId !== track.id){
-    audioEl.src = track.audioUrl;
-    audioEl.dataset.trackId = track.id;
-  }
-  if(!audioCtx){
-    const AC = window.AudioContext || window.webkitAudioContext;
-    audioCtx = new AC();
-  }
-  if(!audioGraphWired){
-    const source = audioCtx.createMediaElementSource(audioEl);
-    analyserNode = audioCtx.createAnalyser();
-    analyserNode.fftSize = 256;
-    analyserData = new Uint8Array(analyserNode.frequencyBinCount);
-    source.connect(analyserNode);
-    analyserNode.connect(audioCtx.destination);
-    audioGraphWired = true;
-  }
-  if(audioCtx.state==='suspended') audioCtx.resume();
-}
-
 function startPlayback(){
   if(isPlaying) return;
   isPlaying = true;
   updateTransportButtons();
   const track = getActiveTrack();
   if(track && track.audioUrl){
-    try{ ensureAudioGraph(track); } catch(err){ console.warn('Audio setup failed:', err); }
+    if(!audioEl) audioEl = new Audio();
+    if(audioEl.dataset.trackId !== track.id){
+      audioEl.src = track.audioUrl;
+      audioEl.dataset.trackId = track.id;
+    }
     const ta = state.timelineAudio;
     audioEl.volume = Math.max(0, Math.min(1, ta.volume));
 
     // play() must be called synchronously inside the click/keydown handler — browsers
-    // block audio if it's started from an async callback (e.g. a 'loadedmetadata'
-    // listener) instead of directly within the user gesture, even though the seek below
-    // doesn't have that restriction.
+    // block audio started from an async callback instead of directly within the gesture.
+    // Seeking doesn't have that restriction, so it's fine to defer until metadata is ready.
     const playPromise = audioEl.play();
     if(playPromise && playPromise.catch) playPromise.catch(err=> console.warn('Audio play() was blocked:', err));
 
@@ -1297,18 +1263,20 @@ function wireFader(){
 function updateVuMeter(reset){
   const fill = document.getElementById('vuMeterFill');
   if(!fill) return;
-  if(reset || !analyserNode || !isPlaying){
+  if(reset || !isPlaying){
     fill.style.height = '0%';
     return;
   }
-  analyserNode.getByteTimeDomainData(analyserData);
-  let sumSquares = 0;
-  for(let i=0;i<analyserData.length;i++){
-    const v = (analyserData[i]-128)/128;
-    sumSquares += v*v;
+  const track = getActiveTrack();
+  const ta = state.timelineAudio;
+  if(!track || !track.peaks || !ta || !track.fullDuration){
+    fill.style.height = '0%';
+    return;
   }
-  const rms = Math.sqrt(sumSquares/analyserData.length);
-  const level = Math.min(1, rms*3.2);
+  const curSec = ta.trimIn + (playheadX / PX_PER_SEC);
+  const idx = Math.max(0, Math.min(track.peaks.length-1, Math.floor((curSec/track.fullDuration) * track.peaks.length)));
+  const amp = track.peaks[idx] || 0;
+  const level = Math.min(1, amp * 1.5) * (ta.volume || 0);
   fill.style.height = Math.round(level*100) + '%';
 }
 
@@ -2903,8 +2871,6 @@ function drawWave(){
 renderAssets();
 renderTimelineScenes();
 refreshMainPreview();
-document.addEventListener('pointerdown', warmUpAudioContext, { once:true });
-document.addEventListener('keydown', warmUpAudioContext, { once:true });
 function goHome(){
   document.querySelectorAll('.item.selected').forEach(el=>el.classList.remove('selected'));
   pausePlayback();
