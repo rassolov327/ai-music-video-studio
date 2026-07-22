@@ -436,6 +436,14 @@
   }
   .wave-canvas{flex:1 1 auto;height:36px;}
   .no-track{padding:14px 12px;color:var(--text-3);font-size:12px;font-style:italic;}
+  .real-audio{align-items:center;}
+  .vol-control{display:flex;align-items:center;gap:5px;flex:0 0 auto;color:var(--text-2);margin-right:4px;}
+  .vol-control input[type=range]{width:70px;accent-color:var(--accent);}
+  .vol-control span{font-family:var(--font-mono);font-size:10px;color:var(--text-3);width:32px;}
+  .audio-clip-wrap{position:relative;height:36px;flex:0 0 auto;background:var(--bg-elevated);border-radius:4px;overflow:hidden;}
+  .audio-clip-wrap .wave-canvas{width:100%;height:100%;flex:none;display:block;}
+  .audio-clip-wrap .shot-trim{background:rgba(255,255,255,0);}
+  .audio-clip-wrap .shot-trim:hover{background:rgba(255,255,255,.25);}
 
   /* ---- Right inspector ---- */
   .inspector{
@@ -514,17 +522,18 @@
 // ---------- state ----------
 const state = {
   categories: [
-    {key:'music', name:'Music', icon:'ti-music', addType:null, collapsed:true, items:[
+    {key:'music', name:'Music', icon:'ti-music', addType:'music', collapsed:true, items:[
       {name:'Enter Sandman.mp3', icon:'ti-file-music'},
     ]},
     {key:'band', name:'Band / Characters', icon:'ti-users', addType:'character', collapsed:true, items:[]},
     {key:'locations', name:'Locations', icon:'ti-map-pin', addType:'location', collapsed:true, items:[]},
     {key:'scenes', name:'Scenes', icon:'ti-movie', addType:'scene', collapsed:true, items:[]},
   ],
-  scenes: []
+  scenes: [],
+  timelineAudio: null // { trackId, trimIn, trimOut, volume } — which Music asset (and window/volume) is on the timeline
 };
 
-let sceneSeq = 1, shotSeq = 1, paletteSeq = 0, charSeq = 1, locSeq = 1;
+let sceneSeq = 1, shotSeq = 1, paletteSeq = 0, charSeq = 1, locSeq = 1, trackSeq = 1;
 let focus = { sceneId: null, shotId: null };
 let timelineMode = 'assembly'; // 'assembly' (spaced, insert-between) | 'edit' (flush clips, drag-to-reorder within scene)
 let playheadX = 0;
@@ -1471,6 +1480,7 @@ function renderAssets(){
         row.className='item';
         const isChar = cat.addType==='character';
         const isLoc = cat.addType==='location';
+        const isMusic = cat.addType==='music';
         const statusDot = isChar ? `<span class="item-status-dot status-${characterStatus(it)}"></span>`
           : isLoc ? `<span class="item-status-dot status-${locationStatus(it)}"></span>` : '';
         const iconHtml = it.photo
@@ -1478,6 +1488,14 @@ function renderAssets(){
           : `<span class="item-avatar-wrap"><i class="ti ${it.icon} itype"></i>${statusDot}</span>`;
         row.innerHTML = `${iconHtml}<span class="item-name">${it.name}</span>
           <span class="item-del" title="Remove"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></span>`;
+        if(isMusic && it.id){
+          row.draggable = true;
+          row.title = 'Drag onto the timeline';
+          row.addEventListener('dragstart', (e)=>{
+            e.dataTransfer.setData('text/plain', it.id);
+            e.dataTransfer.effectAllowed = 'copy';
+          });
+        }
         row.onclick = (e)=>{
           if(e.target.closest('.item-del')) return;
           document.querySelectorAll('.item.selected').forEach(el=>el.classList.remove('selected'));
@@ -1490,6 +1508,9 @@ function renderAssets(){
         };
         row.querySelector('.item-del').onclick = (e)=>{
           e.stopPropagation();
+          if(isMusic && state.timelineAudio && state.timelineAudio.trackId===it.id){
+            state.timelineAudio = null;
+          }
           cat.items.splice(idx,1);
           renderAssets();
           renderTimeline();
@@ -1512,6 +1533,8 @@ function renderAssets(){
         showScenesOverview();
       } else if(cat.addType==='location'){
         showLocationGallery(cat);
+      } else if(cat.addType==='music'){
+        showMusicGallery(cat);
       } else {
         showGenericPlaceholder(cat);
       }
@@ -2364,12 +2387,169 @@ function showLocationForm(cat, editIdx){
   };
 }
 
+// ---------- Music: gallery, upload, decoding ----------
+function showMusicGallery(cat){
+  pausePlayback();
+  previewEl.classList.add('align-tl');
+  previewEl.onclick = null;
+  previewBarEl.textContent = 'Music';
+
+  const tiles = cat.items.map((it,idx)=>`
+    <div class="char-tile" data-idx="${idx}">
+      <div class="char-tile-photo">
+        <i class="ti ti-file-music" style="font-size:26px;"></i>
+        ${it.id && state.timelineAudio && state.timelineAudio.trackId===it.id ? '<div class="char-tile-status status-green" title="On timeline"></div>' : ''}
+        <div class="char-tile-del" data-del-idx="${idx}" title="Remove">${trashSvg(13)}</div>
+      </div>
+      <div class="char-tile-name">${it.name}</div>
+      <div class="char-tile-role">${it.fullDuration ? formatTimecode(it.fullDuration) : ''}</div>
+    </div>
+  `).join('');
+
+  previewEl.innerHTML = `
+    <div class="char-gallery">
+      <div class="char-grid">
+        ${tiles}
+        <div class="char-tile char-tile-add" id="addMusicTile">
+          <div class="char-tile-photo">${plusSvg(26)}</div>
+          <div class="char-tile-name">Add track</div>
+        </div>
+      </div>
+    </div>`;
+
+  previewEl.querySelectorAll('[data-del-idx]').forEach(btn=>{
+    btn.onclick = (e)=>{
+      e.stopPropagation();
+      const idx = parseInt(e.target.closest('[data-del-idx]').dataset.delIdx, 10);
+      const removed = cat.items[idx];
+      if(removed && removed.id && state.timelineAudio && state.timelineAudio.trackId===removed.id){
+        state.timelineAudio = null;
+      }
+      cat.items.splice(idx,1);
+      renderAssets();
+      renderTimeline();
+      showMusicGallery(cat);
+    };
+  });
+  document.getElementById('addMusicTile').onclick = ()=> showMusicUploadForm(cat);
+}
+
+function showMusicUploadForm(cat){
+  pausePlayback();
+  previewEl.classList.remove('align-tl');
+  previewEl.onclick = null;
+  previewBarEl.textContent = 'Add asset — Music';
+  previewEl.innerHTML = `
+    <div class="char-form">
+      <h3>Add music track</h3>
+      <p class="sub">Upload an audio file from your computer (MP3, WAV, M4A, AAC, OGG, FLAC).</p>
+
+      <label class="photo-drop" id="musicDrop" for="musicFileInput" style="aspect-ratio:3/1;max-height:110px;">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
+        <span id="musicDropLabel">Choose audio file</span>
+      </label>
+      <input type="file" id="musicFileInput" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;">
+
+      <label class="char-row" style="margin:4px 0 16px;">
+        <input type="checkbox" id="musicAutoAdd" checked>Add to timeline automatically
+      </label>
+
+      <div id="musicUploadStatus" class="gen-hint"></div>
+
+      <div class="cf-actions">
+        <button class="cf-btn" id="musicCancel">Cancel</button>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('musicCancel').onclick = ()=> showMusicGallery(cat);
+
+  const fileInput = document.getElementById('musicFileInput');
+  const statusEl = document.getElementById('musicUploadStatus');
+  const dropLabel = document.getElementById('musicDropLabel');
+  fileInput.onchange = async ()=>{
+    const file = fileInput.files[0];
+    if(!file) return;
+    dropLabel.textContent = file.name;
+    statusEl.textContent = 'Decoding audio…';
+    try{
+      const track = await buildMusicTrack(file);
+      statusEl.textContent = 'Added — ' + formatTimecode(track.fullDuration) + ' long.';
+      cat.items.push(track);
+      if(document.getElementById('musicAutoAdd').checked){
+        setTimelineAudioTrack(track.id);
+      }
+      renderAssets();
+      setTimeout(()=> showMusicGallery(cat), 400);
+    } catch(err){
+      statusEl.textContent = 'Could not read this audio file — try a different format.';
+    }
+  };
+}
+
+async function buildMusicTrack(file){
+  const buffer = await file.arrayBuffer();
+  const AC = window.AudioContext || window.webkitAudioContext;
+  const ctx = new AC();
+  const decoded = await ctx.decodeAudioData(buffer.slice(0));
+  const peaks = computeWavePeaks(decoded, 2000);
+  const reader = new Promise((resolve, reject)=>{
+    const fr = new FileReader();
+    fr.onload = ()=> resolve(fr.result);
+    fr.onerror = reject;
+    fr.readAsDataURL(file);
+  });
+  const audioUrl = await reader;
+  ctx.close && ctx.close();
+  return {
+    id: 't' + (trackSeq++),
+    name: file.name,
+    icon: 'ti-file-music',
+    audioUrl,
+    fullDuration: decoded.duration,
+    peaks,
+  };
+}
+
+function computeWavePeaks(audioBuffer, resolution){
+  const ch0 = audioBuffer.getChannelData(0);
+  const total = ch0.length;
+  const bucketSize = Math.max(1, Math.floor(total/resolution));
+  const peaks = new Array(Math.ceil(total/bucketSize));
+  for(let i=0, p=0; i<total; i+=bucketSize, p++){
+    let max = 0;
+    const end = Math.min(i+bucketSize, total);
+    for(let j=i; j<end; j++){
+      const v = Math.abs(ch0[j]);
+      if(v>max) max = v;
+    }
+    peaks[p] = max;
+  }
+  return peaks;
+}
+
 // ---------- timeline / audio track ----------
+function setTimelineAudioTrack(trackId){
+  state.timelineAudio = { trackId, trimIn:0, trimOut:null, volume:1 };
+  const musicCat = state.categories.find(c=>c.key==='music');
+  const track = musicCat.items.find(t=>t.id===trackId);
+  if(track) state.timelineAudio.trimOut = track.fullDuration;
+  renderTimeline();
+}
+
 function renderTimeline(){
   const musicCat = state.categories.find(c=>c.key==='music');
-  const track = musicCat.items[0];
+
+  if(state.timelineAudio){
+    const track = musicCat.items.find(t=>t.id===state.timelineAudio.trackId);
+    if(track){ renderRealAudioTrack(track); return; }
+    state.timelineAudio = null;
+  }
+
+  // legacy placeholder track (no real audio bytes — kept so existing projects still show something)
+  const track = musicCat.items.find(it=>!it.id) || musicCat.items[0];
   if(!track){
-    waveformWrap.innerHTML = `<div class="no-track">No music track added. Add one from the Music library on the left.</div>`;
+    waveformWrap.innerHTML = `<div class="no-track">No music track added. Add one from the Music library on the left, or drag a track here.</div>`;
     return;
   }
   waveformWrap.innerHTML = `
@@ -2378,6 +2558,90 @@ function renderTimeline(){
       <canvas class="wave-canvas" id="wave"></canvas>
     </div>`;
   requestAnimationFrame(drawWave);
+}
+
+function renderRealAudioTrack(track){
+  const ta = state.timelineAudio;
+  const clipWidth = Math.max(20, Math.round((ta.trimOut - ta.trimIn) * PX_PER_SEC));
+  waveformWrap.innerHTML = `
+    <div class="waveform real-audio">
+      <div class="track-name"><i class="ti ti-music"></i> ${track.name}</div>
+      <div class="vol-control" title="Volume">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="4,9 8,9 12,5 12,19 8,15 4,15"></polygon><path d="M16 8a5 5 0 0 1 0 8"></path></svg>
+        <input type="range" min="0" max="150" value="${Math.round(ta.volume*100)}" id="audioVolInput">
+        <span id="audioVolLabel">${Math.round(ta.volume*100)}%</span>
+      </div>
+      <div class="audio-clip-wrap" id="audioClipWrap" style="width:${clipWidth}px;">
+        <canvas class="wave-canvas" id="wave"></canvas>
+        <div class="shot-trim left" id="audioTrimLeft" title="Trim start"></div>
+        <div class="shot-trim right" id="audioTrimRight" title="Trim end"></div>
+      </div>
+    </div>`;
+  requestAnimationFrame(()=> drawRealWave(track, ta.trimIn, ta.trimOut));
+
+  document.getElementById('audioVolInput').addEventListener('input', (e)=>{
+    ta.volume = parseInt(e.target.value,10)/100;
+    document.getElementById('audioVolLabel').textContent = e.target.value + '%';
+  });
+
+  const clipWrap = document.getElementById('audioClipWrap');
+  function wireAudioTrim(handleId, side){
+    const handle = document.getElementById(handleId);
+    handle.addEventListener('pointerdown', (e)=>{
+      e.preventDefault();
+      const startX = e.clientX;
+      const startIn = ta.trimIn, startOut = ta.trimOut;
+      const MIN_SEC = 1;
+      handle.setPointerCapture(e.pointerId);
+      document.body.style.cursor = 'ew-resize';
+      const onMove = (ev)=>{
+        const deltaSec = ((ev.clientX - startX) / ZOOM) / PX_PER_SEC;
+        if(side==='right'){
+          ta.trimOut = Math.max(startIn+MIN_SEC, Math.min(track.fullDuration, startOut + deltaSec));
+        } else {
+          ta.trimIn = Math.max(0, Math.min(startOut-MIN_SEC, startIn + deltaSec));
+        }
+        const wpx = Math.max(20, Math.round((ta.trimOut - ta.trimIn) * PX_PER_SEC));
+        clipWrap.style.width = wpx + 'px';
+        drawRealWave(track, ta.trimIn, ta.trimOut);
+      };
+      const onUp = ()=>{
+        handle.removeEventListener('pointermove', onMove);
+        handle.removeEventListener('pointerup', onUp);
+        document.body.style.cursor = '';
+      };
+      handle.addEventListener('pointermove', onMove);
+      handle.addEventListener('pointerup', onUp);
+    });
+  }
+  wireAudioTrim('audioTrimLeft', 'left');
+  wireAudioTrim('audioTrimRight', 'right');
+}
+
+function drawRealWave(track, trimIn, trimOut){
+  const canvas = document.getElementById('wave');
+  if(!canvas) return;
+  const dpr = window.devicePixelRatio||1;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if(w===0) return;
+  canvas.width = w*dpr; canvas.height = h*dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr,dpr);
+  ctx.clearRect(0,0,w,h);
+  ctx.fillStyle = '#3f6b4f';
+  const peaks = track.peaks;
+  const total = peaks.length;
+  const startIdx = Math.max(0, Math.floor((trimIn/track.fullDuration) * total));
+  const endIdx = Math.min(total, Math.ceil((trimOut/track.fullDuration) * total));
+  const visibleCount = Math.max(1, endIdx-startIdx);
+  const step = 3;
+  const bars = Math.floor(w/step);
+  for(let i=0;i<bars;i++){
+    const idx = startIdx + Math.floor((i/bars) * visibleCount);
+    const amp = peaks[Math.min(idx, total-1)] || 0;
+    const bh = Math.max(2, amp*h);
+    ctx.fillRect(i*step, (h-bh)/2, 2, bh);
+  }
 }
 
 function drawWave(){
@@ -2405,6 +2669,15 @@ renderAssets();
 renderTimelineScenes();
 refreshMainPreview();
 renderTimeline();
+waveformWrap.addEventListener('dragover', (e)=>{ e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+waveformWrap.addEventListener('drop', (e)=>{
+  e.preventDefault();
+  const id = e.dataTransfer.getData('text/plain');
+  if(!id) return;
+  const musicCat = state.categories.find(c=>c.key==='music');
+  const track = musicCat.items.find(t=>t.id===id);
+  if(track) setTimelineAudioTrack(track.id);
+});
 function goHome(){
   document.querySelectorAll('.item.selected').forEach(el=>el.classList.remove('selected'));
   pausePlayback();
