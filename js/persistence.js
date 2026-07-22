@@ -3,16 +3,25 @@
 //  - IndexedDB (default, works in every browser) — the project lives inside the browser's
 //    own storage, invisible in the OS file explorer.
 //  - A real folder on disk via the File System Access API (Chrome/Edge only) — opt-in,
-//    writes an actual project.json file the user can see, back up, or move by hand.
+//    writes an actual project.json file (plus real asset files) the user can see, back up,
+//    or move by hand.
 // Everything above this file (characters, locations, looks, music, timeline...) never talks
 // to either backend directly — it only mutates `state`/`focus`/etc., and this module is the
 // only place that knows how those get persisted. Swapping IndexedDB for real files later
 // (Electron) means changing this one file, not the rest of the app.
+//
+// Important design point: the project JSON (scenes, characters, looks, timings...) is small
+// and saves on a cheap timer. Big binary assets — right now just the music file — are NOT
+// re-packed into that JSON on every tick. Each one is written ONCE, at the moment it's
+// added or replaced, as either a raw Blob in its own IndexedDB store or a real file in the
+// project folder's assets/ subfolder. The project JSON only ever holds a small reference
+// (the track's id) pointing at that asset.
 
 const DB_NAME = 'ai_mv_studio_db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_PROJECT = 'project';
 const STORE_HANDLES = 'handles';
+const STORE_ASSETS = 'assets'; // raw Blobs (e.g. music files), keyed by asset id
 
 const SUPPORTS_DISK_FOLDER = ('showDirectoryPicker' in window) && (()=>{
   try{ return window.self === window.top; } catch(err){ return false; }
@@ -20,6 +29,7 @@ const SUPPORTS_DISK_FOLDER = ('showDirectoryPicker' in window) && (()=>{
 
 let diskDirHandle = null;
 let autosaveTimer = null;
+let lastSavedJSON = null;
 
 function openDB(){
   return new Promise((resolve, reject)=>{
@@ -28,6 +38,7 @@ function openDB(){
       const db = e.target.result;
       if(!db.objectStoreNames.contains(STORE_PROJECT)) db.createObjectStore(STORE_PROJECT);
       if(!db.objectStoreNames.contains(STORE_HANDLES)) db.createObjectStore(STORE_HANDLES);
+      if(!db.objectStoreNames.contains(STORE_ASSETS)) db.createObjectStore(STORE_ASSETS);
     };
     req.onsuccess = ()=> resolve(req.result);
     req.onerror = ()=> reject(req.error);
@@ -51,36 +62,107 @@ async function idbSet(store, key, value){
     tx.onerror = ()=> reject(tx.error);
   });
 }
-
-// ---- blob: URL <-> base64 (audio needs this; it's the only asset stored as a live blob URL
-// instead of an inline data: URL, and blob: URLs don't survive a reload)
-function blobUrlToBase64(blobUrl){
-  return fetch(blobUrl)
-    .then(res => res.blob())
-    .then(blob => new Promise((resolve, reject)=>{
-      const fr = new FileReader();
-      fr.onload = ()=> resolve(fr.result);
-      fr.onerror = reject;
-      fr.readAsDataURL(blob);
-    }));
-}
-function base64ToBlobUrl(dataUrl){
-  // Deliberately NOT using fetch(dataUrl) here — fetching a multi-megabyte data: URL (a
-  // full song, base64-encoded, easily 5-10MB+) is unreliable in real browsers even though
-  // it works fine on tiny test files. atob() has no such practical size limit.
+async function idbDelete(store, key){
+  const db = await openDB();
   return new Promise((resolve, reject)=>{
-    try{
-      const commaIdx = dataUrl.indexOf(',');
-      const header = dataUrl.slice(0, commaIdx);
-      const base64 = dataUrl.slice(commaIdx + 1);
-      const mimeMatch = header.match(/data:(.*?);base64/);
-      const mime = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
-      const binary = atob(base64);
-      const bytes = new Uint8Array(binary.length);
-      for(let i=0; i<binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      resolve(URL.createObjectURL(new Blob([bytes], { type: mime })));
-    } catch(err){ reject(err); }
+    const tx = db.transaction(store, 'readwrite');
+    tx.objectStore(store).delete(key);
+    tx.oncomplete = ()=> resolve();
+    tx.onerror = ()=> reject(tx.error);
   });
+}
+
+// ---- big binary assets (music files) — written once, not on every autosave tick ----
+function assetKeyForTrack(trackId){ return 'music:' + trackId; }
+
+function safeAssetFileName(trackId, originalName){
+  const dot = originalName.lastIndexOf('.');
+  const ext = dot>=0 ? originalName.slice(dot) : '';
+  return trackId + ext;
+}
+
+async function getAssetsDirHandle(create){
+  if(!diskDirHandle) return null;
+  return diskDirHandle.getDirectoryHandle('assets', { create: !!create });
+}
+
+// Called exactly once, right when a track is added or replaced — never on a periodic tick.
+async function persistAudioAsset(trackId, file){
+  if(diskDirHandle){
+    try{
+      const assetsDir = await getAssetsDirHandle(true);
+      const fileName = safeAssetFileName(trackId, file.name || 'track.mp3');
+      const fileHandle = await assetsDir.getFileHandle(fileName, { create:true });
+      const writable = await fileHandle.createWritable();
+      await writable.write(file);
+      await writable.close();
+      console.log('[ProjectStore] wrote audio asset to disk: assets/' + fileName);
+      return { location:'disk', fileName };
+    } catch(err){
+      console.warn('[ProjectStore] could not write audio asset to disk, falling back to browser storage:', err);
+    }
+  }
+  await idbSet(STORE_ASSETS, assetKeyForTrack(trackId), file);
+  console.log('[ProjectStore] stored audio asset in browser storage for track', trackId);
+  return { location:'idb' };
+}
+
+async function loadAudioAsset(trackId, diskFileName){
+  if(diskDirHandle){
+    try{
+      const assetsDir = await getAssetsDirHandle(false);
+      const fileName = diskFileName || safeAssetFileName(trackId, '.mp3');
+      const fileHandle = await assetsDir.getFileHandle(fileName);
+      const file = await fileHandle.getFile();
+      console.log('[ProjectStore] loaded audio asset from disk: assets/' + fileName);
+      return file;
+    } catch(err){
+      console.warn('[ProjectStore] audio asset not found on disk for track ' + trackId + ', trying browser storage:', err);
+    }
+  }
+  try{
+    const blob = await idbGet(STORE_ASSETS, assetKeyForTrack(trackId));
+    if(blob) console.log('[ProjectStore] loaded audio asset from browser storage for track', trackId);
+    return blob || null;
+  } catch(err){
+    console.warn('[ProjectStore] could not load audio asset for track ' + trackId + ':', err);
+    return null;
+  }
+}
+
+async function deleteAudioAsset(trackId){
+  try{ await idbDelete(STORE_ASSETS, assetKeyForTrack(trackId)); } catch(err){}
+  if(diskDirHandle){
+    try{
+      const assetsDir = await getAssetsDirHandle(false);
+      for await (const name of assetsDir.keys()){
+        if(name.indexOf(trackId)===0) await assetsDir.removeEntry(name);
+      }
+    } catch(err){}
+  }
+}
+
+// Copies any assets currently sitting in browser storage onto a newly-connected disk
+// folder, so switching to "save to disk" mid-project doesn't strand existing audio.
+async function migrateAssetsToDisk(){
+  const musicCat = state.categories.find(c=>c.key==='music');
+  if(!musicCat) return;
+  for(const item of musicCat.items){
+    if(!item.id) continue;
+    try{
+      const blob = await idbGet(STORE_ASSETS, assetKeyForTrack(item.id));
+      if(blob){
+        const assetsDir = await getAssetsDirHandle(true);
+        const fileName = safeAssetFileName(item.id, item.name || 'track.mp3');
+        const fileHandle = await assetsDir.getFileHandle(fileName, { create:true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        item.diskFileName = fileName;
+        console.log('[ProjectStore] migrated audio asset for "' + item.name + '" onto disk');
+      }
+    } catch(err){ console.warn('[ProjectStore] could not migrate asset for "' + item.name + '":', err); }
+  }
 }
 
 // ---- disk folder (File System Access API) ----
@@ -114,6 +196,7 @@ async function chooseDiskFolder(){
   // silently load whatever that folder already contains and clobber what's in memory.
   // (Loading an existing project.json only happens once, at genuine app startup, in
   // initProjectStore() — there's no live work to protect at that point.)
+  await migrateAssetsToDisk();
   await saveProjectNow();
   updateFolderButton();
   return true;
@@ -135,25 +218,18 @@ async function tryRestoreDiskHandle(){
 }
 
 // ---- serialize / restore the whole app state ----
-async function serializeProject(){
-  const categoriesOut = [];
-  for(const cat of state.categories){
-    const itemsOut = [];
-    for(const item of cat.items){
+// Fast and cheap on purpose: no binary data ever passes through here, just plain JSON.
+function serializeProject(){
+  const categoriesOut = state.categories.map(cat=>({
+    key: cat.key, name: cat.name, icon: cat.icon, addType: cat.addType, collapsed: cat.collapsed,
+    items: cat.items.map(item=>{
       const copy = JSON.parse(JSON.stringify(item));
-      if(cat.key==='music' && copy.audioUrl && copy.audioUrl.indexOf('blob:')===0){
-        try{
-          copy.audioUrl = await blobUrlToBase64(item.audioUrl);
-          console.log('[ProjectStore] encoded audio track "' + item.name + '" for saving (' + Math.round(copy.audioUrl.length/1024) + ' KB as base64)');
-        }
-        catch(err){ console.warn('[ProjectStore] FAILED to encode audio track "' + item.name + '" for saving:', err); copy.audioUrl = null; }
-      }
-      itemsOut.push(copy);
-    }
-    categoriesOut.push({ key:cat.key, name:cat.name, icon:cat.icon, addType:cat.addType, collapsed:cat.collapsed, items:itemsOut });
-  }
+      if(cat.key==='music') delete copy.audioUrl; // never persisted inline — see persistAudioAsset
+      return copy;
+    }),
+  }));
   return {
-    version: 1,
+    version: 2,
     savedAt: Date.now(),
     categories: categoriesOut,
     scenes: JSON.parse(JSON.stringify(state.scenes)),
@@ -171,14 +247,13 @@ async function applyProjectData(data){
   if(musicCat){
     console.log('[ProjectStore] restoring', musicCat.items.length, 'music track(s)');
     for(const item of musicCat.items){
-      if(item.audioUrl && item.audioUrl.indexOf('data:')===0){
-        try{
-          item.audioUrl = await base64ToBlobUrl(item.audioUrl);
-          console.log('[ProjectStore] restored audio track "' + item.name + '" ->', item.audioUrl);
-        }
-        catch(err){ console.warn('[ProjectStore] FAILED to restore audio track "' + item.name + '":', err); item.audioUrl = null; }
-      } else {
-        console.log('[ProjectStore] audio track "' + item.name + '" had no data: URL to restore (audioUrl was:', item.audioUrl, ')');
+      try{
+        const blob = await loadAudioAsset(item.id, item.diskFileName);
+        item.audioUrl = blob ? URL.createObjectURL(blob) : null;
+        console.log('[ProjectStore] track "' + item.name + '" audio ' + (blob ? 'restored' : 'NOT FOUND'));
+      } catch(err){
+        console.warn('[ProjectStore] failed to restore audio for "' + item.name + '":', err);
+        item.audioUrl = null;
       }
     }
   }
@@ -204,7 +279,7 @@ async function applyProjectData(data){
   return true;
 }
 
-// ---- save orchestration + autosave ----
+// ---- save orchestration + autosave (JSON only — assets are handled separately) ----
 function setSaveStatus(status){
   const el = document.getElementById('saveStatus');
   if(!el) return;
@@ -216,7 +291,7 @@ function setSaveStatus(status){
 }
 
 async function saveProjectNow(){
-  const data = await serializeProject();
+  const data = serializeProject();
   if(diskDirHandle){
     try{
       await writeProjectToDisk(diskDirHandle, data);
@@ -232,35 +307,30 @@ async function saveProjectNow(){
   console.log('[ProjectStore] saved to browser storage (IndexedDB)');
 }
 
-let lastSavedJSON = null;
-
-// kept as a no-op hook — some render functions still call this, harmless now that
-// autosave compares actual content instead of relying on every mutation site remembering
-// to flag itself dirty (that approach had gaps: e.g. scene settings' location/look
-// dropdowns mutate state without going through any of the hooked render functions).
+// kept as a no-op hook — some render functions still call this; harmless leftover now that
+// autosave compares actual content instead of needing every mutation site to flag itself.
 function markProjectDirty(){}
 
-// Forces an immediate save instead of waiting for the next periodic tick — used right
-// after especially valuable actions (like finishing a music upload) so a quick refresh
-// right afterward can't lose it.
+// Forces an immediate JSON save instead of waiting for the next periodic tick — used right
+// after especially meaningful actions (attaching a track, adding a scene...). Cheap now
+// that it never touches binary data.
 function saveProjectSoon(){
   autosaveTick();
 }
 
 async function autosaveTick(){
   let data;
-  try{ data = await serializeProject(); }
+  try{ data = serializeProject(); }
   catch(err){ console.warn('[ProjectStore] Autosave: could not serialize project:', err); return; }
   const json = JSON.stringify(data);
-  if(json === lastSavedJSON){ console.log('[ProjectStore] autosave tick: nothing changed, skipping write'); return; }
+  if(json === lastSavedJSON) return; // nothing actually changed since the last save
   setSaveStatus('saving');
   try{
     if(diskDirHandle){
-      try{ await writeProjectToDisk(diskDirHandle, data); console.log('[ProjectStore] autosaved to disk folder'); }
+      try{ await writeProjectToDisk(diskDirHandle, data); }
       catch(err){ console.warn('[ProjectStore] Disk save failed, falling back to browser storage:', err); await idbSet(STORE_PROJECT, 'current', data); }
     } else {
       await idbSet(STORE_PROJECT, 'current', data);
-      console.log('[ProjectStore] autosaved to browser storage (IndexedDB)');
     }
     lastSavedJSON = json;
     setSaveStatus('saved');
@@ -278,7 +348,7 @@ function updateFolderButton(){
   const folderIcon = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>';
   if(diskDirHandle){
     btn.innerHTML = folderIcon + 'Saved to “' + diskDirHandle.name + '” · change';
-    btn.title = 'Autosaving into this folder on your disk. Click to pick a different folder.';
+    btn.title = 'Autosaving into this folder on your disk (project.json + assets/). Click to pick a different folder.';
   } else {
     btn.innerHTML = folderIcon + 'Save to disk folder';
     btn.title = 'Keep this project as real files on your disk';
@@ -323,8 +393,9 @@ async function initProjectStore(){
       await applyProjectData(data);
       updateFolderButton();
       setSaveStatus('saved');
-      lastSavedJSON = JSON.stringify(await serializeProject());
+      lastSavedJSON = JSON.stringify(serializeProject());
       autosaveTimer = setInterval(autosaveTick, 3000);
+      wireExitSave();
       return true;
     }
     console.log('[ProjectStore] connected folder has no project.json yet');
@@ -337,8 +408,17 @@ async function initProjectStore(){
   if(idbData){
     await applyProjectData(idbData);
     setSaveStatus('saved');
-    lastSavedJSON = JSON.stringify(await serializeProject());
+    lastSavedJSON = JSON.stringify(serializeProject());
   }
   autosaveTimer = setInterval(autosaveTick, 3000);
+  wireExitSave();
   return !!idbData;
+}
+
+// Final safety net: save (cheap now — JSON only) when the tab is hidden/closed.
+function wireExitSave(){
+  document.addEventListener('visibilitychange', ()=>{
+    if(document.visibilityState === 'hidden') saveProjectNow();
+  });
+  window.addEventListener('pagehide', ()=> saveProjectNow());
 }

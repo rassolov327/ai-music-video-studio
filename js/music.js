@@ -37,9 +37,11 @@ function showMusicGallery(cat){
         state.timelineAudio = null;
       }
       if(removed && removed.audioUrl) URL.revokeObjectURL(removed.audioUrl);
+      if(removed && removed.id && typeof deleteAudioAsset==='function') deleteAudioAsset(removed.id);
       cat.items.splice(idx,1);
       renderAssets();
       renderTimeline();
+      if(typeof saveProjectSoon==='function') saveProjectSoon();
       showMusicGallery(cat);
     };
   });
@@ -92,6 +94,10 @@ function showMusicUploadForm(cat){
         setTimelineAudioTrack(track.id);
       }
       renderAssets();
+      if(typeof persistAudioAsset==='function'){
+        const result = await persistAudioAsset(track.id, file);
+        if(result && result.fileName) track.diskFileName = result.fileName;
+      }
       if(typeof saveProjectSoon==='function') saveProjectSoon();
       setTimeout(()=> showMusicGallery(cat), 400);
     } catch(err){

@@ -91,9 +91,11 @@ function renderAssets(){
             state.timelineAudio = null;
           }
           if(isMusic && it.audioUrl) URL.revokeObjectURL(it.audioUrl);
+          if(isMusic && typeof deleteAudioAsset==='function') deleteAudioAsset(it.id);
           cat.items.splice(idx,1);
           renderAssets();
           renderTimeline();
+          if(typeof saveProjectSoon==='function') saveProjectSoon();
         };
         itemsEl.appendChild(row);
       });
