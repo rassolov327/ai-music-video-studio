@@ -18,7 +18,7 @@
 		-Server
 	}
 
-	root * {{.STATIC_FILE_ROOT}}
+	root * .
 	file_server
 	try_files {path} /index.html
 }
