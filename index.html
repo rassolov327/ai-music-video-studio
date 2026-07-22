@@ -1099,7 +1099,7 @@ function wireTimelineDrag(){
 let isPlaying = false;
 let playRafId = null;
 let playStartPerf = 0, playStartX = 0;
-let audioEl = null, audioCtx = null, analyserNode = null, analyserData = null;
+let audioEl = null, audioCtx = null, analyserNode = null, analyserData = null, audioGraphWired = false;
 
 function updateTransportButtons(){
   const playBtn2 = document.getElementById('playBtn2');
@@ -1114,7 +1114,19 @@ function getActiveTrack(){
   return musicCat.items.find(t=>t.id===state.timelineAudio.trackId) || null;
 }
 
-// sets up the shared <audio> element and a one-time Web Audio graph (analyser for the VU meter)
+// Creates the AudioContext as early as possible (first tap/click/keypress anywhere) so it's
+// already 'running' by the time Play is pressed, instead of racing an autoplay policy then.
+function warmUpAudioContext(){
+  if(!audioCtx){
+    try{
+      const AC = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new AC();
+    } catch(err){}
+  }
+  if(audioCtx && audioCtx.state==='suspended') audioCtx.resume();
+}
+
+// sets up the shared <audio> element and the one-time Web Audio graph (analyser for the VU meter)
 function ensureAudioGraph(track){
   if(!audioEl){
     audioEl = new Audio();
@@ -1126,12 +1138,15 @@ function ensureAudioGraph(track){
   if(!audioCtx){
     const AC = window.AudioContext || window.webkitAudioContext;
     audioCtx = new AC();
+  }
+  if(!audioGraphWired){
     const source = audioCtx.createMediaElementSource(audioEl);
     analyserNode = audioCtx.createAnalyser();
     analyserNode.fftSize = 256;
     analyserData = new Uint8Array(analyserNode.frequencyBinCount);
     source.connect(analyserNode);
     analyserNode.connect(audioCtx.destination);
+    audioGraphWired = true;
   }
   if(audioCtx.state==='suspended') audioCtx.resume();
 }
@@ -1144,23 +1159,26 @@ function startPlayback(){
   if(track && track.audioUrl){
     try{ ensureAudioGraph(track); } catch(err){ console.warn('Audio setup failed:', err); }
     const ta = state.timelineAudio;
-    const seekAndPlay = ()=>{
+    audioEl.volume = Math.max(0, Math.min(1, ta.volume));
+
+    // play() must be called synchronously inside the click/keydown handler — browsers
+    // block audio if it's started from an async callback (e.g. a 'loadedmetadata'
+    // listener) instead of directly within the user gesture, even though the seek below
+    // doesn't have that restriction.
+    const playPromise = audioEl.play();
+    if(playPromise && playPromise.catch) playPromise.catch(err=> console.warn('Audio play() was blocked:', err));
+
+    const doSeek = ()=>{
       try{
         const target = ta.trimIn + (playheadX / PX_PER_SEC);
         const safeOut = Math.max(ta.trimIn, (ta.trimOut || audioEl.duration || target) - 0.05);
         audioEl.currentTime = Math.min(target, safeOut);
-        audioEl.volume = Math.max(0, Math.min(1, ta.volume));
-        const p = audioEl.play();
-        if(p && p.catch) p.catch(err=> console.warn('Audio play() was blocked:', err));
-      } catch(err){ console.warn('Audio seek/play failed:', err); }
+      } catch(err){ console.warn('Audio seek failed:', err); }
     };
-    // readyState 0 (HAVE_NOTHING) right after assigning src means duration/seeking
-    // aren't reliable yet on some browsers — wait for metadata instead of failing silently.
     if(audioEl.readyState >= 1){
-      seekAndPlay();
+      doSeek();
     } else {
-      audioEl.addEventListener('loadedmetadata', seekAndPlay, { once:true });
-      audioEl.load();
+      audioEl.addEventListener('loadedmetadata', doSeek, { once:true });
     }
   }
   playStartPerf = performance.now();
@@ -2885,6 +2903,8 @@ function drawWave(){
 renderAssets();
 renderTimelineScenes();
 refreshMainPreview();
+document.addEventListener('pointerdown', warmUpAudioContext, { once:true });
+document.addEventListener('keydown', warmUpAudioContext, { once:true });
 function goHome(){
   document.querySelectorAll('.item.selected').forEach(el=>el.classList.remove('selected'));
   pausePlayback();
