@@ -77,8 +77,8 @@
   }
   .cat-head:hover{background:var(--bg-panel-2);}
   .cat-head:hover .cat-add{opacity:1;}
-  .cat-head i.chev{font-size:13px;color:var(--text-3);transition:transform .12s;flex:0 0 auto;}
-  .cat-head.collapsed i.chev{transform:rotate(-90deg);}
+  .cat-head .chev{font-size:13px;color:var(--text-3);transition:transform .12s;flex:0 0 auto;}
+  .cat-head.collapsed .chev{transform:rotate(-90deg);}
   .cat-head i.folder{font-size:15px;color:var(--text-2);flex:0 0 auto;}
   .cat-name{flex:1 1 auto;}
   .cat-count{color:var(--text-3);font-size:11px;font-family:var(--font-mono);margin-right:2px;}
@@ -453,12 +453,47 @@
   /* ---- Right inspector ---- */
   .inspector{
     width:230px;flex:0 0 auto;background:var(--bg-panel);border-left:1px solid var(--line);
-    overflow-y:auto;
+    display:flex;flex-direction:column;
   }
-  .insp-tabs{display:flex;border-bottom:1px solid var(--line);}
+  .insp-tabs{display:flex;border-bottom:1px solid var(--line);flex:0 0 auto;}
   .insp-tab{padding:9px 12px;font-size:12px;color:var(--text-3);cursor:default;border-bottom:2px solid transparent;}
   .insp-tab.active{color:var(--text-1);border-bottom-color:var(--accent);}
   .insp-empty{padding:16px 14px;color:var(--text-3);font-size:12px;line-height:1.6;}
+  #inspBody{flex:1 1 auto;overflow-y:auto;min-height:0;}
+
+  .mixer-panel{
+    flex:0 0 auto;border-top:1px solid var(--line);padding:12px 10px 14px;
+    display:flex;flex-direction:column;align-items:center;gap:8px;height:200px;
+  }
+  .mixer-empty{color:var(--text-3);font-size:11px;text-align:center;line-height:1.5;margin:auto;}
+  .mixer-track-name{
+    font-size:10.5px;color:var(--text-2);text-align:center;max-width:100%;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  }
+  .mixer-fader-row{display:flex;align-items:flex-end;gap:8px;flex:1 1 auto;padding:4px 0;}
+  .vu-meter{
+    position:relative;width:8px;height:100%;background:var(--bg-elevated);border-radius:3px;
+    overflow:hidden;display:flex;align-items:flex-end;
+  }
+  .vu-meter-fill{
+    width:100%;height:0%;background:linear-gradient(0deg,#5fae7a 0%,#5fae7a 70%,#e0b23c 85%,#d9695f 100%);
+    transition:height .05s linear;
+  }
+  .fader-track{
+    position:relative;width:6px;height:100%;background:var(--bg-elevated);border-radius:3px;cursor:pointer;
+  }
+  .fader-fill{
+    position:absolute;left:0;bottom:0;width:100%;height:0%;background:var(--accent-dim);border-radius:3px;
+    pointer-events:none;
+  }
+  .fader-handle{
+    position:absolute;left:50%;bottom:0%;width:20px;height:11px;background:var(--bg-elevated);
+    border:1px solid var(--line);border-radius:3px;transform:translate(-50%,50%);cursor:ns-resize;
+  }
+  .fader-handle::before{
+    content:'';position:absolute;left:3px;right:3px;top:50%;height:1px;background:var(--text-3);
+  }
+  .mixer-vol-label{font-family:var(--font-mono);font-size:11px;color:var(--text-2);}
 
   ::-webkit-scrollbar{width:8px;height:8px;}
   ::-webkit-scrollbar-thumb{background:#33373f;border-radius:4px;}
@@ -517,6 +552,9 @@
       <div id="inspBody">
         <div class="insp-empty">No shot selected.<br>Create a scene and a shot to see its parameters here.</div>
       </div>
+      <div class="mixer-panel" id="mixerPanel">
+        <div class="mixer-empty">No audio track<br>on the timeline</div>
+      </div>
     </div>
 
   </div>
@@ -526,9 +564,7 @@
 // ---------- state ----------
 const state = {
   categories: [
-    {key:'music', name:'Music', icon:'ti-music', addType:'music', collapsed:true, items:[
-      {name:'Enter Sandman.mp3', icon:'ti-file-music'},
-    ]},
+    {key:'music', name:'Music', icon:'ti-music', addType:'music', collapsed:true, items:[]},
     {key:'band', name:'Band / Characters', icon:'ti-users', addType:'character', collapsed:true, items:[]},
     {key:'locations', name:'Locations', icon:'ti-map-pin', addType:'location', collapsed:true, items:[]},
     {key:'scenes', name:'Scenes', icon:'ti-movie', addType:'scene', collapsed:true, items:[]},
@@ -1059,9 +1095,11 @@ function wireTimelineDrag(){
   }
 }
 
-// ---------- transport: play / pause / stop ----------
+// ---------- transport: play / pause / stop (with real audio playback) ----------
 let isPlaying = false;
-let playTimer = null;
+let playRafId = null;
+let playStartPerf = 0, playStartX = 0;
+let audioEl = null, audioCtx = null, analyserNode = null, analyserData = null;
 
 function updateTransportButtons(){
   const playBtn2 = document.getElementById('playBtn2');
@@ -1070,41 +1108,179 @@ function updateTransportButtons(){
   if(pauseBtn2) pauseBtn2.classList.toggle('active', !isPlaying);
 }
 
+function getActiveTrack(){
+  if(!state.timelineAudio) return null;
+  const musicCat = state.categories.find(c=>c.key==='music');
+  return musicCat.items.find(t=>t.id===state.timelineAudio.trackId) || null;
+}
+
+// sets up the shared <audio> element and a one-time Web Audio graph (analyser for the VU meter)
+function ensureAudioGraph(track){
+  if(!audioEl){
+    audioEl = new Audio();
+    audioEl.crossOrigin = 'anonymous';
+  }
+  if(audioEl.dataset.trackId !== track.id){
+    audioEl.src = track.audioUrl;
+    audioEl.dataset.trackId = track.id;
+  }
+  if(!audioCtx){
+    const AC = window.AudioContext || window.webkitAudioContext;
+    audioCtx = new AC();
+    const source = audioCtx.createMediaElementSource(audioEl);
+    analyserNode = audioCtx.createAnalyser();
+    analyserNode.fftSize = 256;
+    analyserData = new Uint8Array(analyserNode.frequencyBinCount);
+    source.connect(analyserNode);
+    analyserNode.connect(audioCtx.destination);
+  }
+  if(audioCtx.state==='suspended') audioCtx.resume();
+}
+
 function startPlayback(){
   if(isPlaying) return;
   isPlaying = true;
   updateTransportButtons();
-  const tickMs = 100;
-  const stepPx = PX_PER_SEC * (tickMs/1000);
-  playTimer = setInterval(()=>{
-    // re-fetch the track fresh every tick — renderTimelineScenes() replaces this node
-    // whenever the focused shot changes, so a reference captured once goes stale and
-    // reports scrollWidth 0, which was snapping the playhead back to the start.
-    const maxX = getTotalTimelinePx();
-    playheadX = Math.min(playheadX + stepPx, maxX);
-    const marker = document.getElementById('timelinePlayhead');
-    if(marker) marker.style.left = playheadX + 'px';
-    updateTimecodeReadout();
-    const anchor = anchorAtX(playheadX);
-    const newSceneId = anchor ? anchor.dataset.scene : null;
-    const newShotId = anchor ? (anchor.dataset.shot || null) : null;
-    if(newSceneId!==focus.sceneId || newShotId!==focus.shotId){
-      focus = { sceneId:newSceneId, shotId:newShotId };
-      renderTimelineScenes();
-      refreshMainPreview();
-    }
-    if(playheadX >= maxX) pausePlayback();
-  }, tickMs);
+  const track = getActiveTrack();
+  if(track && track.audioUrl){
+    try{
+      ensureAudioGraph(track);
+      const ta = state.timelineAudio;
+      const target = ta.trimIn + (playheadX / PX_PER_SEC);
+      audioEl.currentTime = Math.min(target, Math.max(ta.trimIn, ta.trimOut - 0.05));
+      audioEl.volume = Math.max(0, Math.min(1, ta.volume));
+      audioEl.play().catch(()=>{});
+    } catch(err){}
+  }
+  playStartPerf = performance.now();
+  playStartX = playheadX;
+  runPlayLoop();
 }
+
+function runPlayLoop(){
+  if(!isPlaying) return;
+  const maxX = getTotalTimelinePx();
+  const track = getActiveTrack();
+  const ta = state.timelineAudio;
+
+  if(track && audioEl && ta && !audioEl.paused){
+    const relSec = audioEl.currentTime - ta.trimIn;
+    playheadX = Math.max(0, Math.min(relSec * PX_PER_SEC, maxX));
+    if(audioEl.currentTime >= ta.trimOut - 0.02){
+      audioEl.pause();
+    }
+  } else {
+    const elapsedSec = (performance.now() - playStartPerf) / 1000;
+    playheadX = Math.min(playStartX + elapsedSec * PX_PER_SEC, maxX);
+  }
+
+  const marker = document.getElementById('timelinePlayhead');
+  if(marker) marker.style.left = playheadX + 'px';
+  updateTimecodeReadout();
+  updateVuMeter();
+
+  const anchor = anchorAtX(playheadX);
+  const newSceneId = anchor ? anchor.dataset.scene : null;
+  const newShotId = anchor ? (anchor.dataset.shot || null) : null;
+  if(newSceneId!==focus.sceneId || newShotId!==focus.shotId){
+    focus = { sceneId:newSceneId, shotId:newShotId };
+    renderTimelineScenes();
+    refreshMainPreview();
+  }
+
+  if(playheadX >= maxX){ pausePlayback(); return; }
+  playRafId = requestAnimationFrame(runPlayLoop);
+}
+
 function pausePlayback(){
-  if(playTimer){ clearInterval(playTimer); playTimer = null; }
+  if(playRafId){ cancelAnimationFrame(playRafId); playRafId = null; }
+  if(audioEl) audioEl.pause();
   isPlaying = false;
   updateTransportButtons();
+  updateVuMeter(true);
 }
 function stopPlayback(){
   pausePlayback();
   playheadX = 0;
+  if(audioEl && state.timelineAudio) audioEl.currentTime = state.timelineAudio.trimIn;
   syncFocusToPlayhead();
+}
+
+// ---------- mixer: vertical volume fader + live VU meter ----------
+function renderMixerPanel(){
+  const panel = document.getElementById('mixerPanel');
+  if(!panel) return;
+  const track = getActiveTrack();
+  if(!track || !state.timelineAudio){
+    panel.innerHTML = `<div class="mixer-empty">No audio track<br>on the timeline</div>`;
+    return;
+  }
+  const vol = Math.round(state.timelineAudio.volume * 100);
+  panel.innerHTML = `
+    <div class="mixer-track-name" title="${track.name}">${track.name}</div>
+    <div class="mixer-fader-row">
+      <div class="vu-meter"><div class="vu-meter-fill" id="vuMeterFill" style="height:0%;"></div></div>
+      <div class="fader-track" id="faderTrack">
+        <div class="fader-fill" id="faderFill" style="height:${vol}%;"></div>
+        <div class="fader-handle" id="faderHandle" style="bottom:${vol}%;"></div>
+      </div>
+    </div>
+    <div class="mixer-vol-label" id="mixerVolLabel">${vol}</div>
+  `;
+  wireFader();
+}
+
+function applyVolume(vol){
+  if(!state.timelineAudio) return;
+  vol = Math.max(0, Math.min(100, Math.round(vol)));
+  state.timelineAudio.volume = vol / 100;
+  if(audioEl) audioEl.volume = vol / 100;
+  const fill = document.getElementById('faderFill');
+  const handle = document.getElementById('faderHandle');
+  const label = document.getElementById('mixerVolLabel');
+  if(fill) fill.style.height = vol + '%';
+  if(handle) handle.style.bottom = vol + '%';
+  if(label) label.textContent = vol;
+}
+
+function wireFader(){
+  const trackEl = document.getElementById('faderTrack');
+  if(!trackEl) return;
+  function setFromClientY(clientY){
+    const rect = trackEl.getBoundingClientRect();
+    let ratio = 1 - (clientY - rect.top) / rect.height; // ratio-based: immune to CSS zoom, top=100%
+    applyVolume(ratio * 100);
+  }
+  trackEl.addEventListener('pointerdown', (e)=>{
+    e.preventDefault();
+    trackEl.setPointerCapture(e.pointerId);
+    setFromClientY(e.clientY);
+    const onMove = (ev)=> setFromClientY(ev.clientY);
+    const onUp = ()=>{
+      trackEl.removeEventListener('pointermove', onMove);
+      trackEl.removeEventListener('pointerup', onUp);
+    };
+    trackEl.addEventListener('pointermove', onMove);
+    trackEl.addEventListener('pointerup', onUp);
+  });
+}
+
+function updateVuMeter(reset){
+  const fill = document.getElementById('vuMeterFill');
+  if(!fill) return;
+  if(reset || !analyserNode || !isPlaying){
+    fill.style.height = '0%';
+    return;
+  }
+  analyserNode.getByteTimeDomainData(analyserData);
+  let sumSquares = 0;
+  for(let i=0;i<analyserData.length;i++){
+    const v = (analyserData[i]-128)/128;
+    sumSquares += v*v;
+  }
+  const rms = Math.sqrt(sumSquares/analyserData.length);
+  const level = Math.min(1, rms*3.2);
+  fill.style.height = Math.round(level*100) + '%';
 }
 
 // ---------- main timeline-synced preview ----------
@@ -1452,7 +1628,7 @@ function renderAssets(){
     const head = document.createElement('div');
     head.className='cat-head' + (cat.collapsed ? ' collapsed' : '');
     head.innerHTML = `
-      <i class="ti ti-chevron-down chev"></i>
+      <svg class="chev" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
       <i class="ti ${cat.icon} folder"></i>
       <span class="cat-name">${cat.name}</span>
       <span class="cat-count">${displayItems.length || ''}</span>
@@ -2544,6 +2720,7 @@ function computeWavePeaks(audioBuffer, resolution){
 
 // ---------- timeline / audio track ----------
 function setTimelineAudioTrack(trackId){
+  pausePlayback();
   state.timelineAudio = { trackId, trimIn:0, trimOut:null, volume:1 };
   const musicCat = state.categories.find(c=>c.key==='music');
   const track = musicCat.items.find(t=>t.id===trackId);
@@ -2555,6 +2732,7 @@ function renderTimeline(){
   const musicCat = state.categories.find(c=>c.key==='music');
   const waveformWrap = document.getElementById('waveformWrap');
   if(!waveformWrap) return;
+  renderMixerPanel();
 
   if(state.timelineAudio){
     const track = musicCat.items.find(t=>t.id===state.timelineAudio.trackId);
@@ -2603,11 +2781,6 @@ function renderRealAudioTrack(track){
     <div class="waveform real-audio">
       <div class="audio-sticky-label"><div class="audio-sticky-label-inner">
         <span class="track-name"><i class="ti ti-music"></i> ${track.name}</span>
-        <div class="vol-control" title="Volume">
-          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="4,9 8,9 12,5 12,19 8,15 4,15"></polygon><path d="M16 8a5 5 0 0 1 0 8"></path></svg>
-          <input type="range" min="0" max="150" value="${Math.round(ta.volume*100)}" id="audioVolInput">
-          <span id="audioVolLabel">${Math.round(ta.volume*100)}%</span>
-        </div>
       </div></div>
       <div class="audio-clip-wrap" id="audioClipWrap" style="width:${clipWidth}px;">
         <canvas class="wave-canvas" id="wave"></canvas>
@@ -2616,11 +2789,6 @@ function renderRealAudioTrack(track){
       </div>
     </div>`;
   requestAnimationFrame(()=> drawRealWave(track, ta.trimIn, ta.trimOut));
-
-  document.getElementById('audioVolInput').addEventListener('input', (e)=>{
-    ta.volume = parseInt(e.target.value,10)/100;
-    document.getElementById('audioVolLabel').textContent = e.target.value + '%';
-  });
 
   const clipWrap = document.getElementById('audioClipWrap');
   function wireAudioTrim(handleId, side){
