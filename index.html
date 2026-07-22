@@ -1118,7 +1118,6 @@ function getActiveTrack(){
 function ensureAudioGraph(track){
   if(!audioEl){
     audioEl = new Audio();
-    audioEl.crossOrigin = 'anonymous';
   }
   if(audioEl.dataset.trackId !== track.id){
     audioEl.src = track.audioUrl;
@@ -1143,14 +1142,26 @@ function startPlayback(){
   updateTransportButtons();
   const track = getActiveTrack();
   if(track && track.audioUrl){
-    try{
-      ensureAudioGraph(track);
-      const ta = state.timelineAudio;
-      const target = ta.trimIn + (playheadX / PX_PER_SEC);
-      audioEl.currentTime = Math.min(target, Math.max(ta.trimIn, ta.trimOut - 0.05));
-      audioEl.volume = Math.max(0, Math.min(1, ta.volume));
-      audioEl.play().catch(()=>{});
-    } catch(err){}
+    try{ ensureAudioGraph(track); } catch(err){ console.warn('Audio setup failed:', err); }
+    const ta = state.timelineAudio;
+    const seekAndPlay = ()=>{
+      try{
+        const target = ta.trimIn + (playheadX / PX_PER_SEC);
+        const safeOut = Math.max(ta.trimIn, (ta.trimOut || audioEl.duration || target) - 0.05);
+        audioEl.currentTime = Math.min(target, safeOut);
+        audioEl.volume = Math.max(0, Math.min(1, ta.volume));
+        const p = audioEl.play();
+        if(p && p.catch) p.catch(err=> console.warn('Audio play() was blocked:', err));
+      } catch(err){ console.warn('Audio seek/play failed:', err); }
+    };
+    // readyState 0 (HAVE_NOTHING) right after assigning src means duration/seeking
+    // aren't reliable yet on some browsers — wait for metadata instead of failing silently.
+    if(audioEl.readyState >= 1){
+      seekAndPlay();
+    } else {
+      audioEl.addEventListener('loadedmetadata', seekAndPlay, { once:true });
+      audioEl.load();
+    }
   }
   playStartPerf = performance.now();
   playStartX = playheadX;
