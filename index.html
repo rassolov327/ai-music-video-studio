@@ -352,6 +352,23 @@
   }
   .scene-label-btn:hover{background:var(--bg-elevated);color:var(--text-1);opacity:1;}
   .scene-cells-row{display:flex;align-items:center;gap:3px;padding:5px;border-radius:8px;}
+  .scene-cells-row.edit-mode{gap:0;padding:5px 0;}
+  .timeline-mode-row{display:flex;gap:2px;padding:6px 12px 0;}
+  .mode-tab{
+    padding:4px 10px;font-size:11px;color:var(--text-3);cursor:pointer;border-radius:5px 5px 0 0;
+    border:1px solid transparent;border-bottom:none;
+  }
+  .mode-tab.active{color:var(--text-1);background:var(--bg-elevated);border-color:var(--line);}
+  .mode-tab:hover{color:var(--text-1);}
+  .shot-thumb.edit-clip{border-radius:0;}
+  .shot-thumb.edit-clip:first-child{border-top-left-radius:6px;border-bottom-left-radius:6px;}
+  .shot-thumb.edit-clip:last-child{border-top-right-radius:6px;border-bottom-right-radius:6px;}
+  .shot-thumb.edit-clip.dragging{opacity:.6;box-shadow:0 0 0 2px #fff;z-index:3;}
+  .edit-append-btn{
+    flex:0 0 22px;height:60px;border:1px dashed rgba(255,255,255,.25);display:flex;align-items:center;
+    justify-content:center;color:rgba(255,255,255,.5);cursor:pointer;border-radius:0 6px 6px 0;
+  }
+  .edit-append-btn:hover{border-color:var(--accent);color:var(--accent-text);}
   .scene-rename-input{
     background:var(--bg-app);border:1px solid var(--accent);color:var(--text-1);
     font-size:10.5px;border-radius:4px;padding:1px 3px;font-family:var(--font-ui);width:100px;
@@ -476,6 +493,10 @@
       </div>
 
       <div class="timeline-area">
+        <div class="timeline-mode-row">
+          <div class="mode-tab active" id="modeAssemblyBtn" data-mode="assembly">Assembly</div>
+          <div class="mode-tab" id="modeEditBtn" data-mode="edit">Edit</div>
+        </div>
         <div class="timeline-scenes" id="timelineScenes"></div>
         <div id="waveformWrap"></div>
         <div class="timecode-row">
@@ -514,6 +535,7 @@ const state = {
 
 let sceneSeq = 1, shotSeq = 1, paletteSeq = 0, charSeq = 1, locSeq = 1;
 let focus = { sceneId: null, shotId: null };
+let timelineMode = 'assembly'; // 'assembly' (spaced, insert-between) | 'edit' (flush clips, drag-to-reorder within scene)
 let playheadX = 0;
 const PX_PER_SEC = 40; // scale of the ruler/track: 1 real second of playback = 40px
 // CSS `zoom` scales rendered/visual pixels (getBoundingClientRect, clientX) but NOT layout
@@ -644,6 +666,7 @@ function setFocus(sceneId, shotId){
 
 function renderTimelineScenes(){
   if(!timelineScenesEl) return;
+  const isEdit = timelineMode==='edit';
 
   let trackHtml = '<div class="timeline-track" id="timelineTrack">';
   state.scenes.forEach(scene=>{
@@ -657,18 +680,19 @@ function renderTimelineScenes(){
           <span class="scene-label-btn" data-del-scene="${scene.id}" title="Delete scene">${trashSvg(9)}</span>
         </span>
       </div>
-      <div class="scene-cells-row" style="background:${col.bg};">`;
+      <div class="scene-cells-row${isEdit?' edit-mode':''}" style="background:${col.bg};">`;
 
     if(scene.shots.length===0){
       trackHtml += `<div class="empty-scene-cell" data-anchor data-scene="${scene.id}" data-add-at="${scene.id}|0" title="Add first shot">${plusSvg(18)}</div>`;
     } else {
-      trackHtml += `<div class="insert-btn" data-add-at="${scene.id}|0" title="Insert shot">${plusSvg(11)}</div>`;
+      if(!isEdit) trackHtml += `<div class="insert-btn" data-add-at="${scene.id}|0" title="Insert shot">${plusSvg(11)}</div>`;
       scene.shots.forEach((shot, i)=>{
         const isFocused = focus.sceneId===scene.id && focus.shotId===shot.id;
         const wpx = Math.round(shot.duration * PX_PER_SEC);
         const thumbBg = shot.previewImage ? '' : `background:${col.thumb};`;
+        const editBorder = isEdit ? `border-bottom:3px solid ${col.dot};` : '';
         trackHtml += `
-          <div class="shot-thumb${isFocused?' focused':''}" data-anchor data-scene="${scene.id}" data-shot="${shot.id}" style="${thumbBg}width:${wpx}px;flex-basis:${wpx}px;">
+          <div class="shot-thumb${isFocused?' focused':''}${isEdit?' edit-clip':''}" data-anchor data-scene="${scene.id}" data-shot="${shot.id}" style="${thumbBg}${editBorder}width:${wpx}px;flex-basis:${wpx}px;">
             ${shot.previewImage ? `<img src="${shot.previewImage}">` : ''}
             <div class="shot-trim left" data-trim="${scene.id}|${shot.id}|left" title="Drag to trim"></div>
             <div class="shot-trim right" data-trim="${scene.id}|${shot.id}|right" title="Drag to trim"></div>
@@ -677,8 +701,9 @@ function renderTimelineScenes(){
             <span class="st-name" data-rename-shot="${scene.id}|${shot.id}">${shot.name}</span>
             <span class="st-meta">${shot.duration}s</span>
           </div>
-          <div class="insert-btn" data-add-at="${scene.id}|${i+1}" title="Insert shot">${plusSvg(11)}</div>`;
+          ${!isEdit ? `<div class="insert-btn" data-add-at="${scene.id}|${i+1}" title="Insert shot">${plusSvg(11)}</div>` : ''}`;
       });
+      if(isEdit) trackHtml += `<div class="edit-append-btn" data-add-at="${scene.id}|${scene.shots.length}" title="Add shot to end">${plusSvg(12)}</div>`;
     }
     trackHtml += `</div></div>`;
   });
@@ -720,6 +745,7 @@ function renderTimelineScenes(){
   timelineScenesEl.querySelectorAll('.shot-thumb').forEach(el=>{
     el.onclick = (e)=>{
       if(e.target.closest('.block-del') || e.target.closest('.block-rename') || e.target.closest('.shot-trim')) return;
+      if(el.dataset.wasDragged) { delete el.dataset.wasDragged; return; }
       setFocus(el.dataset.scene, el.dataset.shot);
     };
   });
@@ -762,13 +788,63 @@ function renderTimelineScenes(){
       el.addEventListener('pointerup', onUp);
     });
   });
-  timelineScenesEl.querySelectorAll('.empty-scene-cell').forEach(el=>{
-    // clicking the empty cell both adds a shot (via data-add-at handler above) — no separate focus needed
-  });
+
+  if(isEdit) wireEditModeReorder();
 
   renderRuler();
   positionPlayhead();
   wireTimelineDrag();
+}
+
+function wireEditModeReorder(){
+  timelineScenesEl.querySelectorAll('.shot-thumb.edit-clip').forEach(el=>{
+    el.addEventListener('pointerdown', (e)=>{
+      if(e.target.closest('.shot-trim') || e.target.closest('.block-del') || e.target.closest('.block-rename')) return;
+      const sceneId = el.dataset.scene;
+      const shotId = el.dataset.shot;
+      el.setPointerCapture(e.pointerId);
+      let moved = false;
+      let lastSwapX = e.clientX;
+      const onMove = (ev)=>{
+        if(Math.abs(ev.clientX - lastSwapX) < 4 && !moved) return;
+        if(!moved){ moved = true; el.classList.add('dragging'); }
+        const scene = state.scenes.find(s=>s.id===sceneId);
+        if(!scene) return;
+        const rect = el.getBoundingClientRect();
+        const draggedCenter = rect.left + rect.width/2;
+        const siblings = Array.from(timelineScenesEl.querySelectorAll(`.shot-thumb.edit-clip[data-scene="${sceneId}"]`));
+        for(const sib of siblings){
+          if(sib===el) continue;
+          const sRect = sib.getBoundingClientRect();
+          const sCenter = sRect.left + sRect.width/2;
+          const overSib = ev.clientX > sRect.left && ev.clientX < sRect.right;
+          if(overSib){
+            const fromIdx = scene.shots.findIndex(sh=>sh.id===shotId);
+            const toIdx = scene.shots.findIndex(sh=>sh.id===sib.dataset.shot);
+            if(fromIdx>-1 && toIdx>-1 && fromIdx!==toIdx){
+              const [moved_] = scene.shots.splice(fromIdx,1);
+              scene.shots.splice(toIdx,0,moved_);
+              lastSwapX = ev.clientX;
+              renderTimelineScenes();
+              const again = timelineScenesEl.querySelector(`.shot-thumb.edit-clip[data-shot="${shotId}"]`);
+              if(again){ again.classList.add('dragging'); again.setPointerCapture(e.pointerId); }
+            }
+            break;
+          }
+        }
+      };
+      const onUp = ()=>{
+        el.removeEventListener('pointermove', onMove);
+        el.removeEventListener('pointerup', onUp);
+        if(moved){
+          const stillHere = timelineScenesEl.querySelector(`.shot-thumb.edit-clip[data-shot="${shotId}"]`);
+          if(stillHere){ stillHere.classList.remove('dragging'); stillHere.dataset.wasDragged = '1'; }
+        }
+      };
+      el.addEventListener('pointermove', onMove);
+      el.addEventListener('pointerup', onUp);
+    });
+  });
 }
 
 function getTotalTimelinePx(){
@@ -2271,11 +2347,12 @@ renderAssets();
 renderTimelineScenes();
 refreshMainPreview();
 renderTimeline();
-document.getElementById('homeBtn').onclick = ()=>{
+function goHome(){
   document.querySelectorAll('.item.selected').forEach(el=>el.classList.remove('selected'));
   pausePlayback();
   refreshMainPreview();
-};
+}
+document.getElementById('homeBtn').onclick = goHome;
 document.getElementById('playBtn').onclick = startPlayback;
 document.getElementById('pauseBtn').onclick = pausePlayback;
 document.getElementById('stopBtn').onclick = stopPlayback;
@@ -2283,12 +2360,29 @@ document.getElementById('playBtn2').onclick = startPlayback;
 document.getElementById('pauseBtn2').onclick = pausePlayback;
 document.getElementById('stopBtn2').onclick = stopPlayback;
 updateTransportButtons();
+document.getElementById('modeAssemblyBtn').onclick = ()=>{
+  timelineMode = 'assembly';
+  document.getElementById('modeAssemblyBtn').classList.add('active');
+  document.getElementById('modeEditBtn').classList.remove('active');
+  renderTimelineScenes();
+};
+document.getElementById('modeEditBtn').onclick = ()=>{
+  timelineMode = 'edit';
+  document.getElementById('modeEditBtn').classList.add('active');
+  document.getElementById('modeAssemblyBtn').classList.remove('active');
+  renderTimelineScenes();
+};
 window.addEventListener('keydown', (e)=>{
-  if(e.code!=='Space') return;
   const tag = document.activeElement && document.activeElement.tagName;
-  if(tag==='INPUT' || tag==='TEXTAREA' || tag==='SELECT' || (document.activeElement && document.activeElement.isContentEditable)) return;
-  e.preventDefault();
-  if(isPlaying) pausePlayback(); else startPlayback();
+  const inField = tag==='INPUT' || tag==='TEXTAREA' || tag==='SELECT' || (document.activeElement && document.activeElement.isContentEditable);
+  if(e.code==='Space'){
+    if(inField) return;
+    e.preventDefault();
+    if(isPlaying) pausePlayback(); else startPlayback();
+  } else if(e.code==='Escape'){
+    if(inField){ document.activeElement.blur(); return; }
+    goHome();
+  }
 });
 window.addEventListener('resize', drawWave);
 </script>
