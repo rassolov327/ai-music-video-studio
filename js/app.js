@@ -1,12 +1,17 @@
 // ---------- init ----------
-renderAssets();
-renderTimelineScenes();
-refreshMainPreview();
 function goHome(){
   document.querySelectorAll('.item.selected').forEach(el=>el.classList.remove('selected'));
   pausePlayback();
   refreshMainPreview();
 }
+(async function(){
+  const restored = await initProjectStore();
+  if(!restored){
+    renderAssets();
+    renderTimelineScenes();
+    refreshMainPreview();
+  }
+})();
 document.getElementById('homeBtn').onclick = goHome;
 document.getElementById('playBtn2').onclick = startPlayback;
 document.getElementById('pauseBtn2').onclick = pausePlayback;

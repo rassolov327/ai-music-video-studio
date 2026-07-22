@@ -1,4 +1,5 @@
 function renderAssets(){
+  if(typeof markProjectDirty==='function') markProjectDirty();
   assetsEl.innerHTML='';
   state.categories.forEach(cat=>{
     const isScenes = cat.key==='scenes';

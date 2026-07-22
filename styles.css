@@ -40,8 +40,14 @@
   .brand i{color:var(--accent);font-size:18px;}
   .menu{display:flex;gap:14px;color:var(--text-2);font-size:12.5px;}
   .menu span:hover{color:var(--text-1);cursor:default;}
-  .proj-title{margin-left:auto;margin-right:auto;color:var(--text-2);font-size:12.5px;}
+  .proj-title{margin-left:auto;color:var(--text-2);font-size:12.5px;}
   .proj-title b{color:var(--text-1);font-weight:500;}
+  .save-status{
+    font-size:11px;color:var(--text-3);margin:0 10px;font-family:var(--font-mono);min-width:70px;
+  }
+  .save-status.saving{color:var(--text-2);}
+  .save-status.saved{color:#5fae7a;}
+  .save-status.error{color:var(--danger);}
   .topbar-actions{display:flex;gap:6px;}
   .tbtn{
     display:flex;align-items:center;gap:6px;

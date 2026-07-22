@@ -87,6 +87,7 @@ function setFocus(sceneId, shotId){
 }
 
 function renderTimelineScenes(){
+  if(typeof markProjectDirty==='function') markProjectDirty();
   if(!timelineScenesEl) return;
   const isEdit = timelineMode==='edit';
 

@@ -110,6 +110,7 @@ function stopPlayback(){
 
 // ---------- mixer: vertical volume fader + live VU meter ----------
 function renderMixerPanel(){
+  if(typeof markProjectDirty==='function') markProjectDirty();
   const panel = document.getElementById('mixerPanel');
   if(!panel) return;
   const track = getActiveTrack();

@@ -9,6 +9,7 @@ function setTimelineAudioTrack(trackId){
 }
 
 function renderTimeline(){
+  if(typeof markProjectDirty==='function') markProjectDirty();
   const musicCat = state.categories.find(c=>c.key==='music');
   const waveformWrap = document.getElementById('waveformWrap');
   if(!waveformWrap) return;

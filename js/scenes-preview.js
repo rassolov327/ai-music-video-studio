@@ -132,6 +132,7 @@ function showSceneGallery(sceneId){
 }
 
 function refreshMainPreview(){
+  if(typeof markProjectDirty==='function') markProjectDirty();
   previewEl.classList.remove('align-tl');
   previewEl.onclick = null;
 
