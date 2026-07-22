@@ -125,12 +125,10 @@
   /* ---- Center column ---- */
   .center{flex:1 1 auto;display:flex;flex-direction:column;min-width:0;}
   .preview-bar{
-    display:grid;grid-template-columns:1fr auto 1fr;align-items:center;column-gap:10px;padding:6px 12px;
+    display:flex;align-items:center;gap:10px;padding:6px 12px;
     border-bottom:1px solid var(--line);color:var(--text-2);font-size:12px;flex:0 0 auto;
   }
-  .pb-left{display:flex;align-items:center;gap:10px;justify-self:start;min-width:0;overflow:hidden;}
-  .pb-transport{display:flex;align-items:center;gap:6px;justify-self:center;}
-  .pb-right{justify-self:end;}
+  .pb-left{display:flex;align-items:center;gap:10px;min-width:0;overflow:hidden;}
   .preview-bar #homeBtn{padding:4px 9px;flex:0 0 auto;}
   .preview-bar #previewBar{font-weight:500;color:var(--text-1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .transport-btn{
@@ -140,7 +138,7 @@
   .transport-btn:hover{color:var(--text-1);border-color:#3a3e48;}
   .transport-btn.active{background:var(--accent-dim);border-color:#5a4526;color:var(--accent-text);}
   .preview-transport{
-    display:flex;align-items:center;gap:6px;padding:6px 12px;
+    display:flex;align-items:center;justify-content:center;gap:6px;padding:6px 12px;
     border-bottom:1px solid var(--line);flex:0 0 auto;
   }
   .preview-tc{font-family:var(--font-mono);font-size:11px;color:var(--text-2);margin-left:6px;}
@@ -476,19 +474,13 @@
           <button class="tbtn" id="homeBtn" title="Back to main screen"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"></path><path d="M5 10v10a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V10"></path></svg>Home</button>
           <span id="previewBar">Preview</span>
         </div>
-        <div class="pb-transport">
-          <button class="transport-btn" id="playBtn" title="Play"><svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><polygon points="5,3 19,12 5,21"></polygon></svg></button>
-          <button class="transport-btn" id="pauseBtn" title="Pause"><svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><rect x="5" y="3" width="5" height="18"></rect><rect x="14" y="3" width="5" height="18"></rect></svg></button>
-          <button class="transport-btn" id="stopBtn" title="Stop"><svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><rect x="4" y="4" width="16" height="16"></rect></svg></button>
-        </div>
-        <div class="pb-right"></div>
       </div>
       <div class="preview" id="preview"></div>
       <div class="preview-transport">
         <button class="transport-btn" id="playBtn2" title="Play"><svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><polygon points="5,3 19,12 5,21"></polygon></svg></button>
         <button class="transport-btn" id="pauseBtn2" title="Pause"><svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><rect x="5" y="3" width="5" height="18"></rect><rect x="14" y="3" width="5" height="18"></rect></svg></button>
         <button class="transport-btn" id="stopBtn2" title="Stop"><svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><rect x="4" y="4" width="16" height="16"></rect></svg></button>
-        <span class="preview-tc" id="tcCurrent2">0:00</span>
+        <span class="preview-tc" id="tcCurrent2">0:00:00</span>
       </div>
 
       <div class="timeline-area">
@@ -537,6 +529,7 @@ let focus = { sceneId: null, shotId: null };
 let timelineMode = 'assembly'; // 'assembly' (spaced, insert-between) | 'edit' (flush clips, drag-to-reorder within scene)
 let playheadX = 0;
 const PX_PER_SEC = 40; // scale of the ruler/track: 1 real second of playback = 40px
+const PROJECT_FPS = 24; // standard film rate — used for the frame-accurate timecode readout
 // CSS `zoom` scales rendered/visual pixels (getBoundingClientRect, clientX) but NOT layout
 // pixels (offsetLeft/offsetWidth/scrollWidth) — read it once so pointer math can convert
 // between the two consistently instead of drifting off the cursor.
@@ -572,6 +565,12 @@ function formatTimecode(seconds){
   const m = Math.floor(seconds/60);
   const s = Math.floor(seconds%60);
   return m + ':' + String(s).padStart(2,'0');
+}
+function formatTimecodeFrames(seconds){
+  const m = Math.floor(seconds/60);
+  const s = Math.floor(seconds%60);
+  const f = Math.floor((seconds - Math.floor(seconds)) * PROJECT_FPS);
+  return m + ':' + String(s).padStart(2,'0') + ':' + String(f).padStart(2,'0');
 }
 function sceneColor(scene){ return TIMELINE_COLORS[scene.colorIdx % TIMELINE_COLORS.length]; }
 
@@ -924,7 +923,7 @@ function updateTimecodeReadout(){
   const cur2 = document.getElementById('tcCurrent2');
   if(cur) cur.textContent = formatTimecode(playheadX / PX_PER_SEC);
   if(tot) tot.textContent = formatTimecode(getActualClipDurationSec());
-  if(cur2) cur2.textContent = formatTimecode(playheadX / PX_PER_SEC);
+  if(cur2) cur2.textContent = formatTimecodeFrames(playheadX / PX_PER_SEC);
 }
 
 function renderRuler(){
@@ -1044,12 +1043,8 @@ let isPlaying = false;
 let playTimer = null;
 
 function updateTransportButtons(){
-  const playBtn = document.getElementById('playBtn');
-  const pauseBtn = document.getElementById('pauseBtn');
   const playBtn2 = document.getElementById('playBtn2');
   const pauseBtn2 = document.getElementById('pauseBtn2');
-  if(playBtn) playBtn.classList.toggle('active', isPlaying);
-  if(pauseBtn) pauseBtn.classList.toggle('active', !isPlaying);
   if(playBtn2) playBtn2.classList.toggle('active', isPlaying);
   if(pauseBtn2) pauseBtn2.classList.toggle('active', !isPlaying);
 }
@@ -2416,9 +2411,6 @@ function goHome(){
   refreshMainPreview();
 }
 document.getElementById('homeBtn').onclick = goHome;
-document.getElementById('playBtn').onclick = startPlayback;
-document.getElementById('pauseBtn').onclick = pausePlayback;
-document.getElementById('stopBtn').onclick = stopPlayback;
 document.getElementById('playBtn2').onclick = startPlayback;
 document.getElementById('pauseBtn2').onclick = pausePlayback;
 document.getElementById('stopBtn2').onclick = stopPlayback;
