@@ -309,6 +309,37 @@
     display:flex;align-items:center;justify-content:center;color:var(--text-3);cursor:pointer;flex:0 0 auto;
   }
   .angle-tile-add:hover{border-color:var(--accent);color:var(--accent-text);}
+
+  .req-checklist{
+    background:var(--bg-panel-2);border:1px solid var(--line);border-radius:6px;
+    padding:10px 12px;margin-bottom:14px;font-size:11px;color:var(--text-3);line-height:1.65;
+  }
+  .req-checklist .req-title{color:var(--text-2);font-weight:500;margin-bottom:4px;font-size:11px;}
+  .angle-progress{font-size:10.5px;color:var(--text-3);margin-bottom:8px;font-family:var(--font-mono);}
+  .angle-progress b{color:var(--text-2);}
+  .angle-slots-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px;}
+  .angle-slot{
+    position:relative;aspect-ratio:1;border-radius:8px;border:1px dashed var(--line);
+    background:var(--bg-panel-2);display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:4px;cursor:pointer;overflow:hidden;color:var(--text-3);text-align:center;padding:4px;
+  }
+  .angle-slot:hover{border-color:var(--accent);color:var(--accent-text);}
+  .angle-slot.optional{border-style:dotted;}
+  .angle-slot.filled{border-style:solid;border-color:var(--line);color:var(--text-3);}
+  .angle-slot img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
+  .angle-slot .slot-plus{position:relative;z-index:1;}
+  .angle-slot .slot-label{position:relative;z-index:1;font-size:9.5px;line-height:1.3;}
+  .angle-slot.filled .slot-label{
+    position:absolute;left:0;right:0;bottom:0;z-index:1;background:rgba(0,0,0,.6);color:#fff;
+    padding:3px 2px;
+  }
+  .angle-slot .slot-remove{
+    position:absolute;top:3px;right:3px;width:16px;height:16px;border-radius:4px;z-index:2;
+    background:rgba(0,0,0,.55);color:#fff;display:none;align-items:center;justify-content:center;opacity:.75;
+  }
+  .angle-slot.filled .slot-remove{display:flex;}
+  .angle-slot .slot-remove:hover{background:rgba(217,105,95,.85);opacity:1;}
+  .turnaround-sheet-preview{width:100%;border-radius:6px;border:1px solid var(--line);margin-bottom:10px;display:block;}
   .cf-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px;}
   .form-tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:14px;}
   .form-tab{
@@ -614,6 +645,33 @@ function plusSvg(size){
 function noteSvg(size){
   return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>`;
 }
+
+// Angle set for the character turnaround sheet — mirrors how reference-based consistency
+// actually works in models like Kling Elements / GPT-Image-1 / Nano Banana: a handful of
+// well-chosen angles + one expression beats a pile of near-duplicate photos.
+const CHAR_ANGLE_SLOTS = [
+  { key:'front',            label:'Front',        hint:'Neutral face, straight at camera', required:true },
+  { key:'threeQuarterLeft', label:'3/4 Left',      hint:'Head turned ~45° left',            required:true },
+  { key:'threeQuarterRight',label:'3/4 Right',     hint:'Head turned ~45° right',           required:true },
+  { key:'profile',          label:'Profile',       hint:'Full side view',                   required:true },
+  { key:'fullBody',         label:'Full body',     hint:'Neutral pose, base outfit',         required:true },
+  { key:'smile',            label:'Expression',    hint:'Smiling / genuine expression',      required:true },
+  { key:'back',             label:'Back',          hint:'Back of head (optional)',           required:false },
+  { key:'closeup',          label:'Close-up',      hint:'Distinctive detail (optional)',     required:false },
+];
+function emptyAngleSlots(){
+  const obj = {};
+  CHAR_ANGLE_SLOTS.forEach(s=> obj[s.key]=null);
+  return obj;
+}
+function filledCoreAngleCount(slots){
+  if(!slots) return 0;
+  return CHAR_ANGLE_SLOTS.filter(s=>s.required && slots[s.key]).length;
+}
+function coreAngleCountTotal(){
+  return CHAR_ANGLE_SLOTS.filter(s=>s.required).length;
+}
+
 function formatTimecode(seconds){
   const m = Math.floor(seconds/60);
   const s = Math.floor(seconds%60);
@@ -1768,7 +1826,8 @@ function showGenericPlaceholder(cat){
 // ---------- preview: characters gallery (tile grid) ----------
 function characterStatus(it){
   if(!it.name || !it.photo || !it.role || !it.description) return 'red';
-  if(!it.referenceCard) return 'yellow';
+  const coreDone = filledCoreAngleCount(it.angleSlots) >= coreAngleCountTotal();
+  if(!coreDone || !it.referenceCard) return 'yellow';
   return 'green';
 }
 
@@ -1972,7 +2031,12 @@ function buildReferenceCardText(it, kind){
   lines.push('name: ' + it.name);
   if(it.role) lines.push('role: ' + it.role);
   lines.push('primary_photo: ' + (it.photo ? 'attached (1)' : 'none'));
-  lines.push((kind==='location' ? 'angle_refs: ' : 'angle_refs: ') + ((it.angles && it.angles.length) || 0) + ' attached');
+  if(kind==='character' && it.angleSlots){
+    const filled = CHAR_ANGLE_SLOTS.filter(s=>it.angleSlots[s.key]).map(s=>s.label);
+    lines.push('angle_refs: ' + filled.length + ' attached (' + (filled.join(', ') || 'none') + ')');
+  } else {
+    lines.push('angle_refs: ' + ((it.angles && it.angles.length) || 0) + ' attached');
+  }
   if(it.description) lines.push('description: ' + it.description);
   lines.push('');
   lines.push('consistency_rule:');
@@ -1992,21 +2056,77 @@ function buildReferenceCardText(it, kind){
   return lines.join('\n');
 }
 
+// Composites the filled angle slots into one "turnaround sheet" image — entirely local
+// (canvas), no network call. This is the same asset a real KIE call would later send as
+// the reference image(s) to Kling Elements / GPT-Image-1 / Nano Banana etc.
+function buildTurnaroundSheet(data){
+  const slots = data.angleSlots;
+  if(!slots) return Promise.resolve(null);
+  const present = CHAR_ANGLE_SLOTS.filter(s=>slots[s.key]);
+  if(present.length===0) return Promise.resolve(null);
+
+  const cellW = 220, cellH = 220, labelH = 24, pad = 10;
+  const cols = Math.min(4, present.length);
+  const rows = Math.ceil(present.length/cols);
+  const canvas = document.createElement('canvas');
+  canvas.width = cols*cellW + (cols+1)*pad;
+  canvas.height = rows*(cellH+labelH) + (rows+1)*pad;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#15171b';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  const loads = present.map((slotDef, i)=> new Promise((resolve)=>{
+    const img = new Image();
+    img.onload = ()=>{
+      const col = i % cols, row = Math.floor(i/cols);
+      const x = pad + col*(cellW+pad), y = pad + row*(cellH+labelH+pad);
+      const scale = Math.max(cellW/img.naturalWidth, cellH/img.naturalHeight);
+      const sw = cellW/scale, sh = cellH/scale;
+      const sx = (img.naturalWidth-sw)/2, sy = (img.naturalHeight-sh)/2;
+      ctx.drawImage(img, sx, sy, sw, sh, x, y, cellW, cellH);
+      ctx.fillStyle = '#9498a0';
+      ctx.font = '13px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(slotDef.label, x+cellW/2, y+cellH+17);
+      resolve();
+    };
+    img.onerror = resolve;
+    img.src = slots[slotDef.key];
+  }));
+
+  return Promise.all(loads).then(()=> canvas.toDataURL('image/png'));
+}
+
 function renderGenBlock(sectionEl, data, refText, onGenerate, opts){
   if(!sectionEl) return;
   opts = opts || {};
   const kind = opts.kind || 'character';
   const requireRole = opts.requireRole !== false;
-  const hasAllData = !!(data.name && data.photo && data.description && (!requireRole || data.role));
+  const hasBasics = !!(data.name && data.photo && data.description && (!requireRole || data.role));
 
-  if(!hasAllData){
-    sectionEl.innerHTML = `<div class="gen-hint">Add a photo${requireRole ? ', role' : ''} and description to generate this ${kind}'s AI reference card.</div>`;
+  let anglesOk = true, angleHint = '';
+  if(opts.requireCoreAngles){
+    const filled = filledCoreAngleCount(data.angleSlots);
+    const total = coreAngleCountTotal();
+    anglesOk = filled >= total;
+    angleHint = `${filled}/${total} core angles`;
+  }
+
+  if(!hasBasics || !anglesOk){
+    const missing = [];
+    if(!hasBasics) missing.push(`photo${requireRole?', role':''} and description`);
+    if(!anglesOk) missing.push(`all core reference angles (${angleHint})`);
+    sectionEl.innerHTML = `<div class="gen-hint">Add ${missing.join(' and ')} to generate this ${kind}'s AI reference card.</div>`;
     return;
   }
+
+  const sheet = opts.existingSheet;
+  const sheetHtml = sheet ? `<img class="turnaround-sheet-preview" src="${sheet}">` : '';
 
   if(refText){
     sectionEl.innerHTML = `
       <div class="ref-status"><span class="dot2"></span>Reference card generated</div>
+      ${sheetHtml}
       <div class="ref-card-box">${refText}</div>
       <div class="ref-actions">
         <button class="cf-btn" id="genRegenBtn">Regenerate <span class="gen-cost">${GEN_COST_LABEL}</span></button>
@@ -2015,7 +2135,7 @@ function renderGenBlock(sectionEl, data, refText, onGenerate, opts){
   } else {
     sectionEl.innerHTML = `
       <button class="gen-btn" id="genBtn">Generate this ${kind} for AI use <span class="gen-cost">${GEN_COST_LABEL}</span></button>
-      <div class="gen-hint">Generates a structured, AI-readable reference (via ${GEN_MODEL_LABEL}) that future shot generations will point to, so this ${kind} stays consistent from shot to shot.</div>`;
+      <div class="gen-hint">Builds a turnaround sheet from your reference photos plus a structured text card (no paid API yet — this runs locally). Future shot generations will point to this so ${kind==='location'?'the location':'this character'} stays consistent from shot to shot.</div>`;
     sectionEl.querySelector('#genBtn').onclick = ()=> runGenBlock(sectionEl, data, onGenerate, opts);
   }
 }
@@ -2024,18 +2144,30 @@ function runGenBlock(sectionEl, data, onGenerate, opts){
   if(!sectionEl) return;
   const kind = (opts && opts.kind) || 'character';
   sectionEl.innerHTML = `<button class="gen-btn" disabled><span class="gen-spin"></span>Generating…</button>`;
-  // simulated call — real integration proxies this through a backend that holds the KIE API key
-  setTimeout(()=>{
+  // simulated/local for now — once a paid backend (KIE) is wired up, this is where the real
+  // API call goes, sending the same turnaround sheet + text this already builds.
+  setTimeout(async ()=>{
     const text = buildReferenceCardText(data, kind);
-    onGenerate(text);
+    let sheet = null;
+    if(opts && opts.buildSheet){
+      try{ sheet = await opts.buildSheet(data); }catch(err){}
+    }
+    onGenerate(text, sheet);
   }, 1200);
 }
 
 function renderGenSection(cat, idx){
   const it = cat.items[idx];
-  renderGenBlock(document.getElementById('genSection'), it, it.referenceCard, (text)=>{
+  renderGenBlock(document.getElementById('genSection'), it, it.referenceCard, (text, sheet)=>{
     it.referenceCard = text;
+    if(sheet) it.turnaroundSheet = sheet;
+    renderAssets();
     renderGenSection(cat, idx);
+  }, {
+    kind:'character',
+    requireCoreAngles:true,
+    buildSheet: buildTurnaroundSheet,
+    existingSheet: it.turnaroundSheet,
   });
 }
 
@@ -2046,10 +2178,13 @@ function showCharacterCard(cat, idx){
   const it = cat.items[idx];
   previewBarEl.textContent = 'Character card — ' + it.name;
 
-  const anglesHtml = (it.angles && it.angles.length)
-    ? `<div class="char-card-section-title">Angles</div>
-       <div class="char-card-angles">${it.angles.map(a=>`<div class="char-card-angle" style="background-image:url(${a})"></div>`).join('')}</div>`
-    : '';
+  const filledSlots = it.angleSlots ? CHAR_ANGLE_SLOTS.filter(s=>it.angleSlots[s.key]) : [];
+  const coreDone = filledCoreAngleCount(it.angleSlots);
+  const anglesHtml = filledSlots.length
+    ? `<div class="char-card-section-title">Reference angles — ${coreDone}/${coreAngleCountTotal()} core</div>
+       <div class="char-card-angles">${filledSlots.map(s=>`<div class="char-card-angle" style="background-image:url(${it.angleSlots[s.key]})" title="${s.label}"></div>`).join('')}</div>`
+    : `<div class="char-card-section-title">Reference angles — 0/${coreAngleCountTotal()} core</div>
+       <div class="gen-hint" style="margin-top:0;">Add reference photos via Edit to build a full turnaround.</div>`;
 
   previewEl.innerHTML = `
     <div class="char-card" id="charCard">
@@ -2097,17 +2232,13 @@ function showCharacterForm(cat, editIdx){
   previewEl.classList.remove('align-tl');
   previewEl.onclick = null;
   previewBarEl.textContent = isEdit ? 'Edit character — ' + existing.name : 'Add asset — Band / Characters';
+
+  const angleSlots = (existing && existing.angleSlots) ? Object.assign(emptyAngleSlots(), existing.angleSlots) : emptyAngleSlots();
+
   previewEl.innerHTML = `
     <div class="char-form">
       <h3>${isEdit ? 'Edit character' : 'New character'}</h3>
       <p class="sub">${isEdit ? 'Update the saved character details.' : 'Add a band member as a digital actor for this project.'}</p>
-
-      <label class="photo-drop${existing && existing.photo ? ' has-photo' : ''}" id="photoDrop" for="photoInput" style="${existing && existing.photo ? `background-image:url(${existing.photo})` : ''}">
-        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"></path><circle cx="12" cy="13" r="3.5"></circle></svg>
-        <span>Add photo</span>
-        <div class="photo-remove" id="photoRemove"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
-      </label>
-      <input type="file" id="photoInput" accept="image/*,.heic,.heif,.tiff,.tif,.bmp,.svg,.avif,.webp" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;">
 
       <div class="cf-field">
         <label>Name</label>
@@ -2121,10 +2252,17 @@ function showCharacterForm(cat, editIdx){
         <label>Description</label>
         <textarea id="cfNotes" placeholder="Appearance, wardrobe, anything worth remembering">${existing && existing.description ? existing.description : ''}</textarea>
       </div>
+
+      <div class="req-checklist">
+        <div class="req-title">For a reliable reference set</div>
+        Even, neutral light · plain background · no sunglasses or heavy filters · face fills ~40–70% of the portrait shots · same hair/outfit across the set.
+      </div>
+
       <div class="cf-field">
-        <label>Additional angles</label>
-        <div class="angles-row" id="anglesRow"></div>
-        <input type="file" id="angleInput" accept="image/*,.heic,.heif,.tiff,.tif,.bmp,.svg,.avif,.webp" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;">
+        <label>Reference photos</label>
+        <div class="angle-progress" id="angleProgress"></div>
+        <div class="angle-slots-grid" id="angleSlotsGrid"></div>
+        <input type="file" id="slotFileInput" accept="image/*,.heic,.heif,.tiff,.tif,.bmp,.svg,.avif,.webp" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;">
       </div>
 
       <div class="gen-section" id="genSectionForm"></div>
@@ -2136,87 +2274,76 @@ function showCharacterForm(cat, editIdx){
     </div>
   `;
 
-  const anglePhotos = (existing && existing.angles) ? existing.angles.slice() : [];
-  const anglesRow = document.getElementById('anglesRow');
-  const angleInput = document.getElementById('angleInput');
   const roleInput = document.getElementById('cfRole');
   const notesInput = document.getElementById('cfNotes');
+  const nameInput = document.getElementById('cfName');
+  const saveBtn = document.getElementById('cfSave');
+  const slotFileInput = document.getElementById('slotFileInput');
   let formRefText = existing ? existing.referenceCard || null : null;
+  let formSheet = existing ? existing.turnaroundSheet || null : null;
+  let activeSlotKey = null;
 
   function refreshFormGen(){
     const data = {
       name: nameInput.value.trim(),
       role: roleInput.value.trim(),
       description: notesInput.value.trim(),
-      photo: photoDataUrl,
-      angles: anglePhotos,
+      photo: angleSlots.front,
+      angleSlots,
     };
-    renderGenBlock(document.getElementById('genSectionForm'), data, formRefText, (text)=>{
+    renderGenBlock(document.getElementById('genSectionForm'), data, formRefText, (text, sheet)=>{
       formRefText = text;
+      if(sheet) formSheet = sheet;
       refreshFormGen();
+    }, {
+      kind:'character',
+      requireCoreAngles:true,
+      buildSheet: buildTurnaroundSheet,
+      existingSheet: formSheet,
     });
   }
 
-  function renderAngles(){
-    anglesRow.innerHTML = anglePhotos.map((src,idx)=>`
-      <div class="angle-tile" style="background-image:url(${src})" data-idx="${idx}">
-        <div class="angle-tile-del" title="Remove"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
-      </div>
-    `).join('') + `
-      <label class="angle-tile-add" for="angleInput" title="Add angle"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg></label>
-    `;
-    anglesRow.querySelectorAll('.angle-tile-del').forEach(btn=>{
+  function renderSlots(){
+    const filled = filledCoreAngleCount(angleSlots);
+    document.getElementById('angleProgress').innerHTML = `<b>${filled}/${coreAngleCountTotal()}</b> core angles captured${filled>=coreAngleCountTotal()?' — nice, that\u2019s the full set':''}`;
+    const grid = document.getElementById('angleSlotsGrid');
+    grid.innerHTML = CHAR_ANGLE_SLOTS.map(s=>{
+      const src = angleSlots[s.key];
+      return `
+        <div class="angle-slot${src?' filled':''}${s.required?'':' optional'}" data-slot="${s.key}" title="${s.hint}">
+          ${src ? `<img src="${src}"><div class="slot-remove" data-remove="${s.key}">${(function(){return '<svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';})()}</div>` : `<span class="slot-plus">${plusSvg(15)}</span>`}
+          <span class="slot-label">${s.label}${s.required?'':' (opt.)'}</span>
+        </div>`;
+    }).join('');
+
+    grid.querySelectorAll('.angle-slot').forEach(el=>{
+      el.onclick = (e)=>{
+        if(e.target.closest('.slot-remove')) return;
+        activeSlotKey = el.dataset.slot;
+        slotFileInput.click();
+      };
+    });
+    grid.querySelectorAll('.slot-remove').forEach(btn=>{
       btn.onclick = (e)=>{
-        e.preventDefault();
         e.stopPropagation();
-        const idx = parseInt(e.target.closest('.angle-tile').dataset.idx, 10);
-        anglePhotos.splice(idx,1);
-        renderAngles();
+        angleSlots[btn.dataset.remove] = null;
+        renderSlots();
         refreshFormGen();
       };
     });
   }
-  angleInput.onchange = async ()=>{
-    const file = angleInput.files[0];
-    if(!file) return;
+  renderSlots();
+
+  slotFileInput.onchange = async ()=>{
+    const file = slotFileInput.files[0];
+    if(!file || !activeSlotKey) return;
     try{
       const dataUrl = await loadImageAsDataURL(file);
-      anglePhotos.push(dataUrl);
-      renderAngles();
+      angleSlots[activeSlotKey] = dataUrl;
+      renderSlots();
       refreshFormGen();
     } catch(err){}
-    angleInput.value='';
-  };
-  renderAngles();
-
-  const photoDrop = document.getElementById('photoDrop');
-  const photoInput = document.getElementById('photoInput');
-  const photoRemove = document.getElementById('photoRemove');
-  const nameInput = document.getElementById('cfName');
-  const saveBtn = document.getElementById('cfSave');
-  let photoDataUrl = existing ? existing.photo || null : null;
-  if(photoDataUrl) applyNaturalAspect(photoDrop, photoDataUrl);
-
-  photoInput.onchange = async ()=>{
-    const file = photoInput.files[0];
-    if(!file) return;
-    try{
-      photoDataUrl = await loadImageAsDataURL(file);
-      photoDrop.classList.add('has-photo');
-      photoDrop.style.backgroundImage = `url(${photoDataUrl})`;
-      applyNaturalAspect(photoDrop, photoDataUrl);
-      refreshFormGen();
-    } catch(err){}
-  };
-  photoRemove.onclick = (e)=>{
-    e.preventDefault();
-    e.stopPropagation();
-    photoDataUrl = null;
-    photoDrop.classList.remove('has-photo');
-    photoDrop.style.backgroundImage='';
-    photoDrop.style.aspectRatio='';
-    photoInput.value='';
-    refreshFormGen();
+    slotFileInput.value = '';
   };
 
   function refreshSaveState(){
@@ -2237,12 +2364,13 @@ function showCharacterForm(cat, editIdx){
       id: existing && existing.id ? existing.id : 'c' + (charSeq++),
       name: nameInput.value.trim(),
       icon: 'ti-user',
-      live: !!photoDataUrl,
-      photo: photoDataUrl,
+      live: !!angleSlots.front,
+      photo: angleSlots.front,
       role: roleInput.value.trim(),
       description: notesInput.value.trim(),
-      angles: anglePhotos.slice(),
+      angleSlots,
       referenceCard: formRefText,
+      turnaroundSheet: formSheet,
     };
     if(isEdit){
       cat.items[editIdx] = data;
