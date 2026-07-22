@@ -340,9 +340,16 @@
   .ruler-tick{
     position:absolute;top:4px;bottom:4px;width:1px;background:rgba(255,255,255,0.16);
   }
+  .ruler-tick.labeled{
+    top:0;bottom:auto;height:100%;padding-left:4px;background:none;border-left:1px solid rgba(255,255,255,0.16);
+    font-family:var(--font-mono);font-size:9.5px;color:var(--text-3);line-height:20px;white-space:nowrap;
+  }
   .timeline-track{display:flex;align-items:flex-start;gap:10px;position:relative;min-height:92px;padding:10px 12px;}
+  .timeline-track.edit-track{padding:0 12px;min-height:60px;display:block;}
+  .edit-labels-row{margin:8px 12px 0;}
   .scene-column{display:flex;flex-direction:column;gap:4px;flex:0 0 auto;}
   .scene-label-row{display:flex;align-items:center;gap:4px;padding:0 2px;height:16px;}
+  .scene-label-row.edit-label{overflow:hidden;}
   .scene-color-dot{width:7px;height:7px;border-radius:50%;flex:0 0 auto;}
   .scene-label-name{font-size:10.5px;color:var(--text-1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px;}
   .scene-label-actions{display:flex;gap:2px;margin-left:2px;}
@@ -352,7 +359,6 @@
   }
   .scene-label-btn:hover{background:var(--bg-elevated);color:var(--text-1);opacity:1;}
   .scene-cells-row{display:flex;align-items:center;gap:3px;padding:5px;border-radius:8px;}
-  .scene-cells-row.edit-mode{gap:0;padding:5px 0;}
   .timeline-mode-row{display:flex;gap:2px;padding:6px 12px 0;}
   .mode-tab{
     padding:4px 10px;font-size:11px;color:var(--text-3);cursor:pointer;border-radius:5px 5px 0 0;
@@ -361,14 +367,7 @@
   .mode-tab.active{color:var(--text-1);background:var(--bg-elevated);border-color:var(--line);}
   .mode-tab:hover{color:var(--text-1);}
   .shot-thumb.edit-clip{border-radius:0;}
-  .shot-thumb.edit-clip:first-child{border-top-left-radius:6px;border-bottom-left-radius:6px;}
-  .shot-thumb.edit-clip:last-child{border-top-right-radius:6px;border-bottom-right-radius:6px;}
   .shot-thumb.edit-clip.dragging{opacity:.6;box-shadow:0 0 0 2px #fff;z-index:3;}
-  .edit-append-btn{
-    flex:0 0 22px;height:60px;border:1px dashed rgba(255,255,255,.25);display:flex;align-items:center;
-    justify-content:center;color:rgba(255,255,255,.5);cursor:pointer;border-radius:0 6px 6px 0;
-  }
-  .edit-append-btn:hover{border-color:var(--accent);color:var(--accent-text);}
   .scene-rename-input{
     background:var(--bg-app);border:1px solid var(--accent);color:var(--text-1);
     font-size:10.5px;border-radius:4px;padding:1px 3px;font-family:var(--font-ui);width:100px;
@@ -668,6 +667,18 @@ function renderTimelineScenes(){
   if(!timelineScenesEl) return;
   const isEdit = timelineMode==='edit';
 
+  if(isEdit){
+    renderEditModeTrack();
+  } else {
+    renderAssemblyModeTrack();
+  }
+
+  renderRuler();
+  positionPlayhead();
+  wireTimelineDrag();
+}
+
+function renderAssemblyModeTrack(){
   let trackHtml = '<div class="timeline-track" id="timelineTrack">';
   state.scenes.forEach(scene=>{
     const col = sceneColor(scene);
@@ -680,19 +691,18 @@ function renderTimelineScenes(){
           <span class="scene-label-btn" data-del-scene="${scene.id}" title="Delete scene">${trashSvg(9)}</span>
         </span>
       </div>
-      <div class="scene-cells-row${isEdit?' edit-mode':''}" style="background:${col.bg};">`;
+      <div class="scene-cells-row" style="background:${col.bg};">`;
 
     if(scene.shots.length===0){
       trackHtml += `<div class="empty-scene-cell" data-anchor data-scene="${scene.id}" data-add-at="${scene.id}|0" title="Add first shot">${plusSvg(18)}</div>`;
     } else {
-      if(!isEdit) trackHtml += `<div class="insert-btn" data-add-at="${scene.id}|0" title="Insert shot">${plusSvg(11)}</div>`;
+      trackHtml += `<div class="insert-btn" data-add-at="${scene.id}|0" title="Insert shot">${plusSvg(11)}</div>`;
       scene.shots.forEach((shot, i)=>{
         const isFocused = focus.sceneId===scene.id && focus.shotId===shot.id;
         const wpx = Math.round(shot.duration * PX_PER_SEC);
         const thumbBg = shot.previewImage ? '' : `background:${col.thumb};`;
-        const editBorder = isEdit ? `border-bottom:3px solid ${col.dot};` : '';
         trackHtml += `
-          <div class="shot-thumb${isFocused?' focused':''}${isEdit?' edit-clip':''}" data-anchor data-scene="${scene.id}" data-shot="${shot.id}" style="${thumbBg}${editBorder}width:${wpx}px;flex-basis:${wpx}px;">
+          <div class="shot-thumb${isFocused?' focused':''}" data-anchor data-scene="${scene.id}" data-shot="${shot.id}" style="${thumbBg}width:${wpx}px;flex-basis:${wpx}px;">
             ${shot.previewImage ? `<img src="${shot.previewImage}">` : ''}
             <div class="shot-trim left" data-trim="${scene.id}|${shot.id}|left" title="Drag to trim"></div>
             <div class="shot-trim right" data-trim="${scene.id}|${shot.id}|right" title="Drag to trim"></div>
@@ -701,9 +711,8 @@ function renderTimelineScenes(){
             <span class="st-name" data-rename-shot="${scene.id}|${shot.id}">${shot.name}</span>
             <span class="st-meta">${shot.duration}s</span>
           </div>
-          ${!isEdit ? `<div class="insert-btn" data-add-at="${scene.id}|${i+1}" title="Insert shot">${plusSvg(11)}</div>` : ''}`;
+          <div class="insert-btn" data-add-at="${scene.id}|${i+1}" title="Insert shot">${plusSvg(11)}</div>`;
       });
-      if(isEdit) trackHtml += `<div class="edit-append-btn" data-add-at="${scene.id}|${scene.shots.length}" title="Add shot to end">${plusSvg(12)}</div>`;
     }
     trackHtml += `</div></div>`;
   });
@@ -711,8 +720,66 @@ function renderTimelineScenes(){
       <div class="add-scene-column" id="addSceneBtn" title="Add scene">${plusSvg(18)}</div>
     </div>`;
   timelineScenesEl.innerHTML = `<div class="timeline-ruler" id="timelineRuler"></div>` + trackHtml;
-
   document.getElementById('addSceneBtn').onclick = addScene;
+  wireCommonTimelineHandlers();
+}
+
+// Edit mode: one continuous flush strip, so clip widths line up exactly with the ruler.
+// No plus buttons anywhere here — adding scenes/shots happens in Assembly mode.
+function renderEditModeTrack(){
+  let x = 0;
+  let clipsHtml = '';
+  let labelsHtml = '';
+  state.scenes.forEach(scene=>{
+    if(scene.shots.length===0) return; // nothing to place on a real timeline yet
+    const col = sceneColor(scene);
+    const sceneStartX = x;
+    scene.shots.forEach(shot=>{
+      const isFocused = focus.sceneId===scene.id && focus.shotId===shot.id;
+      const wpx = Math.round(shot.duration * PX_PER_SEC);
+      const thumbBg = shot.previewImage ? '' : `background:${col.thumb};`;
+      clipsHtml += `
+        <div class="shot-thumb edit-clip${isFocused?' focused':''}" data-anchor data-scene="${scene.id}" data-shot="${shot.id}"
+             style="${thumbBg}border-bottom:3px solid ${col.dot};position:absolute;left:${x}px;top:0;width:${wpx}px;height:100%;">
+          ${shot.previewImage ? `<img src="${shot.previewImage}">` : ''}
+          <div class="shot-trim left" data-trim="${scene.id}|${shot.id}|left" title="Drag to trim"></div>
+          <div class="shot-trim right" data-trim="${scene.id}|${shot.id}|right" title="Drag to trim"></div>
+          <div class="block-rename" data-rename-btn-shot="${scene.id}|${shot.id}" title="Rename">${pencilSvg(9)}</div>
+          <div class="block-del" data-del-shot="${scene.id}|${shot.id}" title="Delete shot">${trashSvg(9)}</div>
+          <span class="st-name" data-rename-shot="${scene.id}|${shot.id}">${shot.name}</span>
+          <span class="st-meta">${shot.duration}s</span>
+        </div>`;
+      x += wpx;
+    });
+    const sceneWidth = x - sceneStartX;
+    labelsHtml += `
+      <div class="scene-label-row edit-label" style="position:absolute;left:${sceneStartX}px;width:${sceneWidth}px;">
+        <span class="scene-color-dot" style="background:${col.dot};"></span>
+        <span class="scene-label-name" data-rename-scene="${scene.id}">${scene.name}</span>
+        <span class="scene-label-actions">
+          <span class="scene-label-btn" data-rename-btn-scene="${scene.id}" title="Rename">${pencilSvg(9)}</span>
+          <span class="scene-label-btn" data-del-scene="${scene.id}" title="Delete scene">${trashSvg(9)}</span>
+        </span>
+      </div>`;
+  });
+
+  const totalWidth = Math.max(x, 1);
+  const html = `
+    <div class="timeline-ruler" id="timelineRuler"></div>
+    <div class="edit-labels-row" style="position:relative;height:16px;width:${totalWidth}px;">${labelsHtml}</div>
+    <div class="timeline-track edit-track" id="timelineTrack" style="position:relative;height:60px;width:${totalWidth}px;">${clipsHtml}</div>
+  `;
+  timelineScenesEl.innerHTML = html;
+  wireCommonTimelineHandlers();
+  if(x===0){
+    timelineScenesEl.querySelector('.timeline-track').innerHTML =
+      `<div class="insp-empty" style="padding:8px 4px;">No shots yet — switch to Assembly to add some.</div>`;
+  } else {
+    wireEditModeReorder();
+  }
+}
+
+function wireCommonTimelineHandlers(){
   timelineScenesEl.querySelectorAll('[data-del-scene]').forEach(el=>{
     el.onclick = (e)=>{ e.stopPropagation(); deleteScene(el.dataset.delScene); };
   });
@@ -788,12 +855,6 @@ function renderTimelineScenes(){
       el.addEventListener('pointerup', onUp);
     });
   });
-
-  if(isEdit) wireEditModeReorder();
-
-  renderRuler();
-  positionPlayhead();
-  wireTimelineDrag();
 }
 
 function wireEditModeReorder(){
@@ -874,9 +935,10 @@ function renderRuler(){
   ruler.style.width = totalWidth + 'px';
   track.style.minWidth = totalWidth + 'px';
   const totalSeconds = Math.ceil(totalWidth / PX_PER_SEC);
+  const showLabels = timelineMode==='edit';
   let html = '';
   for(let s=0; s<=totalSeconds; s+=2){
-    html += `<div class="ruler-tick" style="left:${s*PX_PER_SEC}px;"></div>`;
+    html += `<div class="ruler-tick${showLabels?' labeled':''}" style="left:${s*PX_PER_SEC}px;">${showLabels?formatTimecode(s):''}</div>`;
   }
   ruler.innerHTML = html;
 }
@@ -888,7 +950,8 @@ function positionPlayhead(){
   const old = document.getElementById('timelinePlayhead');
   if(old) old.remove();
   playheadX = Math.max(0, Math.min(playheadX, getTotalTimelinePx()));
-  const totalHeight = ruler.offsetHeight + track.offsetHeight;
+  const labelsRow = timelineScenesEl.querySelector('.edit-labels-row');
+  const totalHeight = ruler.offsetHeight + (labelsRow ? labelsRow.offsetHeight : 0) + track.offsetHeight;
   const marker = document.createElement('div');
   marker.className = 'playhead-hit';
   marker.id = 'timelinePlayhead';
