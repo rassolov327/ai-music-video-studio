@@ -1120,7 +1120,11 @@ function startPlayback(){
   updateTransportButtons();
   const track = getActiveTrack();
   if(track && track.audioUrl){
-    if(!audioEl) audioEl = new Audio();
+    if(!audioEl){
+      audioEl = new Audio();
+      audioEl.style.display = 'none';
+      document.body.appendChild(audioEl);
+    }
     if(audioEl.dataset.trackId !== track.id){
       audioEl.src = track.audioUrl;
       audioEl.dataset.trackId = track.id;
@@ -1698,6 +1702,7 @@ function renderAssets(){
           if(isMusic && state.timelineAudio && state.timelineAudio.trackId===it.id){
             state.timelineAudio = null;
           }
+          if(isMusic && it.audioUrl) URL.revokeObjectURL(it.audioUrl);
           cat.items.splice(idx,1);
           renderAssets();
           renderTimeline();
@@ -2612,6 +2617,7 @@ function showMusicGallery(cat){
       if(removed && removed.id && state.timelineAudio && state.timelineAudio.trackId===removed.id){
         state.timelineAudio = null;
       }
+      if(removed && removed.audioUrl) URL.revokeObjectURL(removed.audioUrl);
       cat.items.splice(idx,1);
       renderAssets();
       renderTimeline();
@@ -2680,13 +2686,7 @@ async function buildMusicTrack(file){
   const ctx = new AC();
   const decoded = await ctx.decodeAudioData(buffer.slice(0));
   const peaks = computeWavePeaks(decoded, 2000);
-  const reader = new Promise((resolve, reject)=>{
-    const fr = new FileReader();
-    fr.onload = ()=> resolve(fr.result);
-    fr.onerror = reject;
-    fr.readAsDataURL(file);
-  });
-  const audioUrl = await reader;
+  const audioUrl = URL.createObjectURL(file);
   ctx.close && ctx.close();
   return {
     id: 't' + (trackSeq++),
