@@ -6,6 +6,7 @@ function setTimelineAudioTrack(trackId){
   const track = musicCat.items.find(t=>t.id===trackId);
   if(track) state.timelineAudio.trimOut = track.fullDuration;
   renderTimeline();
+  if(typeof saveProjectSoon==='function') saveProjectSoon();
 }
 
 function renderTimeline(){

@@ -142,8 +142,11 @@ async function serializeProject(){
     for(const item of cat.items){
       const copy = JSON.parse(JSON.stringify(item));
       if(cat.key==='music' && copy.audioUrl && copy.audioUrl.indexOf('blob:')===0){
-        try{ copy.audioUrl = await blobUrlToBase64(item.audioUrl); }
-        catch(err){ copy.audioUrl = null; }
+        try{
+          copy.audioUrl = await blobUrlToBase64(item.audioUrl);
+          console.log('[ProjectStore] encoded audio track "' + item.name + '" for saving (' + Math.round(copy.audioUrl.length/1024) + ' KB as base64)');
+        }
+        catch(err){ console.warn('[ProjectStore] FAILED to encode audio track "' + item.name + '" for saving:', err); copy.audioUrl = null; }
       }
       itemsOut.push(copy);
     }
@@ -166,10 +169,16 @@ async function applyProjectData(data){
   if(!data) return false;
   const musicCat = data.categories && data.categories.find(c=>c.key==='music');
   if(musicCat){
+    console.log('[ProjectStore] restoring', musicCat.items.length, 'music track(s)');
     for(const item of musicCat.items){
       if(item.audioUrl && item.audioUrl.indexOf('data:')===0){
-        try{ item.audioUrl = await base64ToBlobUrl(item.audioUrl); }
-        catch(err){ console.warn('Could not restore audio track "' + item.name + '":', err); item.audioUrl = null; }
+        try{
+          item.audioUrl = await base64ToBlobUrl(item.audioUrl);
+          console.log('[ProjectStore] restored audio track "' + item.name + '" ->', item.audioUrl);
+        }
+        catch(err){ console.warn('[ProjectStore] FAILED to restore audio track "' + item.name + '":', err); item.audioUrl = null; }
+      } else {
+        console.log('[ProjectStore] audio track "' + item.name + '" had no data: URL to restore (audioUrl was:', item.audioUrl, ')');
       }
     }
   }
@@ -191,6 +200,7 @@ async function applyProjectData(data){
   renderAssets();
   renderTimelineScenes();
   refreshMainPreview();
+  console.log('[ProjectStore] project restored. timelineAudio:', state.timelineAudio);
   return true;
 }
 
@@ -211,13 +221,15 @@ async function saveProjectNow(){
     try{
       await writeProjectToDisk(diskDirHandle, data);
       lastSavedJSON = JSON.stringify(data);
+      console.log('[ProjectStore] saved to disk folder "' + diskDirHandle.name + '"');
       return;
     } catch(err){
-      console.warn('Disk save failed, falling back to browser storage:', err);
+      console.warn('[ProjectStore] Disk save failed, falling back to browser storage:', err);
     }
   }
   await idbSet(STORE_PROJECT, 'current', data);
   lastSavedJSON = JSON.stringify(data);
+  console.log('[ProjectStore] saved to browser storage (IndexedDB)');
 }
 
 let lastSavedJSON = null;
@@ -228,25 +240,33 @@ let lastSavedJSON = null;
 // dropdowns mutate state without going through any of the hooked render functions).
 function markProjectDirty(){}
 
+// Forces an immediate save instead of waiting for the next periodic tick — used right
+// after especially valuable actions (like finishing a music upload) so a quick refresh
+// right afterward can't lose it.
+function saveProjectSoon(){
+  autosaveTick();
+}
+
 async function autosaveTick(){
   let data;
   try{ data = await serializeProject(); }
-  catch(err){ console.warn('Autosave: could not serialize project:', err); return; }
+  catch(err){ console.warn('[ProjectStore] Autosave: could not serialize project:', err); return; }
   const json = JSON.stringify(data);
-  if(json === lastSavedJSON) return; // nothing actually changed since the last save
+  if(json === lastSavedJSON){ console.log('[ProjectStore] autosave tick: nothing changed, skipping write'); return; }
   setSaveStatus('saving');
   try{
     if(diskDirHandle){
-      try{ await writeProjectToDisk(diskDirHandle, data); }
-      catch(err){ console.warn('Disk save failed, falling back to browser storage:', err); await idbSet(STORE_PROJECT, 'current', data); }
+      try{ await writeProjectToDisk(diskDirHandle, data); console.log('[ProjectStore] autosaved to disk folder'); }
+      catch(err){ console.warn('[ProjectStore] Disk save failed, falling back to browser storage:', err); await idbSet(STORE_PROJECT, 'current', data); }
     } else {
       await idbSet(STORE_PROJECT, 'current', data);
+      console.log('[ProjectStore] autosaved to browser storage (IndexedDB)');
     }
     lastSavedJSON = json;
     setSaveStatus('saved');
   } catch(err){
     setSaveStatus('error');
-    console.warn('Autosave failed:', err);
+    console.warn('[ProjectStore] Autosave failed:', err);
   }
 }
 
@@ -296,6 +316,7 @@ async function initProjectStore(){
   wireFolderButton();
 
   const diskResult = await tryRestoreDiskHandle();
+  console.log('[ProjectStore] startup: disk folder check ->', diskResult === 'granted' ? 'granted' : diskResult && diskResult.needsPermission ? 'needs permission' : 'no folder connected');
   if(diskResult === 'granted'){
     const data = await readProjectFromDisk(diskDirHandle);
     if(data){
@@ -303,19 +324,21 @@ async function initProjectStore(){
       updateFolderButton();
       setSaveStatus('saved');
       lastSavedJSON = JSON.stringify(await serializeProject());
-      autosaveTimer = setInterval(autosaveTick, 5000);
+      autosaveTimer = setInterval(autosaveTick, 3000);
       return true;
     }
+    console.log('[ProjectStore] connected folder has no project.json yet');
   } else if(diskResult && diskResult.needsPermission){
     showReconnectFolderBanner(diskResult.needsPermission);
   }
 
   const idbData = await idbGet(STORE_PROJECT, 'current');
+  console.log('[ProjectStore] startup: browser storage (IndexedDB) ->', idbData ? 'found a saved project' : 'nothing saved yet');
   if(idbData){
     await applyProjectData(idbData);
     setSaveStatus('saved');
     lastSavedJSON = JSON.stringify(await serializeProject());
   }
-  autosaveTimer = setInterval(autosaveTick, 5000);
+  autosaveTimer = setInterval(autosaveTick, 3000);
   return !!idbData;
 }

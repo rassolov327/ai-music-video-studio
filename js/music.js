@@ -92,6 +92,7 @@ function showMusicUploadForm(cat){
         setTimelineAudioTrack(track.id);
       }
       renderAssets();
+      if(typeof saveProjectSoon==='function') saveProjectSoon();
       setTimeout(()=> showMusicGallery(cat), 400);
     } catch(err){
       statusEl.textContent = 'Could not read this audio file — try a different format.';
