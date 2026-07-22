@@ -65,7 +65,22 @@ function blobUrlToBase64(blobUrl){
     }));
 }
 function base64ToBlobUrl(dataUrl){
-  return fetch(dataUrl).then(res => res.blob()).then(blob => URL.createObjectURL(blob));
+  // Deliberately NOT using fetch(dataUrl) here — fetching a multi-megabyte data: URL (a
+  // full song, base64-encoded, easily 5-10MB+) is unreliable in real browsers even though
+  // it works fine on tiny test files. atob() has no such practical size limit.
+  return new Promise((resolve, reject)=>{
+    try{
+      const commaIdx = dataUrl.indexOf(',');
+      const header = dataUrl.slice(0, commaIdx);
+      const base64 = dataUrl.slice(commaIdx + 1);
+      const mimeMatch = header.match(/data:(.*?);base64/);
+      const mime = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
+      const binary = atob(base64);
+      const bytes = new Uint8Array(binary.length);
+      for(let i=0; i<binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      resolve(URL.createObjectURL(new Blob([bytes], { type: mime })));
+    } catch(err){ reject(err); }
+  });
 }
 
 // ---- disk folder (File System Access API) ----
@@ -155,7 +170,7 @@ async function applyProjectData(data){
     for(const item of musicCat.items){
       if(item.audioUrl && item.audioUrl.indexOf('data:')===0){
         try{ item.audioUrl = await base64ToBlobUrl(item.audioUrl); }
-        catch(err){ item.audioUrl = null; }
+        catch(err){ console.warn('Could not restore audio track "' + item.name + '":', err); item.audioUrl = null; }
       }
     }
   }
