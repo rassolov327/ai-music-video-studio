@@ -108,14 +108,13 @@ async function chooseDiskFolder(){
   } catch(err){
     return false; // user cancelled the picker
   }
-  const existing = await readProjectFromDisk(handle);
   diskDirHandle = handle;
   await idbSet(STORE_HANDLES, 'projectDir', handle);
-  if(existing){
-    await applyProjectData(existing);
-  } else {
-    await saveProjectNow();
-  }
+  // Connecting a folder always means "keep saving my current work here" — it must never
+  // silently load whatever that folder already contains and clobber what's in memory.
+  // (Loading an existing project.json only happens once, at genuine app startup, in
+  // initProjectStore() — there's no live work to protect at that point.)
+  await saveProjectNow();
   updateFolderButton();
   return true;
 }
@@ -256,10 +255,14 @@ function updateFolderButton(){
   if(!btn) return;
   if(!SUPPORTS_DISK_FOLDER){ btn.style.display = 'none'; return; }
   btn.style.display = '';
-  btn.textContent = diskDirHandle ? '' : '';
-  btn.innerHTML = diskDirHandle
-    ? '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>Saving to disk folder'
-    : '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>Save to disk folder';
+  const folderIcon = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>';
+  if(diskDirHandle){
+    btn.innerHTML = folderIcon + 'Saved to “' + diskDirHandle.name + '” · change';
+    btn.title = 'Autosaving into this folder on your disk. Click to pick a different folder.';
+  } else {
+    btn.innerHTML = folderIcon + 'Save to disk folder';
+    btn.title = 'Keep this project as real files on your disk';
+  }
 }
 
 function showReconnectFolderBanner(handle){
