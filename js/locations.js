@@ -323,7 +323,10 @@ function showLocationForm(cat, editIdx){
       renderAssets();
       showLocationGallery(cat);
     }
-    if(typeof persistLocationImages==='function') await persistLocationImages(data);
+    if(typeof persistLocationImages==='function'){
+      if(typeof setSaveStatus==='function') setSaveStatus('saving');
+      await persistLocationImages(data);
+    }
     if(typeof saveProjectSoon==='function') saveProjectSoon();
   };
 }

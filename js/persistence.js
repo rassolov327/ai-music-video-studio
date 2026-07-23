@@ -207,7 +207,7 @@ function dataUrlToBlobSync(dataUrl){
 function extFromDataUrl(dataUrl){
   const m = dataUrl.match(/^data:image\/([a-zA-Z0-9+.-]+);base64/);
   if(!m) return '.png';
-  const map = { jpeg:'.jpg', 'svg+xml':'.svg' };
+  const map = { jpeg:'jpg', 'svg+xml':'svg' };
   return '.' + (map[m[1]] || m[1]);
 }
 
@@ -250,32 +250,40 @@ async function loadImageAsset(assetKey, fileName){
 async function persistCharacterImages(character){
   if(!character.id) return;
   character._assetFiles = character._assetFiles || {};
+  const jobs = [];
   if(character.angleSlots){
     for(const slotKey of Object.keys(character.angleSlots)){
       const val = character.angleSlots[slotKey];
       const fieldKey = 'angle-' + slotKey;
       if(val && val.indexOf('data:')===0){
-        const fileName = await persistImageAsset('band:' + character.id + ':' + fieldKey, val);
-        character._assetFiles[fieldKey] = fileName;
+        jobs.push(
+          persistImageAsset('band:' + character.id + ':' + fieldKey, val)
+            .then(fileName=>{ character._assetFiles[fieldKey] = fileName; })
+        );
       }
     }
   }
   if(character.turnaroundSheet && character.turnaroundSheet.indexOf('data:')===0){
-    const fileName = await persistImageAsset('band:' + character.id + ':turnaround', character.turnaroundSheet);
-    character._assetFiles['turnaround'] = fileName;
+    jobs.push(
+      persistImageAsset('band:' + character.id + ':turnaround', character.turnaroundSheet)
+        .then(fileName=>{ character._assetFiles['turnaround'] = fileName; })
+    );
   }
-  console.log('[ProjectStore] persisted images for character "' + character.name + '"');
+  await Promise.all(jobs);
+  console.log('[ProjectStore] persisted ' + jobs.length + ' image(s) for character "' + character.name + '"');
 }
 async function restoreCharacterImages(character){
   if(!character._assetFiles) return;
   if(!character.angleSlots) character.angleSlots = typeof emptyAngleSlots==='function' ? emptyAngleSlots() : {};
-  for(const fieldKey of Object.keys(character._assetFiles)){
+  const jobs = Object.keys(character._assetFiles).map(async (fieldKey)=>{
     const fileName = character._assetFiles[fieldKey];
     const assetKey = 'band:' + character.id + ':' + fieldKey;
     const url = await loadImageAsset(assetKey, fileName);
     if(fieldKey === 'turnaround') character.turnaroundSheet = url;
     else if(fieldKey.indexOf('angle-')===0) character.angleSlots[fieldKey.slice(6)] = url;
-  }
+    if(!url) console.warn('[ProjectStore] character "' + character.name + '": image "' + fieldKey + '" (file "' + fileName + '") could not be found — check assets/ folder');
+  });
+  await Promise.all(jobs);
   character.photo = character.angleSlots.front || null;
 }
 async function deleteCharacterImages(character){
@@ -298,23 +306,31 @@ async function deleteCharacterImages(character){
 async function persistLocationImages(location){
   if(!location.id) return;
   location._assetFiles = location._assetFiles || {};
+  const jobs = [];
   if(location.photo && location.photo.indexOf('data:')===0){
-    location._assetFiles['photo'] = await persistImageAsset('locations:' + location.id + ':photo', location.photo);
+    jobs.push(
+      persistImageAsset('locations:' + location.id + ':photo', location.photo)
+        .then(fileName=>{ location._assetFiles['photo'] = fileName; })
+    );
   }
   if(location.angles){
     for(let i=0; i<location.angles.length; i++){
       const val = location.angles[i];
       const fieldKey = 'angle-' + i;
       if(val && val.indexOf('data:')===0){
-        location._assetFiles[fieldKey] = await persistImageAsset('locations:' + location.id + ':' + fieldKey, val);
+        jobs.push(
+          persistImageAsset('locations:' + location.id + ':' + fieldKey, val)
+            .then(fileName=>{ location._assetFiles[fieldKey] = fileName; })
+        );
       }
     }
   }
-  console.log('[ProjectStore] persisted images for location "' + location.name + '"');
+  await Promise.all(jobs);
+  console.log('[ProjectStore] persisted ' + jobs.length + ' image(s) for location "' + location.name + '"');
 }
 async function restoreLocationImages(location){
   if(!location._assetFiles) return;
-  for(const fieldKey of Object.keys(location._assetFiles)){
+  const jobs = Object.keys(location._assetFiles).map(async (fieldKey)=>{
     const fileName = location._assetFiles[fieldKey];
     const assetKey = 'locations:' + location.id + ':' + fieldKey;
     const url = await loadImageAsset(assetKey, fileName);
@@ -324,7 +340,9 @@ async function restoreLocationImages(location){
       if(!location.angles) location.angles = [];
       location.angles[idx] = url;
     }
-  }
+    if(!url) console.warn('[ProjectStore] location "' + location.name + '": image "' + fieldKey + '" (file "' + fileName + '") could not be found — check assets/ folder');
+  });
+  await Promise.all(jobs);
 }
 async function deleteLocationImages(location){
   if(!location._assetFiles) return;

@@ -211,7 +211,10 @@ function showCharacterForm(cat, editIdx){
       renderAssets();
       showCharacterGallery(cat);
     }
-    if(typeof persistCharacterImages==='function') await persistCharacterImages(data);
+    if(typeof persistCharacterImages==='function'){
+      if(typeof setSaveStatus==='function') setSaveStatus('saving');
+      await persistCharacterImages(data);
+    }
     if(typeof saveProjectSoon==='function') saveProjectSoon();
   };
 }
