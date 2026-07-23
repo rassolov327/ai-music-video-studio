@@ -61,6 +61,14 @@
 
   /* ---- Body layout ---- */
   .body-row{flex:1 1 auto;display:flex;min-height:0;}
+  .col-resizer{
+    width:5px;flex:0 0 auto;cursor:col-resize;background:transparent;position:relative;
+  }
+  .col-resizer:hover, .col-resizer.dragging{background:var(--accent-dim);}
+  .row-resizer{
+    height:5px;flex:0 0 auto;cursor:row-resize;background:transparent;
+  }
+  .row-resizer:hover, .row-resizer.dragging{background:var(--accent-dim);}
 
   /* ---- Left assets panel ---- */
   .assets{
@@ -375,8 +383,8 @@
   .cf-btn.primary:disabled{opacity:.45;cursor:default;background:var(--accent-dim);}
 
   /* ---- Bottom audio track ---- */
-  .timeline-area{border-top:1px solid var(--line);background:var(--bg-panel);flex:0 0 auto;}
-  .timeline-scenes{overflow-x:auto;border-bottom:1px solid var(--line-soft);position:relative;}
+  .timeline-area{border-top:1px solid var(--line);background:var(--bg-panel);flex:0 0 auto;overflow:hidden;display:flex;flex-direction:column;min-height:100px;max-height:80vh;}
+  .timeline-scenes{overflow-x:auto;overflow-y:auto;border-bottom:1px solid var(--line-soft);position:relative;flex:1 1 auto;min-height:0;}
   .timeline-ruler{
     position:relative;height:20px;min-width:100%;
     background:var(--bg-panel-2);border-bottom:1px solid var(--line-soft);cursor:pointer;user-select:none;
@@ -403,7 +411,7 @@
   }
   .scene-label-btn:hover{background:var(--bg-elevated);color:var(--text-1);opacity:1;}
   .scene-cells-row{display:flex;align-items:center;gap:3px;padding:5px;border-radius:8px;}
-  .timeline-mode-row{display:flex;gap:2px;padding:6px 12px 0;}
+  .timeline-mode-row{display:flex;gap:2px;padding:6px 12px 0;flex:0 0 auto;}
   .mode-tab{
     padding:4px 10px;font-size:11px;color:var(--text-3);cursor:pointer;border-radius:5px 5px 0 0;
     border:1px solid transparent;border-bottom:none;
@@ -483,7 +491,7 @@
   }
   .timecode-row{
     display:flex;justify-content:space-between;padding:4px 12px 7px;
-    font-family:var(--font-mono);font-size:10.5px;color:var(--text-3);
+    font-family:var(--font-mono);font-size:10.5px;color:var(--text-3);flex:0 0 auto;
   }
   .wave-canvas{flex:1 1 auto;height:36px;}
   .no-track{padding:14px 12px;color:var(--text-3);font-size:12px;font-style:italic;}

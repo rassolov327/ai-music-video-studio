@@ -17,6 +17,7 @@ document.getElementById('playBtn2').onclick = startPlayback;
 document.getElementById('pauseBtn2').onclick = pausePlayback;
 document.getElementById('stopBtn2').onclick = stopPlayback;
 updateTransportButtons();
+if(typeof wirePanelResizers==='function') wirePanelResizers();
 document.getElementById('modeAssemblyBtn').onclick = ()=>{
   timelineMode = 'assembly';
   document.getElementById('modeAssemblyBtn').classList.add('active');

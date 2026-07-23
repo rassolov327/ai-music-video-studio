@@ -10,7 +10,6 @@
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-<body>
 <div id="app">
 
   <div class="topbar">
@@ -27,6 +26,7 @@
   <div class="body-row">
 
     <div class="assets" id="assets"></div>
+    <div class="col-resizer" id="resizeAssets" title="Drag to resize"></div>
 
     <div class="center">
       <div class="preview-bar">
@@ -43,7 +43,8 @@
         <span class="preview-tc" id="tcCurrent2">0:00:00</span>
       </div>
 
-      <div class="timeline-area">
+      <div class="row-resizer" id="resizeTimeline" title="Drag to resize"></div>
+      <div class="timeline-area" id="timelineArea">
         <div class="timeline-mode-row">
           <div class="mode-tab active" id="modeAssemblyBtn" data-mode="assembly">Assembly</div>
           <div class="mode-tab" id="modeEditBtn" data-mode="edit">Edit</div>
@@ -56,6 +57,7 @@
       </div>
     </div>
 
+    <div class="col-resizer" id="resizeInspector" title="Drag to resize"></div>
     <div class="inspector">
       <div class="insp-tabs">
         <div class="insp-tab active">Inspector</div>
@@ -84,6 +86,7 @@
 <script src="js/looks.js"></script>
 <script src="js/audio-track.js"></script>
 <script src="js/persistence.js"></script>
+<script src="js/panels.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

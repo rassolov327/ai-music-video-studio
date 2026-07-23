@@ -92,6 +92,8 @@ function renderAssets(){
           }
           if(isMusic && it.audioUrl) URL.revokeObjectURL(it.audioUrl);
           if(isMusic && typeof deleteAudioAsset==='function') deleteAudioAsset(it.id);
+          if(isChar && typeof deleteCharacterImages==='function') deleteCharacterImages(it);
+          if(isLoc && typeof deleteLocationImages==='function') deleteLocationImages(it);
           cat.items.splice(idx,1);
           renderAssets();
           renderTimeline();
@@ -204,9 +206,11 @@ function showCharacterGallery(cat){
     btn.onclick = (e)=>{
       e.stopPropagation();
       const idx = parseInt(e.target.closest('.char-tile').dataset.idx, 10);
+      if(typeof deleteCharacterImages==='function') deleteCharacterImages(cat.items[idx]);
       cat.items.splice(idx,1);
       renderAssets();
       showCharacterGallery(cat);
+      if(typeof saveProjectSoon==='function') saveProjectSoon();
     };
   });
 

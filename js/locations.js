@@ -31,9 +31,11 @@ function showLocationGallery(cat){
     btn.onclick = (e)=>{
       e.stopPropagation();
       const idx = parseInt(e.target.closest('.char-tile').dataset.idx, 10);
+      if(typeof deleteLocationImages==='function') deleteLocationImages(cat.items[idx]);
       cat.items.splice(idx,1);
       renderAssets();
       showLocationGallery(cat);
+      if(typeof saveProjectSoon==='function') saveProjectSoon();
     };
   });
   previewEl.querySelectorAll('.char-tile:not(.char-tile-add)').forEach(tile=>{
@@ -82,9 +84,11 @@ function showLocationCard(cat, idx){
   document.getElementById('locCardBack').onclick = ()=> showLocationGallery(cat);
   document.getElementById('locCardEdit').onclick = ()=> showLocationForm(cat, idx);
   document.getElementById('locCardDelete').onclick = ()=>{
+    if(typeof deleteLocationImages==='function') deleteLocationImages(it);
     cat.items.splice(idx,1);
     renderAssets();
     showLocationGallery(cat);
+    if(typeof saveProjectSoon==='function') saveProjectSoon();
   };
   previewEl.onclick = (e)=>{
     if(e.target === previewEl) showLocationGallery(cat);
@@ -297,7 +301,7 @@ function showLocationForm(cat, editIdx){
     if(isEdit) showLocationCard(cat, editIdx);
     else showLocationGallery(cat);
   };
-  saveBtn.onclick = ()=>{
+  saveBtn.onclick = async ()=>{
     if(nameInput.value.trim().length===0) return;
     const data = {
       id: existing && existing.id ? existing.id : 'l' + (locSeq++),
@@ -308,6 +312,7 @@ function showLocationForm(cat, editIdx){
       description: notesInput.value.trim(),
       angles: anglePhotos.slice(),
       referenceCard: formRefText,
+      _assetFiles: existing ? existing._assetFiles : undefined,
     };
     if(isEdit){
       cat.items[editIdx] = data;
@@ -318,6 +323,8 @@ function showLocationForm(cat, editIdx){
       renderAssets();
       showLocationGallery(cat);
     }
+    if(typeof persistLocationImages==='function') await persistLocationImages(data);
+    if(typeof saveProjectSoon==='function') saveProjectSoon();
   };
 }
 

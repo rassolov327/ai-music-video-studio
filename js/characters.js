@@ -39,9 +39,11 @@ function showCharacterCard(cat, idx){
   document.getElementById('cardBack').onclick = ()=> showCharacterGallery(cat);
   document.getElementById('cardEdit').onclick = ()=> showCharacterForm(cat, idx);
   document.getElementById('cardDelete').onclick = ()=>{
+    if(typeof deleteCharacterImages==='function') deleteCharacterImages(it);
     cat.items.splice(idx,1);
     renderAssets();
     showCharacterGallery(cat);
+    if(typeof saveProjectSoon==='function') saveProjectSoon();
   };
 
   // click on the surrounding empty area (not the card itself) returns to the gallery
@@ -185,7 +187,7 @@ function showCharacterForm(cat, editIdx){
     if(isEdit) showCharacterCard(cat, editIdx);
     else showCharacterGallery(cat);
   };
-  saveBtn.onclick = ()=>{
+  saveBtn.onclick = async ()=>{
     if(nameInput.value.trim().length===0) return;
     const data = {
       id: existing && existing.id ? existing.id : 'c' + (charSeq++),
@@ -198,6 +200,7 @@ function showCharacterForm(cat, editIdx){
       angleSlots,
       referenceCard: formRefText,
       turnaroundSheet: formSheet,
+      _assetFiles: existing ? existing._assetFiles : undefined,
     };
     if(isEdit){
       cat.items[editIdx] = data;
@@ -208,6 +211,8 @@ function showCharacterForm(cat, editIdx){
       renderAssets();
       showCharacterGallery(cat);
     }
+    if(typeof persistCharacterImages==='function') await persistCharacterImages(data);
+    if(typeof saveProjectSoon==='function') saveProjectSoon();
   };
 }
 

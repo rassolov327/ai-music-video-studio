@@ -146,26 +146,203 @@ async function deleteAudioAsset(trackId){
 // folder, so switching to "save to disk" mid-project doesn't strand existing audio.
 async function migrateAssetsToDisk(){
   const musicCat = state.categories.find(c=>c.key==='music');
-  if(!musicCat) return;
-  for(const item of musicCat.items){
-    if(!item.id) continue;
+  if(musicCat){
+    for(const item of musicCat.items){
+      if(!item.id) continue;
+      try{
+        const blob = await idbGet(STORE_ASSETS, assetKeyForTrack(item.id));
+        if(blob){
+          const assetsDir = await getAssetsDirHandle(true);
+          const fileName = safeAssetFileName(item.id, item.name || 'track.mp3');
+          const fileHandle = await assetsDir.getFileHandle(fileName, { create:true });
+          const writable = await fileHandle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+          item.diskFileName = fileName;
+          console.log('[ProjectStore] migrated audio asset for "' + item.name + '" onto disk');
+        }
+      } catch(err){ console.warn('[ProjectStore] could not migrate asset for "' + item.name + '":', err); }
+    }
+  }
+  const bandCat = state.categories.find(c=>c.key==='band');
+  if(bandCat) for(const item of bandCat.items) await migrateImageFieldsToDisk(item, 'band');
+  const locCat = state.categories.find(c=>c.key==='locations');
+  if(locCat) for(const item of locCat.items) await migrateImageFieldsToDisk(item, 'locations');
+}
+async function migrateImageFieldsToDisk(item, catKey){
+  if(!item._assetFiles) return;
+  for(const fieldKey of Object.keys(item._assetFiles)){
+    if(item._assetFiles[fieldKey]) continue; // already a disk file
     try{
-      const blob = await idbGet(STORE_ASSETS, assetKeyForTrack(item.id));
+      const assetKey = catKey + ':' + item.id + ':' + fieldKey;
+      const blob = await idbGet(STORE_ASSETS, assetKey);
       if(blob){
         const assetsDir = await getAssetsDirHandle(true);
-        const fileName = safeAssetFileName(item.id, item.name || 'track.mp3');
+        const fileName = assetKey.replace(/[:]/g,'_') + '.png';
         const fileHandle = await assetsDir.getFileHandle(fileName, { create:true });
         const writable = await fileHandle.createWritable();
         await writable.write(blob);
         await writable.close();
-        item.diskFileName = fileName;
-        console.log('[ProjectStore] migrated audio asset for "' + item.name + '" onto disk');
+        item._assetFiles[fieldKey] = fileName;
       }
-    } catch(err){ console.warn('[ProjectStore] could not migrate asset for "' + item.name + '":', err); }
+    } catch(err){ console.warn('[ProjectStore] could not migrate image asset:', err); }
   }
 }
 
-// ---- disk folder (File System Access API) ----
+
+// ---- generic image assets (character angle photos, turnaround sheets, location photos) —
+// same "written once, referenced by key" pattern as audio, so project.json never carries
+// megabytes of base64 image data or gets re-encoded on every autosave tick.
+function dataUrlToBlobSync(dataUrl){
+  const commaIdx = dataUrl.indexOf(',');
+  const header = dataUrl.slice(0, commaIdx);
+  const base64 = dataUrl.slice(commaIdx + 1);
+  const mimeMatch = header.match(/data:(.*?);base64/);
+  const mime = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for(let i=0; i<binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
+function extFromDataUrl(dataUrl){
+  const m = dataUrl.match(/^data:image\/([a-zA-Z0-9+.-]+);base64/);
+  if(!m) return '.png';
+  const map = { jpeg:'.jpg', 'svg+xml':'.svg' };
+  return '.' + (map[m[1]] || m[1]);
+}
+
+// Writes one image (only if it's a local data: URL — remote Pollinations links are left
+// untouched, they're already lightweight) and returns the filename used on disk, or null
+// if it went into IndexedDB instead.
+async function persistImageAsset(assetKey, dataUrl){
+  if(!dataUrl || dataUrl.indexOf('data:')!==0) return undefined; // nothing to do
+  const blob = dataUrlToBlobSync(dataUrl);
+  if(diskDirHandle){
+    try{
+      const assetsDir = await getAssetsDirHandle(true);
+      const fileName = assetKey.replace(/[:]/g,'_') + extFromDataUrl(dataUrl);
+      const fileHandle = await assetsDir.getFileHandle(fileName, { create:true });
+      const writable = await fileHandle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      return fileName;
+    } catch(err){ console.warn('[ProjectStore] could not write image asset to disk:', err); }
+  }
+  await idbSet(STORE_ASSETS, assetKey, blob);
+  return null;
+}
+async function loadImageAsset(assetKey, fileName){
+  if(diskDirHandle && fileName){
+    try{
+      const assetsDir = await getAssetsDirHandle(false);
+      const fileHandle = await assetsDir.getFileHandle(fileName);
+      const file = await fileHandle.getFile();
+      return URL.createObjectURL(file);
+    } catch(err){ console.warn('[ProjectStore] image asset "' + fileName + '" not found on disk, trying browser storage:', err); }
+  }
+  try{
+    const blob = await idbGet(STORE_ASSETS, assetKey);
+    return blob ? URL.createObjectURL(blob) : null;
+  } catch(err){ return null; }
+}
+
+// Called once, right after a character is saved — never on a periodic autosave tick.
+async function persistCharacterImages(character){
+  if(!character.id) return;
+  character._assetFiles = character._assetFiles || {};
+  if(character.angleSlots){
+    for(const slotKey of Object.keys(character.angleSlots)){
+      const val = character.angleSlots[slotKey];
+      const fieldKey = 'angle-' + slotKey;
+      if(val && val.indexOf('data:')===0){
+        const fileName = await persistImageAsset('band:' + character.id + ':' + fieldKey, val);
+        character._assetFiles[fieldKey] = fileName;
+      }
+    }
+  }
+  if(character.turnaroundSheet && character.turnaroundSheet.indexOf('data:')===0){
+    const fileName = await persistImageAsset('band:' + character.id + ':turnaround', character.turnaroundSheet);
+    character._assetFiles['turnaround'] = fileName;
+  }
+  console.log('[ProjectStore] persisted images for character "' + character.name + '"');
+}
+async function restoreCharacterImages(character){
+  if(!character._assetFiles) return;
+  if(!character.angleSlots) character.angleSlots = typeof emptyAngleSlots==='function' ? emptyAngleSlots() : {};
+  for(const fieldKey of Object.keys(character._assetFiles)){
+    const fileName = character._assetFiles[fieldKey];
+    const assetKey = 'band:' + character.id + ':' + fieldKey;
+    const url = await loadImageAsset(assetKey, fileName);
+    if(fieldKey === 'turnaround') character.turnaroundSheet = url;
+    else if(fieldKey.indexOf('angle-')===0) character.angleSlots[fieldKey.slice(6)] = url;
+  }
+  character.photo = character.angleSlots.front || null;
+}
+async function deleteCharacterImages(character){
+  if(!character._assetFiles) return;
+  for(const fieldKey of Object.keys(character._assetFiles)){
+    const assetKey = 'band:' + character.id + ':' + fieldKey;
+    try{ await idbDelete(STORE_ASSETS, assetKey); } catch(err){}
+  }
+  if(diskDirHandle){
+    try{
+      const assetsDir = await getAssetsDirHandle(false);
+      for await (const name of assetsDir.keys()){
+        if(name.indexOf('band_' + character.id + '_')===0) await assetsDir.removeEntry(name);
+      }
+    } catch(err){}
+  }
+}
+
+// Called once, right after a location is saved.
+async function persistLocationImages(location){
+  if(!location.id) return;
+  location._assetFiles = location._assetFiles || {};
+  if(location.photo && location.photo.indexOf('data:')===0){
+    location._assetFiles['photo'] = await persistImageAsset('locations:' + location.id + ':photo', location.photo);
+  }
+  if(location.angles){
+    for(let i=0; i<location.angles.length; i++){
+      const val = location.angles[i];
+      const fieldKey = 'angle-' + i;
+      if(val && val.indexOf('data:')===0){
+        location._assetFiles[fieldKey] = await persistImageAsset('locations:' + location.id + ':' + fieldKey, val);
+      }
+    }
+  }
+  console.log('[ProjectStore] persisted images for location "' + location.name + '"');
+}
+async function restoreLocationImages(location){
+  if(!location._assetFiles) return;
+  for(const fieldKey of Object.keys(location._assetFiles)){
+    const fileName = location._assetFiles[fieldKey];
+    const assetKey = 'locations:' + location.id + ':' + fieldKey;
+    const url = await loadImageAsset(assetKey, fileName);
+    if(fieldKey==='photo') location.photo = url;
+    else if(fieldKey.indexOf('angle-')===0){
+      const idx = parseInt(fieldKey.slice(6), 10);
+      if(!location.angles) location.angles = [];
+      location.angles[idx] = url;
+    }
+  }
+}
+async function deleteLocationImages(location){
+  if(!location._assetFiles) return;
+  for(const fieldKey of Object.keys(location._assetFiles)){
+    const assetKey = 'locations:' + location.id + ':' + fieldKey;
+    try{ await idbDelete(STORE_ASSETS, assetKey); } catch(err){}
+  }
+  if(diskDirHandle){
+    try{
+      const assetsDir = await getAssetsDirHandle(false);
+      for await (const name of assetsDir.keys()){
+        if(name.indexOf('locations_' + location.id + '_')===0) await assetsDir.removeEntry(name);
+      }
+    } catch(err){}
+  }
+}
+
+
 async function writeProjectToDisk(dirHandle, projectData){
   const fileHandle = await dirHandle.getFileHandle('project.json', { create:true });
   const writable = await fileHandle.createWritable();
@@ -225,6 +402,15 @@ function serializeProject(){
     items: cat.items.map(item=>{
       const copy = JSON.parse(JSON.stringify(item));
       if(cat.key==='music') delete copy.audioUrl; // never persisted inline — see persistAudioAsset
+      if(cat.key==='band'){
+        if(copy.angleSlots) Object.keys(copy.angleSlots).forEach(k=>{ copy.angleSlots[k] = null; });
+        copy.turnaroundSheet = null;
+        copy.photo = null; // reconstructed from angleSlots.front on restore
+      }
+      if(cat.key==='locations'){
+        copy.photo = null;
+        if(copy.angles) copy.angles = copy.angles.map(()=> null);
+      }
       return copy;
     }),
   }));
@@ -255,6 +441,20 @@ async function applyProjectData(data){
         console.warn('[ProjectStore] failed to restore audio for "' + item.name + '":', err);
         item.audioUrl = null;
       }
+    }
+  }
+  const bandCat = data.categories && data.categories.find(c=>c.key==='band');
+  if(bandCat){
+    for(const item of bandCat.items){
+      try{ await restoreCharacterImages(item); }
+      catch(err){ console.warn('[ProjectStore] failed to restore images for character "' + item.name + '":', err); }
+    }
+  }
+  const locCat = data.categories && data.categories.find(c=>c.key==='locations');
+  if(locCat){
+    for(const item of locCat.items){
+      try{ await restoreLocationImages(item); }
+      catch(err){ console.warn('[ProjectStore] failed to restore images for location "' + item.name + '":', err); }
     }
   }
   state.categories = data.categories || state.categories;

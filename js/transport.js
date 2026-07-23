@@ -62,18 +62,17 @@ function startPlayback(){
 function runPlayLoop(){
   if(!isPlaying) return;
   const maxX = getTotalTimelinePx();
+
+  // Single continuous driver for the whole pass, through both video shots and the audio
+  // region alike — audio plays alongside it but never takes over driving the playhead, so
+  // there's no jump when the track ends (or is shorter/offset) partway through the timeline.
+  const elapsedSec = (performance.now() - playStartPerf) / 1000;
+  playheadX = Math.min(playStartX + elapsedSec * PX_PER_SEC, maxX);
+
   const track = getActiveTrack();
   const ta = state.timelineAudio;
-
-  if(track && audioEl && ta && !audioEl.paused){
-    const relSec = audioEl.currentTime - ta.trimIn;
-    playheadX = Math.max(0, Math.min(relSec * PX_PER_SEC, maxX));
-    if(audioEl.currentTime >= ta.trimOut - 0.02){
-      audioEl.pause();
-    }
-  } else {
-    const elapsedSec = (performance.now() - playStartPerf) / 1000;
-    playheadX = Math.min(playStartX + elapsedSec * PX_PER_SEC, maxX);
+  if(track && audioEl && ta && !audioEl.paused && audioEl.currentTime >= ta.trimOut - 0.02){
+    audioEl.pause();
   }
 
   const marker = document.getElementById('timelinePlayhead');
