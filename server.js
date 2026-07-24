@@ -63,7 +63,8 @@ function closestKieSize(width, height) {
   return best.size;
 }
 
-app.post('/api/generate-image', async (req, res) => {
+// ---- start a generation task, return immediately (no waiting here) ----
+app.post('/api/generate-image/start', async (req, res) => {
   if (!KIE_API_KEY) {
     return res.status(503).json({ error: 'not_configured', message: 'KIE_API_KEY is not set on the server yet.' });
   }
@@ -95,43 +96,48 @@ app.post('/api/generate-image', async (req, res) => {
         message: (createData && createData.msg) || ('KIE.ai rejected the request (HTTP ' + createRes.status + ').'),
       });
     }
-
-    // Poll for completion — simpler and more reliable here than standing up a public
-    // callback URL just for this. 2.5s between checks, ~2 minute total budget.
-    const deadline = Date.now() + 120000;
-    let lastRaw = null;
-    while (Date.now() < deadline) {
-      await new Promise(r => setTimeout(r, 2500));
-      const pollRes = await fetch(`${KIE_BASE}/api/v1/gpt4o-image/record-info?taskId=${encodeURIComponent(taskId)}`, {
-        headers: { Authorization: `Bearer ${KIE_API_KEY}` },
-      });
-      const pollData = await pollRes.json().catch(() => null);
-      const d = (pollData && pollData.data) || {};
-      lastRaw = pollData;
-      console.log('[server] poll ' + taskId + ':', JSON.stringify(pollData));
-
-      // KIE's docs show successFlag as a plain number in some examples and there's a
-      // history in this project of "===" strict checks silently failing against fields
-      // that come back as strings — coerce to Number defensively rather than guess again.
-      const flag = Number(d.successFlag);
-      // The docs also disagree with themselves on the result field's casing between two
-      // different doc pages (result_urls vs resultUrls) — check both.
-      const resultUrl = d.response && (
-        (d.response.result_urls && d.response.result_urls[0]) ||
-        (d.response.resultUrls && d.response.resultUrls[0])
-      );
-      if (flag === 1 && resultUrl) {
-        return res.json({ imageUrl: resultUrl, taskId });
-      }
-      if (flag === 2 || d.errorCode || d.errorMessage) {
-        return res.status(502).json({ error: 'generation_failed', message: d.errorMessage || 'Generation failed.', taskId });
-      }
-      // flag 0 (and no error) means still in progress — keep polling.
-    }
-    console.log('[server] timed out waiting on ' + taskId + '. Last response:', JSON.stringify(lastRaw));
-    return res.status(504).json({ error: 'timeout', message: 'Generation took longer than expected.', taskId });
+    return res.json({ taskId });
   } catch (err) {
-    console.error('[server] /api/generate-image failed:', err);
+    console.error('[server] /api/generate-image/start failed:', err);
+    return res.status(500).json({ error: 'server_error', message: String(err && err.message || err) });
+  }
+});
+
+// ---- check on a task — one lightweight poll per call, the browser calls this repeatedly ----
+app.get('/api/generate-image/status', async (req, res) => {
+  if (!KIE_API_KEY) {
+    return res.status(503).json({ error: 'not_configured', message: 'KIE_API_KEY is not set on the server yet.' });
+  }
+  const taskId = req.query.taskId;
+  if (!taskId) return res.status(400).json({ error: 'bad_request', message: 'taskId is required.' });
+
+  try {
+    const pollRes = await fetch(`${KIE_BASE}/api/v1/gpt4o-image/record-info?taskId=${encodeURIComponent(taskId)}`, {
+      headers: { Authorization: `Bearer ${KIE_API_KEY}` },
+    });
+    const pollData = await pollRes.json().catch(() => null);
+    const d = (pollData && pollData.data) || {};
+    console.log('[server] poll ' + taskId + ':', JSON.stringify(pollData));
+
+    // KIE's docs show successFlag as a plain number in some examples and there's a
+    // history in this project of "===" strict checks silently failing against fields
+    // that come back as strings — coerce to Number defensively rather than guess again.
+    const flag = Number(d.successFlag);
+    // The docs also disagree with themselves on the result field's casing between two
+    // different doc pages (result_urls vs resultUrls) — check both.
+    const resultUrl = d.response && (
+      (d.response.result_urls && d.response.result_urls[0]) ||
+      (d.response.resultUrls && d.response.resultUrls[0])
+    );
+    if (flag === 1 && resultUrl) {
+      return res.json({ status: 'success', imageUrl: resultUrl, taskId });
+    }
+    if (flag === 2 || d.errorCode || d.errorMessage) {
+      return res.json({ status: 'failed', message: d.errorMessage || 'Generation failed.', taskId });
+    }
+    return res.json({ status: 'pending', kieStatus: d.status || null, progress: d.progress || null, taskId });
+  } catch (err) {
+    console.error('[server] /api/generate-image/status failed:', err);
     return res.status(500).json({ error: 'server_error', message: String(err && err.message || err) });
   }
 });

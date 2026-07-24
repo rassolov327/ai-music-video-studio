@@ -507,19 +507,29 @@ function runShotGeneration(scene, shot){
 async function runShotGenerationPaid(scene, shot){
   const section = document.getElementById('shotGenSection');
   if(!section) return;
-  section.innerHTML = `<button class="gen-btn" disabled><span class="gen-spin"></span>Generating with ${PAID_GEN_MODEL_LABEL}… (can take up to a minute)</button>`;
+  const setStatus = (text)=>{
+    const el = document.getElementById('shotGenSection');
+    if(el) el.innerHTML = `<button class="gen-btn" disabled><span class="gen-spin"></span>${text}</button>`;
+  };
+  setStatus('Starting generation with ' + PAID_GEN_MODEL_LABEL + '…');
   const prompt = buildShotPrompt(shot, scene);
   const meta = state.projectMeta || { width:1920, height:1080 };
   try{
-    const imageUrl = await generateImageViaBackend(prompt, meta.width, meta.height);
+    const imageUrl = await generateImageViaBackend(prompt, meta.width, meta.height, (elapsedSec)=>{
+      setStatus('Generating… ' + elapsedSec + 's elapsed (real AI generation, this can take a couple of minutes)');
+    });
     shot.previewImage = imageUrl;
     renderTimelineScenes();
     if(focus.sceneId===scene.id && focus.shotId===shot.id) refreshMainPreview();
     else renderShotGenSection(scene, shot);
     if(typeof saveProjectSoon==='function') saveProjectSoon();
   } catch(err){
-    section.innerHTML = `<div class="gen-hint" style="color:var(--danger);">Generation failed: ${err.message}</div>`;
-    setTimeout(()=> renderShotGenSection(scene, shot), 3000);
+    const el = document.getElementById('shotGenSection');
+    if(el) el.innerHTML = `
+      <div class="gen-hint" style="color:var(--danger);">Generation failed: ${err.message}</div>
+      <button class="cf-btn" id="paidGenDismissBtn" style="width:100%;margin-top:8px;">OK</button>`;
+    const dismissBtn = document.getElementById('paidGenDismissBtn');
+    if(dismissBtn) dismissBtn.onclick = ()=> renderShotGenSection(scene, shot);
   }
 }
 

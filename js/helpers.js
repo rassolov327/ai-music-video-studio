@@ -69,18 +69,38 @@ async function checkPaidGenerationAvailable(){
   }
   return _kieConfiguredCache;
 }
-async function generateImageViaBackend(prompt, width, height){
-  const res = await fetch('/api/generate-image', {
+async function generateImageViaBackend(prompt, width, height, onProgress){
+  const startRes = await fetch('/api/generate-image/start', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ prompt, width, height }),
   });
-  const data = await res.json().catch(()=> null);
-  if(!res.ok || !data || !data.imageUrl){
-    const message = (data && data.message) || ('Request failed (HTTP ' + res.status + ')');
+  const startData = await startRes.json().catch(()=> null);
+  if(!startRes.ok || !startData || !startData.taskId){
+    const message = (startData && startData.message) || ('Request failed (HTTP ' + startRes.status + ')');
     throw new Error(message);
   }
-  return data.imageUrl;
+  const taskId = startData.taskId;
+
+  const deadline = Date.now() + 300000; // 5 minutes — real paid generation can genuinely take a while
+  let elapsed = 0;
+  while(Date.now() < deadline){
+    await new Promise(r=> setTimeout(r, 3000));
+    elapsed += 3;
+    const statusRes = await fetch('/api/generate-image/status?taskId=' + encodeURIComponent(taskId));
+    const statusData = await statusRes.json().catch(()=> null);
+    if(!statusRes.ok || !statusData){
+      throw new Error('Lost contact with the server while checking on the generation.');
+    }
+    if(statusData.status === 'success' && statusData.imageUrl){
+      return statusData.imageUrl;
+    }
+    if(statusData.status === 'failed'){
+      throw new Error(statusData.message || 'Generation failed.');
+    }
+    if(onProgress) onProgress(elapsed, statusData.kieStatus);
+  }
+  throw new Error('Generation is still running after 5 minutes — it may finish on KIE\'s side, but this attempt gave up waiting. Try again in a bit.');
 }
 
 // ---------- free rough-preview generation via Pollinations.ai (no key required) ----------
