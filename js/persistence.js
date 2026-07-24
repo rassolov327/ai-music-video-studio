@@ -704,12 +704,12 @@ function serializeProject(){
         copy.photo = null; // reconstructed from angleSlots.front on restore
       }
       if(cat.key==='locations'){
-        copy.photo = null;
-        if(copy.angles) copy.angles = copy.angles.map(()=> null);
+        if(copy.photo && copy.photo.indexOf('data:')===0) copy.photo = null;
+        if(copy.angles) copy.angles = copy.angles.map(a => (a && a.indexOf('data:')===0) ? null : a);
       }
       if(cat.key==='props'){
-        copy.photo = null;
-        if(copy.angles) copy.angles = copy.angles.map(()=> null);
+        if(copy.photo && copy.photo.indexOf('data:')===0) copy.photo = null;
+        if(copy.angles) copy.angles = copy.angles.map(a => (a && a.indexOf('data:')===0) ? null : a);
       }
       return copy;
     }),

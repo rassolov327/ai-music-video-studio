@@ -297,7 +297,9 @@ function showPropForm(cat, editIdx){
           photoDrop.classList.add('has-photo');
           setPhotoDropImage(url);
           applyNaturalAspect(photoDrop, url);
+          if(!notesInput.value.trim()) notesInput.value = prompt;
           refreshFormGen();
+          refreshSaveState();
           previewEl.querySelector('[data-tab="details"]').click();
         };
       });
