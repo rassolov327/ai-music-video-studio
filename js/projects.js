@@ -202,3 +202,21 @@ function wireProjectMenu(){
     };
   });
 }
+
+function wireToolsMenu(){
+  const btn = document.getElementById('menuToolsBtn');
+  const dropdown = document.getElementById('menuToolsDropdown');
+  if(!btn || !dropdown) return;
+  btn.addEventListener('click', (e)=>{
+    e.stopPropagation();
+    dropdown.classList.toggle('open');
+  });
+  document.addEventListener('click', ()=> dropdown.classList.remove('open'));
+  dropdown.querySelectorAll('[data-action]').forEach(item=>{
+    item.onclick = (e)=>{
+      e.stopPropagation();
+      dropdown.classList.remove('open');
+      if(item.dataset.action==='check') showCheckReport();
+    };
+  });
+}

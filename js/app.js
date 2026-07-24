@@ -7,6 +7,8 @@ function goHome(){
 (async function(){
   wireNewProjectScreen();
   wireProjectMenu();
+  wireToolsMenu();
+  wireCheckReport();
   wireFolderButton();
   const restored = await initProjectStore();
   if(restored){

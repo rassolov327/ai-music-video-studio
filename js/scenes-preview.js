@@ -457,14 +457,34 @@ function renderShotGenSection(scene, shot){
   if(shot.previewImage){
     section.innerHTML = `
       <div class="shot-preview-thumb"><img src="${shot.previewImage}"></div>
-      <button class="cf-btn" id="shotRegenBtn" style="width:100%;">Regenerate preview <span class="gen-cost">${SHOT_GEN_COST_LABEL}</span></button>`;
+      <button class="cf-btn" id="shotRegenBtn" style="width:100%;">Regenerate preview <span class="gen-cost">${SHOT_GEN_COST_LABEL}</span></button>
+      <div id="paidGenSlot"></div>`;
     document.getElementById('shotRegenBtn').onclick = ()=> runShotGeneration(scene, shot);
   } else {
     section.innerHTML = `
       <button class="gen-btn" id="shotGenBtn">Generate preview <span class="gen-cost">${SHOT_GEN_COST_LABEL}</span></button>
-      <div class="gen-hint">Generates a preview frame (via ${SHOT_GEN_MODEL_LABEL}) from this shot's parameters. Shown here, on the timeline thumbnail, and in the main preview.</div>`;
+      <div class="gen-hint">Generates a preview frame (via ${SHOT_GEN_MODEL_LABEL}) from this shot's parameters. Shown here, on the timeline thumbnail, and in the main preview.</div>
+      <div id="paidGenSlot"></div>`;
     document.getElementById('shotGenBtn').onclick = ()=> runShotGeneration(scene, shot);
   }
+  renderPaidGenSlot(scene, shot);
+}
+
+async function renderPaidGenSlot(scene, shot){
+  const slot = document.getElementById('paidGenSlot');
+  if(!slot) return;
+  const available = await checkPaidGenerationAvailable();
+  // renderShotGenSection may have re-run (e.g. focus changed) while we were awaiting —
+  // re-fetch the slot to make sure we're still updating the section that's on screen.
+  const freshSlot = document.getElementById('paidGenSlot');
+  if(!freshSlot) return;
+  if(!available){
+    freshSlot.innerHTML = `<div class="gen-hint" style="margin-top:10px;">Paid generation (${PAID_GEN_MODEL_LABEL}) isn't connected on this deployment yet.</div>`;
+    return;
+  }
+  freshSlot.innerHTML = `
+    <button class="cf-btn primary" id="shotPaidGenBtn" style="width:100%;margin-top:10px;">Generate (real AI) <span class="gen-cost">${PAID_GEN_COST_LABEL}</span></button>`;
+  document.getElementById('shotPaidGenBtn').onclick = ()=> runShotGenerationPaid(scene, shot);
 }
 
 function runShotGeneration(scene, shot){
@@ -480,7 +500,27 @@ function runShotGeneration(scene, shot){
       renderTimelineScenes();
       if(focus.sceneId===scene.id && focus.shotId===shot.id) refreshMainPreview();
       else renderShotGenSection(scene, shot);
+      if(typeof saveProjectSoon==='function') saveProjectSoon();
     });
+}
+
+async function runShotGenerationPaid(scene, shot){
+  const section = document.getElementById('shotGenSection');
+  if(!section) return;
+  section.innerHTML = `<button class="gen-btn" disabled><span class="gen-spin"></span>Generating with ${PAID_GEN_MODEL_LABEL}… (can take up to a minute)</button>`;
+  const prompt = buildShotPrompt(shot, scene);
+  const meta = state.projectMeta || { width:1920, height:1080 };
+  try{
+    const imageUrl = await generateImageViaBackend(prompt, meta.width, meta.height);
+    shot.previewImage = imageUrl;
+    renderTimelineScenes();
+    if(focus.sceneId===scene.id && focus.shotId===shot.id) refreshMainPreview();
+    else renderShotGenSection(scene, shot);
+    if(typeof saveProjectSoon==='function') saveProjectSoon();
+  } catch(err){
+    section.innerHTML = `<div class="gen-hint" style="color:var(--danger);">Generation failed: ${err.message}</div>`;
+    setTimeout(()=> renderShotGenSection(scene, shot), 3000);
+  }
 }
 
 

@@ -52,6 +52,36 @@ const GEN_MODEL_LABEL = 'KIE · GPT-Image-1';
 const GEN_COST_LABEL = '$0.03';
 const SHOT_GEN_MODEL_LABEL = 'Pollinations.ai (free)';
 const SHOT_GEN_COST_LABEL = 'Free';
+const PAID_GEN_MODEL_LABEL = 'KIE · GPT-Image-1';
+const PAID_GEN_COST_LABEL = '$0.03';
+
+// ---------- paid generation, proxied through our own backend (server.js) ----------
+// The browser never sees the KIE.ai key — it only ever calls this same-origin endpoint.
+let _kieConfiguredCache = null;
+async function checkPaidGenerationAvailable(){
+  if(_kieConfiguredCache !== null) return _kieConfiguredCache;
+  try{
+    const res = await fetch('/api/health');
+    const data = await res.json();
+    _kieConfiguredCache = !!(data && data.kieConfigured);
+  } catch(err){
+    _kieConfiguredCache = false;
+  }
+  return _kieConfiguredCache;
+}
+async function generateImageViaBackend(prompt, width, height){
+  const res = await fetch('/api/generate-image', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt, width, height }),
+  });
+  const data = await res.json().catch(()=> null);
+  if(!res.ok || !data || !data.imageUrl){
+    const message = (data && data.message) || ('Request failed (HTTP ' + res.status + ')');
+    throw new Error(message);
+  }
+  return data.imageUrl;
+}
 
 // ---------- free rough-preview generation via Pollinations.ai (no key required) ----------
 function buildPollinationsUrl(prompt, w, h){

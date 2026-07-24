@@ -1,0 +1,16 @@
+{
+  "name": "ai-music-video-studio",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "AI Music Video Studio — static app + a small backend proxy that keeps the paid image-generation API key server-side.",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
