@@ -25,6 +25,7 @@ function wireColResizer(handle, panelEl, opts){
       const delta = opts.side==='left' ? deltaVisual : -deltaVisual;
       const newWidth = Math.max(opts.min, Math.min(opts.max, startWidth + delta));
       panelEl.style.width = newWidth + 'px';
+      if(typeof sizePreviewFrame==='function') sizePreviewFrame();
     };
     const onUp = ()=>{
       handle.classList.remove('dragging');
@@ -51,6 +52,7 @@ function wireRowResizer(handle, panelEl, opts){
       const maxH = typeof opts.max==='function' ? opts.max() : opts.max;
       const newHeight = Math.max(opts.min, Math.min(maxH, startHeight - deltaVisual));
       panelEl.style.height = newHeight + 'px';
+      if(typeof sizePreviewFrame==='function') sizePreviewFrame();
     };
     const onUp = ()=>{
       handle.classList.remove('dragging');

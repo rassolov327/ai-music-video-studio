@@ -1,32 +1,31 @@
-// ---------- ProjectStore: save/load the whole project, autosave ----------
-// Two backends:
+// ---------- ProjectStore: multiple projects, each with its own save/load, autosave ----------
+// Two backends per project:
 //  - IndexedDB (default, works in every browser) — the project lives inside the browser's
 //    own storage, invisible in the OS file explorer.
 //  - A real folder on disk via the File System Access API (Chrome/Edge only) — opt-in,
 //    writes an actual project.json file (plus real asset files) the user can see, back up,
-//    or move by hand.
+//    or move by hand. Each project that uses this gets its own folder.
 // Everything above this file (characters, locations, looks, music, timeline...) never talks
 // to either backend directly — it only mutates `state`/`focus`/etc., and this module is the
-// only place that knows how those get persisted. Swapping IndexedDB for real files later
-// (Electron) means changing this one file, not the rest of the app.
+// only place that knows how those get persisted.
 //
-// Important design point: the project JSON (scenes, characters, looks, timings...) is small
-// and saves on a cheap timer. Big binary assets — right now just the music file — are NOT
-// re-packed into that JSON on every tick. Each one is written ONCE, at the moment it's
-// added or replaced, as either a raw Blob in its own IndexedDB store or a real file in the
-// project folder's assets/ subfolder. The project JSON only ever holds a small reference
-// (the track's id) pointing at that asset.
+// Multi-project note: several projects can share the same browser storage, so every asset
+// key and every project record is namespaced by projectId — otherwise two projects' "c1"
+// character (both starting their id counter at 1) would collide in storage.
 
 const DB_NAME = 'ai_mv_studio_db';
-const DB_VERSION = 2;
-const STORE_PROJECT = 'project';
-const STORE_HANDLES = 'handles';
-const STORE_ASSETS = 'assets'; // raw Blobs (e.g. music files), keyed by asset id
+const DB_VERSION = 3;
+const STORE_PROJECT = 'project';       // keyed by projectId -> full project JSON
+const STORE_PROJECT_META = 'projectMeta'; // keyed by projectId -> lightweight listing info
+const STORE_HANDLES = 'handles';       // keyed by projectId -> FileSystemDirectoryHandle
+const STORE_ASSETS = 'assets';         // keyed by "<projectId>:music:<id>" etc -> raw Blob
+const STORE_APP = 'app';               // small app-wide settings (e.g. last opened project)
 
 const SUPPORTS_DISK_FOLDER = ('showDirectoryPicker' in window) && (()=>{
   try{ return window.self === window.top; } catch(err){ return false; }
 })();
 
+let currentProjectId = null;
 let diskDirHandle = null;
 let autosaveTimer = null;
 let lastSavedJSON = null;
@@ -37,8 +36,10 @@ function openDB(){
     req.onupgradeneeded = (e)=>{
       const db = e.target.result;
       if(!db.objectStoreNames.contains(STORE_PROJECT)) db.createObjectStore(STORE_PROJECT);
+      if(!db.objectStoreNames.contains(STORE_PROJECT_META)) db.createObjectStore(STORE_PROJECT_META);
       if(!db.objectStoreNames.contains(STORE_HANDLES)) db.createObjectStore(STORE_HANDLES);
       if(!db.objectStoreNames.contains(STORE_ASSETS)) db.createObjectStore(STORE_ASSETS);
+      if(!db.objectStoreNames.contains(STORE_APP)) db.createObjectStore(STORE_APP);
     };
     req.onsuccess = ()=> resolve(req.result);
     req.onerror = ()=> reject(req.error);
@@ -71,9 +72,200 @@ async function idbDelete(store, key){
     tx.onerror = ()=> reject(tx.error);
   });
 }
+async function idbGetAll(store){
+  const db = await openDB();
+  return new Promise((resolve, reject)=>{
+    const tx = db.transaction(store, 'readonly');
+    const os = tx.objectStore(store);
+    const keysReq = os.getAllKeys();
+    const valsReq = os.getAll();
+    let keys, vals;
+    keysReq.onsuccess = ()=>{ keys = keysReq.result; if(vals) resolve(keys.map((k,i)=>({key:k, value:vals[i]}))); };
+    valsReq.onsuccess = ()=>{ vals = valsReq.result; if(keys) resolve(keys.map((k,i)=>({key:k, value:vals[i]}))); };
+    tx.onerror = ()=> reject(tx.error);
+  });
+}
 
-// ---- big binary assets (music files) — written once, not on every autosave tick ----
-function assetKeyForTrack(trackId){ return 'music:' + trackId; }
+// ---- project id namespacing for shared stores ----
+function pid(){ return currentProjectId || 'default'; }
+
+// ============================================================
+// Project list management (home screen)
+// ============================================================
+async function listProjects(){
+  try{
+    const rows = await idbGetAll(STORE_PROJECT_META);
+    return rows.map(r=>r.value).filter(Boolean).sort((a,b)=> (b.updatedAt||0) - (a.updatedAt||0));
+  } catch(err){ return []; }
+}
+async function saveProjectMeta(meta){
+  await idbSet(STORE_PROJECT_META, meta.id, meta);
+}
+function genProjectId(){
+  return 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+}
+async function getLastActiveProjectId(){
+  try{ return await idbGet(STORE_APP, 'lastActiveProjectId'); } catch(err){ return null; }
+}
+async function setLastActiveProjectId(id){
+  try{ await idbSet(STORE_APP, 'lastActiveProjectId', id); } catch(err){}
+}
+
+// Creates a brand new, empty project with the given settings and makes it the active one.
+// `folderHandle` is optional — pass it when the user picked a disk folder in the New
+// Project dialog.
+async function createProject({ name, format, width, height, fps, folderHandle }){
+  if(currentProjectId){
+    stopAutosave();
+    try{ await saveProjectNow(); } catch(err){ console.warn('[ProjectStore] could not save previous project before switching:', err); }
+  }
+  const id = genProjectId();
+  currentProjectId = id;
+  diskDirHandle = folderHandle || null;
+
+  const now = Date.now();
+  const meta = {
+    id, name: (name || 'Untitled Project').trim() || 'Untitled Project',
+    format: format || 'horizontal', width: width || 1920, height: height || 1080, fps: fps || 25,
+    storage: diskDirHandle ? 'disk' : 'idb',
+    folderName: diskDirHandle ? diskDirHandle.name : null,
+    createdAt: now, updatedAt: now,
+  };
+
+  // reset in-memory state to a fresh empty project
+  state.categories.forEach(cat=>{ cat.items = []; });
+  state.scenes = [];
+  state.timelineAudio = null;
+  state.projectMeta = { id, name: meta.name, format: meta.format, width: meta.width, height: meta.height, fps: meta.fps, createdAt: now, updatedAt: now };
+  focus = { sceneId:null, shotId:null };
+  timelineMode = 'assembly';
+  playheadX = 0;
+  sceneSeq = 1; shotSeq = 1; paletteSeq = 0; charSeq = 1; locSeq = 1; trackSeq = 1; lookSeq = 1;
+  PROJECT_FPS = meta.fps;
+  applyProjectFrame();
+  renderAssets();
+  renderTimelineScenes();
+
+  await saveProjectMeta(meta);
+  if(diskDirHandle){
+    try{ await idbSet(STORE_HANDLES, id, diskDirHandle); } catch(err){}
+  }
+  lastSavedJSON = null;
+  await saveProjectNow();
+  await setLastActiveProjectId(id);
+  startAutosave();
+  return id;
+}
+
+// Opens an existing project by id (from the home screen list) and makes it active.
+async function openProject(id, verbose){
+  if(currentProjectId && currentProjectId !== id){
+    stopAutosave();
+    try{ await saveProjectNow(); } catch(err){ console.warn('[ProjectStore] could not save previous project before switching:', err); }
+  }
+  currentProjectId = id;
+  diskDirHandle = null;
+  const meta = await idbGet(STORE_PROJECT_META, id);
+  let data = null;
+
+  if(meta && meta.storage === 'disk'){
+    let handle;
+    try{ handle = await idbGet(STORE_HANDLES, id); } catch(err){ handle = null; }
+    if(handle){
+      try{
+        const perm = await handle.queryPermission({ mode:'readwrite' });
+        if(perm === 'granted'){
+          diskDirHandle = handle;
+        } else {
+          if(verbose) logLoadingStep('Project folder needs permission again.', 'error');
+          const granted = await requestFolderPermissionInteractive(handle);
+          if(granted) diskDirHandle = handle;
+        }
+      } catch(err){}
+    }
+    if(diskDirHandle){
+      data = await readProjectFromDisk(diskDirHandle);
+    }
+  }
+  if(!data){
+    data = await idbGet(STORE_PROJECT, id);
+  }
+
+  if(!data){
+    if(verbose) logLoadingStep('Could not find this project\'s data.', 'error');
+    return false;
+  }
+  const hadErrors = await applyProjectData(data, verbose);
+  lastSavedJSON = JSON.stringify(serializeProject());
+  await setLastActiveProjectId(id);
+  if(meta){ meta.updatedAt = Date.now(); await saveProjectMeta(meta); }
+  startAutosave();
+  updateFolderButton();
+  return !hadErrors;
+}
+
+// Some browsers only grant/re-grant folder permission from a direct user gesture, so this
+// is called from a click handler on the home screen ("this project needs permission") —
+// it cannot happen silently in the background.
+async function requestFolderPermissionInteractive(handle){
+  try{
+    const perm = await handle.requestPermission({ mode:'readwrite' });
+    return perm === 'granted';
+  } catch(err){ return false; }
+}
+
+async function deleteProject(id){
+  try{ await idbDelete(STORE_PROJECT_META, id); } catch(err){}
+  try{ await idbDelete(STORE_PROJECT, id); } catch(err){}
+  try{ await idbDelete(STORE_HANDLES, id); } catch(err){}
+  // best-effort: also clear that project's assets out of browser storage (disk files, if
+  // any, are left alone — they belong to the user's folder, not to us)
+  try{
+    const db = await openDB();
+    const tx = db.transaction(STORE_ASSETS, 'readwrite');
+    const os = tx.objectStore(STORE_ASSETS);
+    const keysReq = os.getAllKeys();
+    keysReq.onsuccess = ()=>{
+      keysReq.result.forEach(k=>{ if(typeof k==='string' && k.indexOf(id+':')===0) os.delete(k); });
+    };
+    await new Promise((resolve)=>{ tx.oncomplete = resolve; tx.onerror = resolve; });
+  } catch(err){}
+}
+async function renameProject(id, name){
+  const meta = await idbGet(STORE_PROJECT_META, id);
+  if(!meta) return;
+  meta.name = (name || 'Untitled Project').trim() || 'Untitled Project';
+  meta.updatedAt = Date.now();
+  await saveProjectMeta(meta);
+  if(id === currentProjectId){
+    state.projectMeta.name = meta.name;
+    saveProjectSoon();
+  }
+}
+
+// Applies the current project's format to the parts of the app that actually depend on it
+// (preview aspect ratio right now; generation calls read state.projectMeta directly).
+function applyProjectFrame(){
+  const root = document.documentElement;
+  if(root) root.style.setProperty('--project-aspect', state.projectMeta.width + ' / ' + state.projectMeta.height);
+  if(typeof updateProjTitleDisplay==='function') updateProjTitleDisplay();
+  if(typeof refreshMainPreview==='function') refreshMainPreview();
+}
+
+function startAutosave(){
+  if(autosaveTimer) clearInterval(autosaveTimer);
+  autosaveTimer = setInterval(autosaveTick, 3000);
+  wireExitSave();
+}
+function stopAutosave(){
+  if(autosaveTimer){ clearInterval(autosaveTimer); autosaveTimer = null; }
+}
+
+// ============================================================
+// Big binary assets (music files, character/location images) — written once, not on every
+// autosave tick. Every key is namespaced by project id.
+// ============================================================
+function assetKeyForTrack(trackId){ return pid() + ':music:' + trackId; }
 
 function safeAssetFileName(trackId, originalName){
   const dot = originalName.lastIndexOf('.');
@@ -174,7 +366,7 @@ async function migrateImageFieldsToDisk(item, catKey){
   for(const fieldKey of Object.keys(item._assetFiles)){
     if(item._assetFiles[fieldKey]) continue; // already a disk file
     try{
-      const assetKey = catKey + ':' + item.id + ':' + fieldKey;
+      const assetKey = pid() + ':' + catKey + ':' + item.id + ':' + fieldKey;
       const blob = await idbGet(STORE_ASSETS, assetKey);
       if(blob){
         const assetsDir = await getAssetsDirHandle(true);
@@ -189,10 +381,8 @@ async function migrateImageFieldsToDisk(item, catKey){
   }
 }
 
-
 // ---- generic image assets (character angle photos, turnaround sheets, location photos) —
-// same "written once, referenced by key" pattern as audio, so project.json never carries
-// megabytes of base64 image data or gets re-encoded on every autosave tick.
+// same "written once, referenced by key" pattern as audio.
 function dataUrlToBlobSync(dataUrl){
   const commaIdx = dataUrl.indexOf(',');
   const header = dataUrl.slice(0, commaIdx);
@@ -210,12 +400,8 @@ function extFromDataUrl(dataUrl){
   const map = { jpeg:'jpg', 'svg+xml':'svg' };
   return '.' + (map[m[1]] || m[1]);
 }
-
-// Writes one image (only if it's a local data: URL — remote Pollinations links are left
-// untouched, they're already lightweight) and returns the filename used on disk, or null
-// if it went into IndexedDB instead.
 async function persistImageAsset(assetKey, dataUrl, assetsDirHandle){
-  if(!dataUrl || dataUrl.indexOf('data:')!==0) return undefined; // nothing to do
+  if(!dataUrl || dataUrl.indexOf('data:')!==0) return undefined;
   const blob = dataUrlToBlobSync(dataUrl);
   if(diskDirHandle){
     try{
@@ -251,10 +437,6 @@ async function loadImageAsset(assetKey, fileName, assetsDirHandle){
 async function persistCharacterImages(character){
   if(!character.id) return;
   character._assetFiles = character._assetFiles || {};
-  // Resolve (and create if needed) the assets/ directory ONCE before writing anything —
-  // this is the piece that broke: several parallel getDirectoryHandle({create:true}) calls
-  // for the *same* "assets" folder can race each other. Music never hit this because it
-  // only ever writes one file at a time; characters write up to 7 at once.
   const assetsDir = diskDirHandle ? await getAssetsDirHandle(true) : null;
   const jobs = [];
   if(character.angleSlots){
@@ -263,7 +445,7 @@ async function persistCharacterImages(character){
       const fieldKey = 'angle-' + slotKey;
       if(val && val.indexOf('data:')===0){
         jobs.push(
-          persistImageAsset('band:' + character.id + ':' + fieldKey, val, assetsDir)
+          persistImageAsset(pid() + ':band:' + character.id + ':' + fieldKey, val, assetsDir)
             .then(fileName=>{ character._assetFiles[fieldKey] = fileName; })
         );
       }
@@ -271,7 +453,7 @@ async function persistCharacterImages(character){
   }
   if(character.turnaroundSheet && character.turnaroundSheet.indexOf('data:')===0){
     jobs.push(
-      persistImageAsset('band:' + character.id + ':turnaround', character.turnaroundSheet, assetsDir)
+      persistImageAsset(pid() + ':band:' + character.id + ':turnaround', character.turnaroundSheet, assetsDir)
         .then(fileName=>{ character._assetFiles['turnaround'] = fileName; })
     );
   }
@@ -287,7 +469,7 @@ async function restoreCharacterImages(character){
   const fieldKeys = Object.keys(character._assetFiles);
   const jobs = fieldKeys.map(async (fieldKey)=>{
     const fileName = character._assetFiles[fieldKey];
-    const assetKey = 'band:' + character.id + ':' + fieldKey;
+    const assetKey = pid() + ':band:' + character.id + ':' + fieldKey;
     const url = await loadImageAsset(assetKey, fileName, assetsDir);
     if(fieldKey === 'turnaround') character.turnaroundSheet = url;
     else if(fieldKey.indexOf('angle-')===0) character.angleSlots[fieldKey.slice(6)] = url;
@@ -301,14 +483,14 @@ async function restoreCharacterImages(character){
 async function deleteCharacterImages(character){
   if(!character._assetFiles) return;
   for(const fieldKey of Object.keys(character._assetFiles)){
-    const assetKey = 'band:' + character.id + ':' + fieldKey;
+    const assetKey = pid() + ':band:' + character.id + ':' + fieldKey;
     try{ await idbDelete(STORE_ASSETS, assetKey); } catch(err){}
   }
   if(diskDirHandle){
     try{
       const assetsDir = await getAssetsDirHandle(false);
       for await (const name of assetsDir.keys()){
-        if(name.indexOf('band_' + character.id + '_')===0) await assetsDir.removeEntry(name);
+        if(name.indexOf('band_' + character.id + '_')===0 || name.indexOf(pid()+'_band_'+character.id+'_')===0) await assetsDir.removeEntry(name);
       }
     } catch(err){}
   }
@@ -322,7 +504,7 @@ async function persistLocationImages(location){
   const jobs = [];
   if(location.photo && location.photo.indexOf('data:')===0){
     jobs.push(
-      persistImageAsset('locations:' + location.id + ':photo', location.photo, assetsDir)
+      persistImageAsset(pid() + ':locations:' + location.id + ':photo', location.photo, assetsDir)
         .then(fileName=>{ location._assetFiles['photo'] = fileName; })
     );
   }
@@ -332,7 +514,7 @@ async function persistLocationImages(location){
       const fieldKey = 'angle-' + i;
       if(val && val.indexOf('data:')===0){
         jobs.push(
-          persistImageAsset('locations:' + location.id + ':' + fieldKey, val, assetsDir)
+          persistImageAsset(pid() + ':locations:' + location.id + ':' + fieldKey, val, assetsDir)
             .then(fileName=>{ location._assetFiles[fieldKey] = fileName; })
         );
       }
@@ -349,7 +531,7 @@ async function restoreLocationImages(location){
   const fieldKeys = Object.keys(location._assetFiles);
   const jobs = fieldKeys.map(async (fieldKey)=>{
     const fileName = location._assetFiles[fieldKey];
-    const assetKey = 'locations:' + location.id + ':' + fieldKey;
+    const assetKey = pid() + ':locations:' + location.id + ':' + fieldKey;
     const url = await loadImageAsset(assetKey, fileName, assetsDir);
     if(fieldKey==='photo') location.photo = url;
     else if(fieldKey.indexOf('angle-')===0){
@@ -366,20 +548,20 @@ async function restoreLocationImages(location){
 async function deleteLocationImages(location){
   if(!location._assetFiles) return;
   for(const fieldKey of Object.keys(location._assetFiles)){
-    const assetKey = 'locations:' + location.id + ':' + fieldKey;
+    const assetKey = pid() + ':locations:' + location.id + ':' + fieldKey;
     try{ await idbDelete(STORE_ASSETS, assetKey); } catch(err){}
   }
   if(diskDirHandle){
     try{
       const assetsDir = await getAssetsDirHandle(false);
       for await (const name of assetsDir.keys()){
-        if(name.indexOf('locations_' + location.id + '_')===0) await assetsDir.removeEntry(name);
+        if(name.indexOf('locations_' + location.id + '_')===0 || name.indexOf(pid()+'_locations_'+location.id+'_')===0) await assetsDir.removeEntry(name);
       }
     } catch(err){}
   }
 }
 
-
+// ---- disk folder (File System Access API) ----
 async function writeProjectToDisk(dirHandle, projectData){
   const fileHandle = await dirHandle.getFileHandle('project.json', { create:true });
   const writable = await fileHandle.createWritable();
@@ -396,6 +578,11 @@ async function readProjectFromDisk(dirHandle){
     return null; // no project.json yet — fresh/empty folder
   }
 }
+
+// Lets the user pick a folder for the CURRENT project (used both from the New Project
+// dialog and from the "Save to disk folder" button while already working on a project).
+// Always just WRITES current state into the chosen folder — never loads from it — so
+// re-picking a folder mid-session can never silently clobber live work.
 async function chooseDiskFolder(){
   if(!SUPPORTS_DISK_FOLDER) return false;
   let handle;
@@ -405,34 +592,39 @@ async function chooseDiskFolder(){
     return false; // user cancelled the picker
   }
   diskDirHandle = handle;
-  await idbSet(STORE_HANDLES, 'projectDir', handle);
-  // Connecting a folder always means "keep saving my current work here" — it must never
-  // silently load whatever that folder already contains and clobber what's in memory.
-  // (Loading an existing project.json only happens once, at genuine app startup, in
-  // initProjectStore() — there's no live work to protect at that point.)
+  await idbSet(STORE_HANDLES, pid(), handle);
   await migrateAssetsToDisk();
   await saveProjectNow();
+  const meta = await idbGet(STORE_PROJECT_META, pid());
+  if(meta){ meta.storage = 'disk'; meta.folderName = handle.name; await saveProjectMeta(meta); }
   updateFolderButton();
   return true;
 }
-async function tryRestoreDiskHandle(){
-  if(!SUPPORTS_DISK_FOLDER) return null;
-  let handle;
-  try{ handle = await idbGet(STORE_HANDLES, 'projectDir'); }
-  catch(err){ return null; }
-  if(!handle) return null;
-  const opts = { mode:'readwrite' };
-  let perm;
-  try{ perm = await handle.queryPermission(opts); } catch(err){ return null; }
-  if(perm === 'granted'){
-    diskDirHandle = handle;
-    return 'granted';
+
+function updateFolderButton(){
+  const btn = document.getElementById('connectFolderBtn');
+  if(!btn) return;
+  if(!SUPPORTS_DISK_FOLDER){ btn.style.display = 'none'; return; }
+  btn.style.display = '';
+  const folderIcon = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>';
+  if(diskDirHandle){
+    btn.innerHTML = folderIcon + 'Saved to “' + diskDirHandle.name + '” · change';
+    btn.title = 'Autosaving into this folder on your disk (project.json + assets/). Click to pick a different folder.';
+  } else {
+    btn.innerHTML = folderIcon + 'Save to disk folder';
+    btn.title = 'Keep this project as real files on your disk';
   }
-  return { needsPermission: handle };
+}
+function wireFolderButton(){
+  const btn = document.getElementById('connectFolderBtn');
+  if(!btn) return;
+  btn.onclick = ()=> chooseDiskFolder().then(updateFolderButton);
 }
 
-// ---- serialize / restore the whole app state ----
+// ============================================================
+// Serialize / restore the whole app state for the CURRENT project.
 // Fast and cheap on purpose: no binary data ever passes through here, just plain JSON.
+// ============================================================
 function serializeProject(){
   const categoriesOut = state.categories.map(cat=>({
     key: cat.key, name: cat.name, icon: cat.icon, addType: cat.addType, collapsed: cat.collapsed,
@@ -452,8 +644,9 @@ function serializeProject(){
     }),
   }));
   return {
-    version: 2,
+    version: 3,
     savedAt: Date.now(),
+    projectMeta: JSON.parse(JSON.stringify(state.projectMeta)),
     categories: categoriesOut,
     scenes: JSON.parse(JSON.stringify(state.scenes)),
     timelineAudio: state.timelineAudio ? JSON.parse(JSON.stringify(state.timelineAudio)) : null,
@@ -522,9 +715,11 @@ async function applyProjectData(data, verbose){
   state.categories = data.categories || state.categories;
   state.scenes = data.scenes || [];
   state.timelineAudio = data.timelineAudio || null;
+  state.projectMeta = data.projectMeta || state.projectMeta;
   focus = data.focus || { sceneId:null, shotId:null };
   timelineMode = data.timelineMode || 'assembly';
   playheadX = data.playheadX || 0;
+  PROJECT_FPS = (state.projectMeta && state.projectMeta.fps) || 25;
   if(data.seq){
     sceneSeq = data.seq.sceneSeq || 1;
     shotSeq = data.seq.shotSeq || 1;
@@ -534,13 +729,16 @@ async function applyProjectData(data, verbose){
     trackSeq = data.seq.trackSeq || 1;
     lookSeq = data.seq.lookSeq || 1;
   }
+  applyProjectFrame();
   renderAssets();
   renderTimelineScenes();
   refreshMainPreview();
   return hadErrors;
 }
 
-// ---- save orchestration + autosave (JSON only — assets are handled separately) ----
+// ============================================================
+// Save orchestration + autosave (JSON only — assets are handled separately)
+// ============================================================
 function setSaveStatus(status){
   const el = document.getElementById('saveStatus');
   if(!el) return;
@@ -552,20 +750,34 @@ function setSaveStatus(status){
 }
 
 async function saveProjectNow(){
+  if(!currentProjectId) return;
+  state.projectMeta.updatedAt = Date.now();
   const data = serializeProject();
   if(diskDirHandle){
     try{
       await writeProjectToDisk(diskDirHandle, data);
       lastSavedJSON = JSON.stringify(data);
+      await touchProjectMeta();
       console.log('[ProjectStore] saved to disk folder "' + diskDirHandle.name + '"');
       return;
     } catch(err){
       console.warn('[ProjectStore] Disk save failed, falling back to browser storage:', err);
     }
   }
-  await idbSet(STORE_PROJECT, 'current', data);
+  await idbSet(STORE_PROJECT, currentProjectId, data);
   lastSavedJSON = JSON.stringify(data);
+  await touchProjectMeta();
   console.log('[ProjectStore] saved to browser storage (IndexedDB)');
+}
+async function touchProjectMeta(){
+  try{
+    const meta = await idbGet(STORE_PROJECT_META, currentProjectId);
+    if(meta){
+      meta.updatedAt = Date.now();
+      meta.name = state.projectMeta.name;
+      await saveProjectMeta(meta);
+    }
+  } catch(err){}
 }
 
 // kept as a no-op hook — some render functions still call this; harmless leftover now that
@@ -580,6 +792,7 @@ function saveProjectSoon(){
 }
 
 async function autosaveTick(){
+  if(!currentProjectId) return;
   let data;
   try{ data = serializeProject(); }
   catch(err){ console.warn('[ProjectStore] Autosave: could not serialize project:', err); return; }
@@ -589,11 +802,12 @@ async function autosaveTick(){
   try{
     if(diskDirHandle){
       try{ await writeProjectToDisk(diskDirHandle, data); }
-      catch(err){ console.warn('[ProjectStore] Disk save failed, falling back to browser storage:', err); await idbSet(STORE_PROJECT, 'current', data); }
+      catch(err){ console.warn('[ProjectStore] Disk save failed, falling back to browser storage:', err); await idbSet(STORE_PROJECT, currentProjectId, data); }
     } else {
-      await idbSet(STORE_PROJECT, 'current', data);
+      await idbSet(STORE_PROJECT, currentProjectId, data);
     }
     lastSavedJSON = json;
+    await touchProjectMeta();
     setSaveStatus('saved');
   } catch(err){
     setSaveStatus('error');
@@ -601,48 +815,21 @@ async function autosaveTick(){
   }
 }
 
-function updateFolderButton(){
-  const btn = document.getElementById('connectFolderBtn');
-  if(!btn) return;
-  if(!SUPPORTS_DISK_FOLDER){ btn.style.display = 'none'; return; }
-  btn.style.display = '';
-  const folderIcon = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>';
-  if(diskDirHandle){
-    btn.innerHTML = folderIcon + 'Saved to “' + diskDirHandle.name + '” · change';
-    btn.title = 'Autosaving into this folder on your disk (project.json + assets/). Click to pick a different folder.';
-  } else {
-    btn.innerHTML = folderIcon + 'Save to disk folder';
-    btn.title = 'Keep this project as real files on your disk';
-  }
+// Final safety net: save (cheap now — JSON only) when the tab is hidden/closed.
+let exitSaveWired = false;
+function wireExitSave(){
+  if(exitSaveWired) return;
+  exitSaveWired = true;
+  document.addEventListener('visibilitychange', ()=>{
+    if(document.visibilityState === 'hidden') saveProjectNow();
+  });
+  window.addEventListener('pagehide', ()=> saveProjectNow());
 }
 
-function showReconnectFolderBanner(handle){
-  const btn = document.getElementById('connectFolderBtn');
-  if(!btn) return;
-  btn.style.display = '';
-  btn.innerHTML = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>Reconnect project folder';
-  btn.onclick = async ()=>{
-    try{
-      const perm = await handle.requestPermission({ mode:'readwrite' });
-      if(perm==='granted'){
-        diskDirHandle = handle;
-        const existing = await readProjectFromDisk(handle);
-        if(existing) await applyProjectData(existing);
-        updateFolderButton();
-        wireFolderButton();
-      }
-    } catch(err){ console.warn('Could not reconnect folder:', err); }
-  };
-}
-
-function wireFolderButton(){
-  const btn = document.getElementById('connectFolderBtn');
-  if(!btn) return;
-  btn.onclick = ()=> chooseDiskFolder().then(updateFolderButton);
-}
-
-// ---- visible loading/diagnostic screen — replaces silent console.warn with something the
-// user can actually read and screenshot without opening DevTools ----
+// ============================================================
+// Visible loading/diagnostic screen — replaces silent console.warn with something the
+// user can actually read and screenshot without opening DevTools.
+// ============================================================
 function logLoadingStep(text, status){
   console.log('[ProjectStore] ' + text);
   const log = document.getElementById('loadingLog');
@@ -655,6 +842,14 @@ function logLoadingStep(text, status){
   log.appendChild(line);
   log.scrollTop = log.scrollHeight;
 }
+function showLoadingScreen(){
+  const screen = document.getElementById('loadingScreen');
+  if(screen){ screen.classList.remove('hidden'); }
+  const log = document.getElementById('loadingLog');
+  if(log) log.innerHTML = '';
+  const btn = document.getElementById('loadingContinueBtn');
+  if(btn) btn.style.display = 'none';
+}
 function finishLoadingScreen(hadErrors){
   const btn = document.getElementById('loadingContinueBtn');
   const screen = document.getElementById('loadingScreen');
@@ -665,56 +860,19 @@ function finishLoadingScreen(hadErrors){
   }
 }
 
+// ============================================================
+// Startup: resume the last active project directly if there is one, otherwise show the
+// home screen (project list). Returns true if a project was opened.
+// ============================================================
 async function initProjectStore(){
-  updateFolderButton();
-  wireFolderButton();
-  logLoadingStep('Checking for a saved project…');
-
-  const diskResult = await tryRestoreDiskHandle();
-  let hadErrors = false;
-  if(diskResult === 'granted'){
-    logLoadingStep('Reconnected to project folder "' + diskDirHandle.name + '"', 'ok');
-    const data = await readProjectFromDisk(diskDirHandle);
-    if(data){
-      logLoadingStep('project.json found — restoring…', 'ok');
-      hadErrors = await applyProjectData(data, true);
-      updateFolderButton();
-      setSaveStatus('saved');
-      lastSavedJSON = JSON.stringify(serializeProject());
-      autosaveTimer = setInterval(autosaveTick, 3000);
-      wireExitSave();
-      logLoadingStep(hadErrors ? 'Done — some assets could not be found (see above).' : 'Done — everything restored.', hadErrors ? 'error' : 'ok');
-      finishLoadingScreen(hadErrors);
-      return true;
-    }
-    logLoadingStep('Connected folder has no project.json yet — starting fresh.', 'info');
-  } else if(diskResult && diskResult.needsPermission){
-    logLoadingStep('Project folder needs permission again — click "Reconnect project folder" above.', 'error');
-    showReconnectFolderBanner(diskResult.needsPermission);
-  } else {
-    logLoadingStep('No project folder connected — using browser storage.', 'info');
+  const lastId = await getLastActiveProjectId();
+  if(!lastId){
+    return false;
   }
-
-  const idbData = await idbGet(STORE_PROJECT, 'current');
-  if(idbData){
-    logLoadingStep('Found a saved project in browser storage — restoring…', 'ok');
-    hadErrors = await applyProjectData(idbData, true);
-    setSaveStatus('saved');
-    lastSavedJSON = JSON.stringify(serializeProject());
-  } else {
-    logLoadingStep('Nothing saved yet — starting a fresh project.', 'info');
-  }
-  autosaveTimer = setInterval(autosaveTick, 3000);
-  wireExitSave();
-  logLoadingStep(hadErrors ? 'Done — some assets could not be found (see above).' : 'Done.', hadErrors ? 'error' : 'ok');
-  finishLoadingScreen(hadErrors);
-  return !!idbData;
-}
-
-// Final safety net: save (cheap now — JSON only) when the tab is hidden/closed.
-function wireExitSave(){
-  document.addEventListener('visibilitychange', ()=>{
-    if(document.visibilityState === 'hidden') saveProjectNow();
-  });
-  window.addEventListener('pagehide', ()=> saveProjectNow());
+  showLoadingScreen();
+  logLoadingStep('Opening your last project…');
+  const ok = await openProject(lastId, true);
+  logLoadingStep(ok ? 'Done.' : 'Could not fully restore this project (see above).', ok ? 'ok' : 'error');
+  finishLoadingScreen(!ok);
+  return ok;
 }

@@ -58,6 +58,18 @@ function buildPollinationsUrl(prompt, w, h){
   const seed = Math.floor(Math.random()*1000000);
   return `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=${w}&height=${h}&nologo=true&seed=${seed}`;
 }
+// Scales a generation request to match the current project's aspect ratio (so a vertical
+// project generates vertical shot previews, not letterboxed 16:9 ones), keeping the long
+// edge around `target` px so requests stay light regardless of the project's real resolution.
+function shotGenerationSize(target){
+  target = target || 768;
+  const meta = (typeof state!=='undefined' && state.projectMeta) ? state.projectMeta : { width:16, height:9 };
+  const ratio = meta.width / meta.height;
+  let w, h;
+  if(ratio >= 1){ w = target; h = Math.round(target / ratio); }
+  else { h = target; w = Math.round(target * ratio); }
+  return { w, h };
+}
 function tryLoadImage(url, timeoutMs){
   return new Promise((resolve, reject)=>{
     const img = new Image();
@@ -110,32 +122,35 @@ function buildShotPrompt(shot, scene){
 
 function generateShotPreviewImage(shot, scene){
   const col = sceneColor(scene);
+  const size = shotGenerationSize(640);
+  const W = size.w, H = size.h;
   const canvas = document.createElement('canvas');
-  canvas.width = 640; canvas.height = 360;
+  canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext('2d');
-  const grad = ctx.createLinearGradient(0, 0, 640, 360);
+  const grad = ctx.createLinearGradient(0, 0, W, H);
   grad.addColorStop(0, col.hexA);
   grad.addColorStop(1, col.hexB);
   ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, 640, 360);
+  ctx.fillRect(0, 0, W, H);
   // a few soft abstract shapes so every generation looks a little different
   let seed = shot.id.split('').reduce((a,c)=>a+c.charCodeAt(0),0) + shot.duration*97;
   function rnd(){ seed = (seed*9301+49297)%233280; return seed/233280; }
   for(let i=0;i<5;i++){
     ctx.beginPath();
-    const r = 40 + rnd()*120;
+    const r = (40 + rnd()*120) * (Math.min(W,H)/360);
     ctx.fillStyle = `rgba(255,255,255,${0.03+rnd()*0.05})`;
-    ctx.arc(rnd()*640, rnd()*360, r, 0, Math.PI*2);
+    ctx.arc(rnd()*W, rnd()*H, r, 0, Math.PI*2);
     ctx.fill();
   }
+  const barH = Math.round(H*0.167);
   ctx.fillStyle = 'rgba(0,0,0,0.28)';
-  ctx.fillRect(0, 300, 640, 60);
+  ctx.fillRect(0, H-barH, W, barH);
   ctx.fillStyle = '#fff';
   ctx.font = '600 20px Inter, sans-serif';
-  ctx.fillText(shot.name, 16, 335);
+  ctx.fillText(shot.name, 16, H-barH+35);
   ctx.fillStyle = 'rgba(255,255,255,0.7)';
   ctx.font = '12px "JetBrains Mono", monospace';
-  ctx.fillText(scene.name + ' · ' + shot.duration + 's', 16, 352);
+  ctx.fillText(scene.name + ' · ' + shot.duration + 's', 16, H-barH+52);
   return canvas.toDataURL('image/png');
 }
 

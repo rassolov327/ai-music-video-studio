@@ -5,11 +5,20 @@ function goHome(){
   refreshMainPreview();
 }
 (async function(){
+  wireNewProjectScreen();
+  wireProjectMenu();
   const restored = await initProjectStore();
-  if(!restored){
-    renderAssets();
-    renderTimelineScenes();
-    refreshMainPreview();
+  if(restored){
+    updateProjTitleDisplay();
+    return;
+  }
+  // no last-active project — first-time visitor goes straight to New Project;
+  // returning users with existing (but not "last active") projects see the list.
+  const projects = await listProjects();
+  if(projects.length===0){
+    showNewProjectScreen();
+  } else {
+    showHomeScreen();
   }
 })();
 document.getElementById('homeBtn').onclick = goHome;
@@ -43,3 +52,4 @@ window.addEventListener('keydown', (e)=>{
   }
 });
 window.addEventListener('resize', drawWave);
+window.addEventListener('resize', ()=>{ if(typeof sizePreviewFrame==='function') sizePreviewFrame(); });

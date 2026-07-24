@@ -8,7 +8,8 @@ const state = {
     {key:'scenes', name:'Scenes', icon:'ti-movie', addType:'scene', collapsed:true, items:[]},
   ],
   scenes: [],
-  timelineAudio: null // { trackId, trimIn, trimOut, volume } — which Music asset (and window/volume) is on the timeline
+  timelineAudio: null, // { trackId, trimIn, trimOut, volume } — which Music asset (and window/volume) is on the timeline
+  projectMeta: { id:null, name:'Untitled Project', format:'horizontal', width:1920, height:1080, fps:25, createdAt:null, updatedAt:null },
 };
 
 let sceneSeq = 1, shotSeq = 1, paletteSeq = 0, charSeq = 1, locSeq = 1, trackSeq = 1, lookSeq = 1;
@@ -16,13 +17,30 @@ let focus = { sceneId: null, shotId: null };
 let timelineMode = 'assembly'; // 'assembly' (spaced, insert-between) | 'edit' (flush clips, drag-to-reorder within scene)
 let playheadX = 0;
 const PX_PER_SEC = 40; // scale of the ruler/track: 1 real second of playback = 40px
-const PROJECT_FPS = 24; // standard film rate — used for the frame-accurate timecode readout
+let PROJECT_FPS = 25; // per-project — set from state.projectMeta.fps when a project is created/opened
 // CSS `zoom` scales rendered/visual pixels (getBoundingClientRect, clientX) but NOT layout
 // pixels (offsetLeft/offsetWidth/scrollWidth) — read it once so pointer math can convert
 // between the two consistently instead of drifting off the cursor.
 const ZOOM = parseFloat(getComputedStyle(document.body).zoom) || 1;
 const SONG_DURATION_SEC = 332; // Enter Sandman runtime (5:32) — placeholder until real audio analysis is wired up
 const TIMELINE_END_SEC = SONG_DURATION_SEC * 1.1; // full scrubbable/playable range: song length + 10%
+
+// Resolution choices offered in the New Project dialog, grouped by orientation — plain
+// pixel dimensions only (no named-platform presets: some regions restrict displaying
+// certain platform logos/names, so we keep this purely technical).
+const RESOLUTION_OPTIONS = {
+  horizontal: [
+    { label:'1280 × 720',  width:1280, height:720 },
+    { label:'1920 × 1080', width:1920, height:1080 },
+    { label:'3840 × 2160', width:3840, height:2160 },
+  ],
+  vertical: [
+    { label:'720 × 1280',  width:720,  height:1280 },
+    { label:'1080 × 1920', width:1080, height:1920 },
+    { label:'2160 × 3840', width:2160, height:3840 },
+  ],
+};
+const FPS_OPTIONS = [24, 25, 30];
 
 const TIMELINE_COLORS = [
   { dot:'#5f8ad4', bg:'rgba(60,95,150,0.22)',  thumb:'linear-gradient(160deg,#3a5f8a,#1c2f45)', hexA:'#3a5f8a', hexB:'#1c2f45' },

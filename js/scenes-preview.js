@@ -168,7 +168,25 @@ function refreshMainPreview(){
         <span class="plabel" style="color:rgba(255,255,255,.75);">${shot ? shot.name + ' — awaiting generation' : (scene.shots.length + ' shot(s) — click the + on the timeline to add one')}</span>
       </div>`;
   }
+  sizePreviewFrame();
   renderInspectorPanel();
+}
+
+// The preview box's real pixel size, computed from the project's actual width/height ratio
+// (horizontal vs vertical projects need genuinely different shapes here, not just a CSS
+// aspect-ratio hint that silently distorts once either max-width or max-height binds).
+function sizePreviewFrame(){
+  const frame = previewEl.querySelector('.timeline-frame');
+  if(!frame) return;
+  const pad = 48; // .preview's own padding (24px each side)
+  const availW = Math.max(120, previewEl.clientWidth - pad);
+  const availH = Math.max(120, previewEl.clientHeight - pad);
+  const meta = state.projectMeta || { width:1920, height:1080 };
+  const ratio = meta.width / meta.height;
+  let w = availW, h = w / ratio;
+  if(h > availH){ h = availH; w = h * ratio; }
+  frame.style.width = Math.round(w) + 'px';
+  frame.style.height = Math.round(h) + 'px';
 }
 
 const SHOT_SIZES = ['Detail Shot','Extreme Close-Up','Close-Up','Medium Close-Up','Medium Shot','Medium Wide Shot','Wide Shot','Extreme Wide Shot'];
@@ -381,7 +399,8 @@ function runShotGeneration(scene, shot){
   if(!section) return;
   section.innerHTML = `<button class="gen-btn" disabled><span class="gen-spin"></span>Generating…</button>`;
   const prompt = buildShotPrompt(shot, scene);
-  tryLoadImage(buildPollinationsUrl(prompt, 640, 360))
+  const size = shotGenerationSize();
+  tryLoadImage(buildPollinationsUrl(prompt, size.w, size.h))
     .catch(()=> generateShotPreviewImage(shot, scene))
     .then((result)=>{
       shot.previewImage = result;

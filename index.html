@@ -10,18 +10,76 @@
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-<div id="loadingScreen" class="loading-screen">
+<div id="loadingScreen" class="loading-screen hidden">
   <div class="loading-box">
     <div class="loading-title"><i class="ti ti-movie"></i> Loading project…</div>
     <div class="loading-log" id="loadingLog"></div>
     <button class="cf-btn primary" id="loadingContinueBtn" style="display:none;">Continue</button>
   </div>
 </div>
+
+<div id="homeScreen" class="home-screen hidden">
+  <div class="home-hero">
+    <div class="home-hero-art"><i class="ti ti-movie"></i></div>
+    <div class="home-logo">AI Music Video Studio</div>
+    <div class="home-tagline">Cast it, dress it, shoot it — plan your next music video start to finish.</div>
+  </div>
+  <div class="home-body">
+    <div class="home-body-head">
+      <div class="home-body-title">Projects</div>
+      <button class="cf-btn primary" id="homeNewProjectBtn"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg> New Project</button>
+    </div>
+    <div class="home-project-list" id="homeProjectList"></div>
+  </div>
+</div>
+
+<div id="newProjectScreen" class="home-screen hidden">
+  <div class="np-box">
+    <div class="np-header">
+      <h2>New Project</h2>
+      <button class="np-close" id="npCloseBtn" title="Cancel"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+    </div>
+
+    <div class="cf-field">
+      <label>Project name</label>
+      <input type="text" id="npName" placeholder="Untitled Project">
+    </div>
+
+    <div class="np-field-title">Orientation</div>
+    <div class="np-orientation-row" id="npOrientationRow">
+      <div class="np-orient-tile active" data-orient="horizontal">
+        <div class="np-orient-shape horizontal"></div>
+        <span>Horizontal</span>
+      </div>
+      <div class="np-orient-tile" data-orient="vertical">
+        <div class="np-orient-shape vertical"></div>
+        <span>Vertical</span>
+      </div>
+    </div>
+
+    <div class="np-field-title">Resolution</div>
+    <div class="np-chip-row" id="npResolutionRow"></div>
+
+    <div class="np-field-title">Frame rate</div>
+    <div class="np-chip-row" id="npFpsRow"></div>
+
+    <div class="np-folder-row" id="npFolderRow" style="display:none;">
+      <button class="cf-btn" id="npFolderBtn"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg> Choose a folder on disk (optional)</button>
+      <span class="np-folder-status" id="npFolderStatus">Not saving to disk — will use browser storage</span>
+    </div>
+
+    <div class="cf-actions">
+      <button class="cf-btn" id="npCancelBtn">Cancel</button>
+      <button class="cf-btn primary" id="npCreateBtn">Create Project</button>
+    </div>
+  </div>
+</div>
+
 <div id="app">
 
   <div class="topbar">
     <div class="brand"><i class="ti ti-movie"></i>AI Music Video Studio</div>
-    <div class="menu"><span>File</span><span>Edit</span><span>Project</span><span>Tools</span><span>Help</span></div>
+    <div class="menu"><span>File</span><span>Edit</span><span class="menu-project" id="menuProjectBtn">Project<div class="menu-dropdown" id="menuProjectDropdown"><div data-action="new">New Project…</div><div data-action="all">All Projects…</div><div data-action="rename">Rename Project…</div></div></span><span>Tools</span><span>Help</span></div>
     <div class="proj-title">New project — <b>Untitled</b></div>
     <span class="save-status" id="saveStatus" title="Autosave status"></span>
     <button class="tbtn" id="connectFolderBtn" style="display:none;" title="Keep this project as real files on your disk"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>Save to disk folder</button>
@@ -94,6 +152,7 @@
 <script src="js/audio-track.js"></script>
 <script src="js/persistence.js"></script>
 <script src="js/panels.js"></script>
+<script src="js/projects.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
