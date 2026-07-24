@@ -7,6 +7,7 @@ function goHome(){
 (async function(){
   wireNewProjectScreen();
   wireProjectMenu();
+  wireFolderButton();
   const restored = await initProjectStore();
   if(restored){
     updateProjTitleDisplay();
