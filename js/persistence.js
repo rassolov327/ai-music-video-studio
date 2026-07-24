@@ -140,7 +140,8 @@ async function createProject({ name, format, width, height, fps, folderHandle })
   focus = { sceneId:null, shotId:null };
   timelineMode = 'assembly';
   playheadX = 0;
-  sceneSeq = 1; shotSeq = 1; paletteSeq = 0; charSeq = 1; locSeq = 1; trackSeq = 1; lookSeq = 1; propSeq = 1;
+  sceneSeq = 1; shotSeq = 1; paletteSeq = 0; charSeq = 1; locSeq = 1; trackSeq = 1; lookSeq = 1; propSeq = 1; draftTaskSeq = 1;
+  state.taskQueue = [];
   PROJECT_FPS = meta.fps;
   applyProjectFrame();
   renderAssets();
@@ -724,7 +725,8 @@ function serializeProject(){
     focus: Object.assign({}, focus),
     timelineMode: timelineMode,
     playheadX: playheadX,
-    seq: { sceneSeq, shotSeq, paletteSeq, charSeq, locSeq, trackSeq, lookSeq, propSeq },
+    taskQueue: JSON.parse(JSON.stringify(state.taskQueue || [])),
+    seq: { sceneSeq, shotSeq, paletteSeq, charSeq, locSeq, trackSeq, lookSeq, propSeq, draftTaskSeq },
   };
 }
 
@@ -805,6 +807,7 @@ async function applyProjectData(data, verbose){
   state.scenes = data.scenes || [];
   state.timelineAudio = data.timelineAudio || null;
   state.projectMeta = data.projectMeta || state.projectMeta;
+  state.taskQueue = data.taskQueue || [];
   focus = data.focus || { sceneId:null, shotId:null };
   timelineMode = data.timelineMode || 'assembly';
   playheadX = data.playheadX || 0;
@@ -818,6 +821,7 @@ async function applyProjectData(data, verbose){
     trackSeq = data.seq.trackSeq || 1;
     propSeq = data.seq.propSeq || 1;
     lookSeq = data.seq.lookSeq || 1;
+    draftTaskSeq = data.seq.draftTaskSeq || 1;
   }
   applyProjectFrame();
   renderAssets();

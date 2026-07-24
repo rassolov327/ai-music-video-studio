@@ -1,6 +1,7 @@
-// ---------- WORK / TASKS bottom page tabs (DaVinci-Resolve style) ----------
+// ---------- WORK / TASKS bottom page tabs (DaVinci-Resolve style render queue) ----------
 let tasksRefreshTimer = null;
-let selectedModelId = null;
+let liveTasks = []; // last fetched snapshot from the server
+let modelOptions = [];
 let appliedTaskIds = new Set(); // avoid re-applying the same finished result repeatedly
 
 function wirePageTabs(){
@@ -10,6 +11,12 @@ function wirePageTabs(){
   const modal = document.getElementById('taskPreviewModal');
   document.getElementById('taskPreviewClose').onclick = ()=> modal.classList.add('hidden');
   modal.onclick = (e)=>{ if(e.target===modal) modal.classList.add('hidden'); };
+
+  document.getElementById('tasksSelectAll').onchange = (e)=>{
+    document.querySelectorAll('.task-tile-select').forEach(cb=>{ cb.checked = e.target.checked; });
+    updateGenerateSelectedButton();
+  };
+  document.getElementById('tasksGenerateSelectedBtn').onclick = generateSelectedDraftTasks;
 }
 
 function showPage(page){
@@ -34,17 +41,12 @@ function startBackgroundTaskWatcher(){
 }
 
 async function loadModelList(){
-  const select = document.getElementById('taskModelSelect');
-  if(!select) return;
   try{
     const res = await fetch('/api/models');
     const data = await res.json();
-    const models = (data && data.models) || [];
-    select.innerHTML = models.map(m=>`<option value="${m.id}">${m.label}</option>`).join('');
-    if(models.length) selectedModelId = models[0].id;
-    select.onchange = ()=>{ selectedModelId = select.value; };
+    modelOptions = (data && data.models) || [];
   } catch(err){
-    select.innerHTML = '<option>Unavailable</option>';
+    modelOptions = [];
   }
 }
 
@@ -53,31 +55,57 @@ async function refreshTasks(){
   try{
     const res = await fetch('/api/tasks?projectId=' + encodeURIComponent(currentProjectId));
     const data = await res.json();
-    const list = (data && data.tasks) || [];
-    renderTasksGrid(list);
-    applyFinishedTasks(list);
-    updateTasksBadge(list);
+    liveTasks = (data && data.tasks) || [];
   } catch(err){
-    // backend not reachable (e.g. no server, plain file:// use) — just leave the tab empty
+    liveTasks = [];
   }
+  renderTasksGrid();
+  applyFinishedTasks(liveTasks);
+  updateTasksBadge();
 }
 
-function updateTasksBadge(list){
+function updateTasksBadge(){
   const badge = document.getElementById('tasksBadge');
   if(!badge) return;
-  const pendingCount = list.filter(t=> t.status==='pending').length;
-  badge.style.display = pendingCount ? '' : 'none';
-  badge.textContent = String(pendingCount);
+  const draftCount = (state.taskQueue || []).length;
+  const pendingCount = liveTasks.filter(t=> t.status==='pending').length;
+  const total = draftCount + pendingCount;
+  badge.style.display = total ? '' : 'none';
+  badge.textContent = String(total);
 }
 
-function renderTasksGrid(list){
+function modelSelectHtml(selectedId, extraClass){
+  const opts = modelOptions.map(m=> `<option value="${m.id}" ${m.id===selectedId?'selected':''}>${m.label}</option>`).join('');
+  return `<select class="${extraClass||''}">${opts}</select>`;
+}
+
+function renderTasksGrid(){
   const grid = document.getElementById('tasksGrid');
   if(!grid) return;
-  if(list.length===0){
-    grid.innerHTML = `<div class="tasks-empty">No generation tasks yet. Use "Generate (real AI)" on a shot to start one — it'll show up here and keep working even while you edit other scenes.</div>`;
+  const drafts = state.taskQueue || [];
+  if(drafts.length===0 && liveTasks.length===0){
+    grid.innerHTML = `<div class="tasks-empty">No generation tasks yet. Use "Add to Tasks (real AI)" on a shot to queue one — pick a model here and hit Generate whenever you're ready.</div>`;
+    updateGenerateSelectedButton();
     return;
   }
-  grid.innerHTML = list.map(t=>{
+
+  const draftTiles = drafts.map(t=>`
+    <div class="task-tile draft" data-draft-id="${t.id}">
+      <div class="task-tile-thumb">
+        <input type="checkbox" class="task-tile-select" title="Select for batch generate">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"></rect><circle cx="9" cy="11" r="2"></circle><path d="M21 16l-5-4-4 3-3-2-6 5"></path></svg>
+        <div class="task-tile-status draft">draft</div>
+        <div class="task-tile-trash" title="Remove from queue"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></div>
+      </div>
+      <div class="task-tile-body">
+        <div class="task-tile-scene">${t.sceneName || 'Scene'}</div>
+        <div class="task-tile-shot">${t.shotName || 'Shot'}</div>
+        ${modelSelectHtml(t.model || (modelOptions[0] && modelOptions[0].id), 'task-tile-model-select')}
+        <button class="cf-btn primary task-tile-send-btn" style="width:100%;margin-top:8px;">Generate</button>
+      </div>
+    </div>`).join('');
+
+  const liveTiles = liveTasks.map(t=>{
     const meta = t.meta || {};
     const thumb = t.status==='success' && t.imageUrl
       ? `<img src="${t.imageUrl}">`
@@ -89,6 +117,7 @@ function renderTasksGrid(list){
         <div class="task-tile-thumb">
           ${thumb}
           <div class="task-tile-status ${t.status}">${t.status}</div>
+          <div class="task-tile-trash" title="Remove from list"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></div>
         </div>
         <div class="task-tile-body">
           <div class="task-tile-scene">${meta.sceneName || 'Scene'}</div>
@@ -98,15 +127,113 @@ function renderTasksGrid(list){
       </div>`;
   }).join('');
 
-  grid.querySelectorAll('.task-tile').forEach(tile=>{
+  grid.innerHTML = draftTiles + liveTiles;
+  wireDraftTiles();
+  wireLiveTiles();
+  updateGenerateSelectedButton();
+}
+
+function wireDraftTiles(){
+  document.querySelectorAll('.task-tile.draft').forEach(tile=>{
+    const draftId = tile.dataset.draftId;
+    const draft = (state.taskQueue||[]).find(t=> t.id===draftId);
+    if(!draft) return;
+    tile.querySelector('.task-tile-model-select').onchange = (e)=>{
+      draft.model = e.target.value;
+      if(typeof saveProjectSoon==='function') saveProjectSoon();
+    };
+    tile.querySelector('.task-tile-select').onchange = updateGenerateSelectedButton;
+    tile.querySelector('.task-tile-trash').onclick = (e)=>{
+      e.stopPropagation();
+      state.taskQueue = (state.taskQueue||[]).filter(t=> t.id!==draftId);
+      if(typeof saveProjectSoon==='function') saveProjectSoon();
+      renderTasksGrid();
+      updateTasksBadge();
+    };
+    tile.querySelector('.task-tile-send-btn').onclick = (e)=>{
+      e.stopPropagation();
+      sendDraftTask(draftId);
+    };
+  });
+}
+
+function wireLiveTiles(){
+  document.querySelectorAll('.task-tile:not(.draft)').forEach(tile=>{
+    const taskId = tile.dataset.taskId;
+    tile.querySelector('.task-tile-trash').onclick = async (e)=>{
+      e.stopPropagation();
+      try{ await fetch('/api/tasks/' + encodeURIComponent(taskId), { method:'DELETE' }); } catch(err){}
+      liveTasks = liveTasks.filter(t=> t.taskId!==taskId);
+      renderTasksGrid();
+      updateTasksBadge();
+    };
     tile.onclick = ()=>{
-      const t = list.find(x=> x.taskId===tile.dataset.taskId);
+      const t = liveTasks.find(x=> x.taskId===taskId);
       if(t && t.status==='success' && t.imageUrl){
         document.getElementById('taskPreviewImg').src = t.imageUrl;
         document.getElementById('taskPreviewModal').classList.remove('hidden');
       }
     };
   });
+}
+
+function updateGenerateSelectedButton(){
+  const btn = document.getElementById('tasksGenerateSelectedBtn');
+  if(!btn) return;
+  const count = document.querySelectorAll('.task-tile-select:checked').length;
+  btn.disabled = count===0;
+  btn.textContent = count ? ('Generate (' + count + ')') : 'Generate';
+}
+
+async function sendDraftTask(draftId){
+  const draft = (state.taskQueue||[]).find(t=> t.id===draftId);
+  if(!draft) return;
+  const tile = document.querySelector('.task-tile[data-draft-id="' + draftId + '"]');
+  const btn = tile ? tile.querySelector('.task-tile-send-btn') : null;
+  if(btn){ btn.disabled = true; btn.textContent = 'Sending…'; }
+  try{
+    await sendGenerationTask(draft);
+    state.taskQueue = (state.taskQueue||[]).filter(t=> t.id!==draftId);
+    if(typeof saveProjectSoon==='function') saveProjectSoon();
+    await refreshTasks();
+  } catch(err){
+    if(btn){ btn.disabled = false; btn.textContent = 'Try again'; }
+    alert('Could not start generation: ' + err.message);
+  }
+}
+
+async function generateSelectedDraftTasks(){
+  const selectedIds = Array.from(document.querySelectorAll('.task-tile.draft')).filter(tile=>
+    tile.querySelector('.task-tile-select').checked
+  ).map(tile=> tile.dataset.draftId);
+  for(const id of selectedIds){
+    await sendDraftTask(id);
+  }
+}
+
+// Looks up the scene/shot for a draft, builds its prompt, and sends it to the server —
+// used both for the per-tile "Generate" button and the batch button.
+async function sendGenerationTask(draft){
+  const scene = state.scenes.find(s=> s.id===draft.sceneId);
+  const shot = scene && scene.shots.find(sh=> sh.id===draft.shotId);
+  if(!scene || !shot){
+    throw new Error('This shot no longer exists.');
+  }
+  const prompt = buildShotPrompt(shot, scene);
+  const meta = state.projectMeta || { width:1920, height:1080 };
+  const res = await fetch('/api/generate-image/start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      prompt, width: meta.width, height: meta.height, model: draft.model,
+      meta: { projectId: currentProjectId, sceneId: scene.id, sceneName: scene.name, shotId: shot.id, shotName: shot.name },
+    }),
+  });
+  const data = await res.json().catch(()=> null);
+  if(!res.ok || !data || !data.taskId){
+    throw new Error((data && data.message) || ('Request failed (HTTP ' + res.status + ')'));
+  }
+  return data.taskId;
 }
 
 // The moment a task shows success, drop its image onto the shot it was generated for —
@@ -131,30 +258,5 @@ function applyFinishedTasks(list){
     renderTimelineScenes();
     if(touchedCurrentView) refreshMainPreview();
     if(typeof saveProjectSoon==='function') saveProjectSoon();
-  }
-}
-
-// Fire-and-forget: creates the task and immediately hands control back — the shot's
-// Inspector panel is never blocked waiting, the Tasks tab (and the background watcher)
-// take it from here.
-async function startPaidGenerationTask(scene, shot){
-  const prompt = buildShotPrompt(shot, scene);
-  const meta = state.projectMeta || { width:1920, height:1080 };
-  try{
-    const res = await fetch('/api/generate-image/start', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        prompt, width: meta.width, height: meta.height, model: selectedModelId,
-        meta: { projectId: currentProjectId, sceneId: scene.id, sceneName: scene.name, shotId: shot.id, shotName: shot.name },
-      }),
-    });
-    const data = await res.json().catch(()=> null);
-    if(!res.ok || !data || !data.taskId){
-      throw new Error((data && data.message) || ('Request failed (HTTP ' + res.status + ')'));
-    }
-    return data.taskId;
-  } catch(err){
-    throw err;
   }
 }

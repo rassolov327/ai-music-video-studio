@@ -794,3 +794,22 @@
     background:rgba(255,255,255,.1);color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;
   }
   .task-preview-close:hover{background:rgba(255,255,255,.2);}
+
+  /* ---- Tasks page — render-queue style additions ---- */
+  .tasks-actions{display:flex;align-items:center;gap:14px;}
+  .tasks-select-all{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-2);cursor:pointer;}
+  .task-tile-select{
+    position:absolute;top:8px;left:8px;width:16px;height:16px;cursor:pointer;z-index:2;
+  }
+  .task-tile-trash{
+    position:absolute;bottom:8px;right:8px;width:24px;height:24px;border-radius:6px;
+    background:rgba(0,0,0,.55);color:#fff;display:flex;align-items:center;justify-content:center;
+    cursor:pointer;z-index:2;
+  }
+  .task-tile-trash:hover{background:rgba(217,105,95,.85);}
+  .task-tile-status.draft{background:rgba(148,152,160,.18);color:var(--text-2);}
+  .task-tile-model-select{
+    width:100%;margin-top:8px;background:var(--bg-elevated);border:1px solid var(--line);color:var(--text-1);
+    border-radius:5px;padding:5px 7px;font-size:11.5px;
+  }
+  .task-tile.draft .task-tile-thumb{color:var(--text-3);}

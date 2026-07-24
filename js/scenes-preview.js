@@ -483,9 +483,9 @@ async function renderPaidGenSlot(scene, shot){
     return;
   }
   freshSlot.innerHTML = `
-    <button class="cf-btn primary" id="shotPaidGenBtn" style="width:100%;margin-top:10px;">Generate (real AI) <span class="gen-cost">${PAID_GEN_COST_LABEL}</span></button>
-    <div class="gen-hint" style="margin-top:6px;">Runs in the background — check the TASKS tab at the bottom for progress. You can keep working on other scenes while it generates.</div>`;
-  document.getElementById('shotPaidGenBtn').onclick = ()=> runShotGenerationPaid(scene, shot);
+    <button class="cf-btn primary" id="shotPaidGenBtn" style="width:100%;margin-top:10px;">Add to Tasks (real AI) <span class="gen-cost">${PAID_GEN_COST_LABEL}</span></button>
+    <div class="gen-hint" style="margin-top:6px;">Adds this shot to the TASKS queue — pick a model and hit Generate there (one at a time, or several together).</div>`;
+  document.getElementById('shotPaidGenBtn').onclick = ()=> queueShotGeneration(scene, shot);
 }
 
 function runShotGeneration(scene, shot){
@@ -505,28 +505,24 @@ function runShotGeneration(scene, shot){
     });
 }
 
-// Fire-and-forget: queues the task on the server and immediately hands control back to
-// the Inspector — no blocking wait here anymore. The Tasks tab (and a background watcher
-// that runs regardless of which tab is open) pick the result up once KIE's webhook (or,
-// failing that, the server's own fallback poll) reports it done, and drop it onto this
-// exact shot automatically.
-async function runShotGenerationPaid(scene, shot){
-  const btn = document.getElementById('shotPaidGenBtn');
-  if(btn){ btn.disabled = true; btn.innerHTML = '<span class="gen-spin"></span>Queuing…'; }
-  try{
-    await startPaidGenerationTask(scene, shot);
-    const slot = document.getElementById('paidGenSlot');
-    if(slot){
-      slot.innerHTML = `<div class="gen-hint" style="color:#5fae7a;">Queued — see the TASKS tab for progress. This card doesn't need to stay open.</div>`;
-    }
-  } catch(err){
-    const slot = document.getElementById('paidGenSlot');
-    if(slot){
-      slot.innerHTML = `
-        <div class="gen-hint" style="color:var(--danger);">Could not start generation: ${err.message}</div>
-        <button class="cf-btn" id="paidGenRetryBtn" style="width:100%;margin-top:8px;">Try again</button>`;
-      const retryBtn = document.getElementById('paidGenRetryBtn');
-      if(retryBtn) retryBtn.onclick = ()=> renderPaidGenSlot(scene, shot);
-    }
+// Adds a draft entry to the task queue — nothing is sent to any provider yet. The Tasks
+// tab is where the model gets chosen and the send actually happens, same idea as
+// DaVinci's render queue: stack up jobs, then render (one, several, or all).
+function queueShotGeneration(scene, shot){
+  state.taskQueue = state.taskQueue || [];
+  state.taskQueue.push({
+    id: 'dt' + (draftTaskSeq++),
+    kind: 'image',
+    sceneId: scene.id, shotId: shot.id,
+    sceneName: scene.name, shotName: shot.name,
+    model: (typeof selectedModelId!=='undefined' && selectedModelId) || null,
+    createdAt: Date.now(),
+  });
+  if(typeof saveProjectSoon==='function') saveProjectSoon();
+  if(typeof renderTasksGrid==='function' && typeof refreshTasks==='function') refreshTasks();
+  const slot = document.getElementById('paidGenSlot');
+  if(slot){
+    slot.innerHTML = `<div class="gen-hint" style="color:#5fae7a;">Added to the TASKS queue — open the TASKS tab to pick a model and generate.</div>`;
   }
 }
+

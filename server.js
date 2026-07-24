@@ -254,6 +254,13 @@ app.get('/api/tasks', (req, res) => {
   res.json({ tasks: out });
 });
 
+// ---- remove a task from tracking (doesn't cancel it on KIE's side, just stops us
+// showing/watching it) ----
+app.delete('/api/tasks/:taskId', (req, res) => {
+  tasks.delete(req.params.taskId);
+  res.json({ ok: true });
+});
+
 // ---- diagnostic: raw, unmodified KIE response for a given taskId ----
 app.get('/api/debug/task/:taskId', async (req, res) => {
   if (!KIE_API_KEY) {

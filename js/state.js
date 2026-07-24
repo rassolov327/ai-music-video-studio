@@ -11,9 +11,13 @@ const state = {
   scenes: [],
   timelineAudio: null, // { trackId, trimIn, trimOut, volume } — which Music asset (and window/volume) is on the timeline
   projectMeta: { id:null, name:'Untitled Project', format:'horizontal', width:1920, height:1080, fps:25, createdAt:null, updatedAt:null },
+  // Draft generation tasks — created when you click "Generate" on a shot, but not sent to
+  // any provider until you pick a model and hit Generate on the tile (or batch-select
+  // several and hit the big Generate button), same idea as DaVinci's render queue.
+  taskQueue: [], // [{ id, kind:'image', sceneId, shotId, sceneName, shotName, model, createdAt }]
 };
 
-let sceneSeq = 1, shotSeq = 1, paletteSeq = 0, charSeq = 1, locSeq = 1, trackSeq = 1, lookSeq = 1, propSeq = 1;
+let sceneSeq = 1, shotSeq = 1, paletteSeq = 0, charSeq = 1, locSeq = 1, trackSeq = 1, lookSeq = 1, propSeq = 1, draftTaskSeq = 1;
 let focus = { sceneId: null, shotId: null };
 let timelineMode = 'assembly'; // 'assembly' (spaced, insert-between) | 'edit' (flush clips, drag-to-reorder within scene)
 let playheadX = 0;

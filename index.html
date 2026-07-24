@@ -150,13 +150,13 @@
   <div class="tasks-page hidden" id="tasksPage">
     <div class="tasks-header">
       <div class="tasks-title">Generation Tasks</div>
-      <div class="tasks-model-row">
-        <label for="taskModelSelect">Model for real AI generation:</label>
-        <select id="taskModelSelect"></select>
+      <div class="tasks-actions">
+        <label class="tasks-select-all"><input type="checkbox" id="tasksSelectAll"> Select all drafts</label>
+        <button class="cf-btn primary" id="tasksGenerateSelectedBtn" disabled>Generate</button>
       </div>
     </div>
     <div class="tasks-grid" id="tasksGrid">
-      <div class="tasks-empty">No generation tasks yet. Use "Generate (real AI)" on a shot to start one — it'll show up here and keep working even while you edit other scenes.</div>
+      <div class="tasks-empty">No generation tasks yet. Use "Add to Tasks (real AI)" on a shot to queue one — pick a model here and hit Generate whenever you're ready.</div>
     </div>
   </div>
 
