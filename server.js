@@ -87,6 +87,7 @@ app.post('/api/generate-image', async (req, res) => {
       }),
     });
     const createData = await createRes.json().catch(() => null);
+    console.log('[server] create task response:', JSON.stringify(createData));
     const taskId = createData && createData.data && createData.data.taskId;
     if (!createRes.ok || !taskId) {
       return res.status(502).json({
@@ -96,8 +97,9 @@ app.post('/api/generate-image', async (req, res) => {
     }
 
     // Poll for completion — simpler and more reliable here than standing up a public
-    // callback URL just for this. 2.5s between checks, ~90s total budget.
-    const deadline = Date.now() + 90000;
+    // callback URL just for this. 2.5s between checks, ~2 minute total budget.
+    const deadline = Date.now() + 120000;
+    let lastRaw = null;
     while (Date.now() < deadline) {
       await new Promise(r => setTimeout(r, 2500));
       const pollRes = await fetch(`${KIE_BASE}/api/v1/gpt4o-image/record-info?taskId=${encodeURIComponent(taskId)}`, {
@@ -105,14 +107,28 @@ app.post('/api/generate-image', async (req, res) => {
       });
       const pollData = await pollRes.json().catch(() => null);
       const d = (pollData && pollData.data) || {};
-      if (d.successFlag === 1 && d.response && d.response.result_urls && d.response.result_urls[0]) {
-        return res.json({ imageUrl: d.response.result_urls[0], taskId });
+      lastRaw = pollData;
+      console.log('[server] poll ' + taskId + ':', JSON.stringify(pollData));
+
+      // KIE's docs show successFlag as a plain number in some examples and there's a
+      // history in this project of "===" strict checks silently failing against fields
+      // that come back as strings — coerce to Number defensively rather than guess again.
+      const flag = Number(d.successFlag);
+      // The docs also disagree with themselves on the result field's casing between two
+      // different doc pages (result_urls vs resultUrls) — check both.
+      const resultUrl = d.response && (
+        (d.response.result_urls && d.response.result_urls[0]) ||
+        (d.response.resultUrls && d.response.resultUrls[0])
+      );
+      if (flag === 1 && resultUrl) {
+        return res.json({ imageUrl: resultUrl, taskId });
       }
-      if (d.errorCode || d.errorMessage) {
+      if (flag === 2 || d.errorCode || d.errorMessage) {
         return res.status(502).json({ error: 'generation_failed', message: d.errorMessage || 'Generation failed.', taskId });
       }
-      // successFlag 0 (and no error) means still in progress — keep polling.
+      // flag 0 (and no error) means still in progress — keep polling.
     }
+    console.log('[server] timed out waiting on ' + taskId + '. Last response:', JSON.stringify(lastRaw));
     return res.status(504).json({ error: 'timeout', message: 'Generation took longer than expected.', taskId });
   } catch (err) {
     console.error('[server] /api/generate-image failed:', err);
