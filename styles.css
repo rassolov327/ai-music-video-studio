@@ -59,6 +59,16 @@
   .tbtn:hover{border-color:#3a3e48;color:var(--text-1);background:var(--bg-elevated);}
   .tbtn.primary{background:var(--accent-dim);border-color:#5a4526;color:var(--accent-text);}
   .tbtn.primary:hover{background:#4a381f;}
+  .tbtn.icon-only{padding:6px;}
+
+  .make-movie-btn{
+    flex:0 0 auto;margin:0 12px 14px;padding:10px 8px;border-radius:8px;
+    background:var(--accent-dim);border:1px solid #5a4526;color:var(--accent-text);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+    cursor:pointer;font-size:12.5px;font-weight:500;line-height:1.25;text-align:center;
+  }
+  .make-movie-btn:hover{background:#4a381f;}
+  .make-movie-btn i{font-size:15px;margin-bottom:2px;}
 
   /* ---- Body layout ---- */
   .body-row{flex:1 1 auto;display:flex;min-height:0;}

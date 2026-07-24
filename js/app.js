@@ -22,6 +22,11 @@ function goHome(){
   }
 })();
 document.getElementById('homeBtn').onclick = goHome;
+document.getElementById('goToProjectsBtn').onclick = async ()=>{
+  pausePlayback();
+  if(typeof currentProjectId!=='undefined' && currentProjectId) await saveProjectNow();
+  showHomeScreen();
+};
 document.getElementById('playBtn2').onclick = startPlayback;
 document.getElementById('pauseBtn2').onclick = pausePlayback;
 document.getElementById('stopBtn2').onclick = stopPlayback;
