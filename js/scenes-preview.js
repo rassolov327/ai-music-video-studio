@@ -199,10 +199,14 @@ function renderSceneSettingsPanel(body, scene){
   const characters = bandCat ? bandCat.items : [];
   const looksCat = state.categories.find(c=>c.key==='looks');
   const allLooks = looksCat ? looksCat.items : [];
+  const propCat = state.categories.find(c=>c.key==='props');
+  const allProps = propCat ? propCat.items : [];
   const TIME_OF_DAY = ['Morning','Day','Evening','Night'];
 
   if(!scene.characters) scene.characters = [];
+  if(!scene.props) scene.props = [];
   const availableChars = characters.filter(c=> !scene.characters.some(e=>e.characterId===c.id));
+  const availableProps = allProps.filter(p=> !scene.props.includes(p.id));
 
   const charRowsHtml = scene.characters.length===0
     ? `<div class="gen-hint" style="margin-top:0;">No characters in this scene yet.</div>`
@@ -231,6 +235,28 @@ function renderSceneSettingsPanel(body, scene){
           <button class="cf-btn" id="addCharacterBtn">Add character</button>
         </div>`;
 
+  const propRowsHtml = scene.props.length===0
+    ? `<div class="gen-hint" style="margin-top:0;">No props assigned to this scene yet.</div>`
+    : scene.props.map((propId, idx)=>{
+        const p = allProps.find(x=>x.id===propId);
+        return `
+          <div class="scene-char-row" data-idx="${idx}">
+            <span class="scene-char-name">${p ? p.name : '(deleted)'}</span>
+            <span class="scene-char-remove" data-idx="${idx}" title="Remove from scene">${trashSvg(12)}</span>
+          </div>`;
+      }).join('');
+
+  const addPropRowHtml = allProps.length===0
+    ? `<div class="gen-hint" style="margin-top:6px;">No props created yet — add one in Props.</div>`
+    : availableProps.length===0
+      ? ''
+      : `<div class="scene-char-add-row">
+          <select id="addPropSelect">
+            ${availableProps.map(p=>`<option value="${p.id}">${p.name}</option>`).join('')}
+          </select>
+          <button class="cf-btn" id="addPropBtn">Add prop</button>
+        </div>`;
+
   body.innerHTML = `
     <div style="padding:14px;">
       <div class="cat-count" style="font-size:11px;margin-bottom:10px;">Scene settings</div>
@@ -257,6 +283,13 @@ function renderSceneSettingsPanel(body, scene){
         ${addRowHtml}
         <div class="gen-hint" style="margin-top:8px;">Every shot in this scene automatically uses these characters and looks — set once here so nothing drifts shot to shot.</div>
       </div>
+
+      <div class="field-group">
+        <div class="field-group-title">Props in this scene</div>
+        <div id="scenePropList">${propRowsHtml}</div>
+        ${addPropRowHtml}
+        <div class="gen-hint" style="margin-top:8px;">Not attached to a character — just present in every shot of this scene (a bar counter, a chair, a car) so it stays the same object throughout.</div>
+      </div>
     </div>`;
 
   document.getElementById('sceneNameInput').addEventListener('input', (e)=>{
@@ -264,10 +297,11 @@ function renderSceneSettingsPanel(body, scene){
     renderTimelineScenes();
     renderAssets();
     previewBarEl.textContent = scene.name;
+    if(typeof saveProjectSoon==='function') saveProjectSoon();
   });
-  document.getElementById('sceneLocInput').addEventListener('change', (e)=>{ scene.location = e.target.value; });
-  document.getElementById('sceneTimeInput').addEventListener('change', (e)=>{ scene.timeOfDay = e.target.value; });
-  document.getElementById('sceneDescInput').addEventListener('input', (e)=>{ scene.description = e.target.value; });
+  document.getElementById('sceneLocInput').addEventListener('change', (e)=>{ scene.location = e.target.value; if(typeof saveProjectSoon==='function') saveProjectSoon(); });
+  document.getElementById('sceneTimeInput').addEventListener('change', (e)=>{ scene.timeOfDay = e.target.value; if(typeof saveProjectSoon==='function') saveProjectSoon(); });
+  document.getElementById('sceneDescInput').addEventListener('input', (e)=>{ scene.description = e.target.value; if(typeof saveProjectSoon==='function') saveProjectSoon(); });
 
   const addBtn = document.getElementById('addCharacterBtn');
   if(addBtn){
@@ -276,19 +310,41 @@ function renderSceneSettingsPanel(body, scene){
       if(!sel || !sel.value) return;
       scene.characters.push({ characterId: sel.value, lookId: null });
       renderSceneSettingsPanel(body, scene);
+      if(typeof saveProjectSoon==='function') saveProjectSoon();
     };
   }
   body.querySelectorAll('.scene-char-look').forEach(sel=>{
     sel.addEventListener('change', (e)=>{
       const idx = parseInt(e.target.dataset.idx, 10);
       scene.characters[idx].lookId = e.target.value || null;
+      if(typeof saveProjectSoon==='function') saveProjectSoon();
     });
   });
-  body.querySelectorAll('.scene-char-remove').forEach(btn=>{
+  body.querySelector('#sceneCharList').querySelectorAll('.scene-char-remove').forEach(btn=>{
     btn.addEventListener('click', (e)=>{
       const idx = parseInt(e.target.closest('[data-idx]').dataset.idx, 10);
       scene.characters.splice(idx,1);
       renderSceneSettingsPanel(body, scene);
+      if(typeof saveProjectSoon==='function') saveProjectSoon();
+    });
+  });
+
+  const addPropBtn = document.getElementById('addPropBtn');
+  if(addPropBtn){
+    addPropBtn.onclick = ()=>{
+      const sel = document.getElementById('addPropSelect');
+      if(!sel || !sel.value) return;
+      scene.props.push(sel.value);
+      renderSceneSettingsPanel(body, scene);
+      if(typeof saveProjectSoon==='function') saveProjectSoon();
+    };
+  }
+  body.querySelector('#scenePropList').querySelectorAll('.scene-char-remove').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{
+      const idx = parseInt(e.target.closest('[data-idx]').dataset.idx, 10);
+      scene.props.splice(idx,1);
+      renderSceneSettingsPanel(body, scene);
+      if(typeof saveProjectSoon==='function') saveProjectSoon();
     });
   });
 }
@@ -311,11 +367,14 @@ function renderInspectorPanel(){
   const shot = scene.shots.find(sh=>sh.id===focus.shotId);
   if(!shot){ body.innerHTML = `<div class="insp-empty">No shot selected.</div>`; return; }
   if(!scene.characters) scene.characters = [];
+  if(!scene.props) scene.props = [];
 
   const bandCat = state.categories.find(c=>c.key==='band');
   const characters = bandCat ? bandCat.items : [];
   const looksCat = state.categories.find(c=>c.key==='looks');
   const allLooks = looksCat ? looksCat.items : [];
+  const propCat = state.categories.find(c=>c.key==='props');
+  const allProps = propCat ? propCat.items : [];
 
   const sceneCharHtml = scene.characters.length===0
     ? `<div class="gen-hint" style="margin-top:0;">No characters in this scene yet.</div>`
@@ -323,6 +382,13 @@ function renderInspectorPanel(){
         const c = characters.find(x=>x.id===entry.characterId);
         const look = entry.lookId ? allLooks.find(l=>l.id===entry.lookId) : null;
         return `<div class="char-row checked" style="cursor:default;">${c ? c.name : '(deleted)'}${look ? ` <span style="color:var(--text-3);">— ${look.name}</span>` : ''}</div>`;
+      }).join('');
+
+  const scenePropHtml = scene.props.length===0
+    ? `<div class="gen-hint" style="margin-top:0;">No props in this scene yet.</div>`
+    : scene.props.map(propId=>{
+        const p = allProps.find(x=>x.id===propId);
+        return `<div class="char-row checked" style="cursor:default;">${p ? p.name : '(deleted)'}</div>`;
       }).join('');
 
   body.innerHTML = `
@@ -335,6 +401,12 @@ function renderInspectorPanel(){
         <div class="field-group-title">Characters <span style="font-weight:400;color:var(--text-3);">— inherited from scene</span></div>
         <div class="char-list">${sceneCharHtml}</div>
         <button class="cf-btn" id="jumpToSceneBtn" style="margin-top:8px;width:100%;">Edit in Scene settings</button>
+      </div>
+
+      <div class="field-group">
+        <div class="field-group-title">Props <span style="font-weight:400;color:var(--text-3);">— inherited from scene</span></div>
+        <div class="char-list">${scenePropHtml}</div>
+        <button class="cf-btn" id="jumpToSceneBtn2" style="margin-top:8px;width:100%;">Edit in Scene settings</button>
       </div>
 
       <div class="cf-field"><label>Shot size</label>
@@ -362,6 +434,7 @@ function renderInspectorPanel(){
   renderShotGenSection(scene, shot);
 
   document.getElementById('jumpToSceneBtn').onclick = ()=> setFocus(scene.id, null);
+  document.getElementById('jumpToSceneBtn2').onclick = ()=> setFocus(scene.id, null);
   document.getElementById('shotNameInput').addEventListener('input', (e)=>{
     shot.name = e.target.value;
     renderTimelineScenes();

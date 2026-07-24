@@ -60,7 +60,7 @@ function showMusicUploadForm(cat){
 
       <label class="photo-drop" id="musicDrop" for="musicFileInput" style="aspect-ratio:3/1;max-height:110px;">
         <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
-        <span id="musicDropLabel">Choose audio file</span>
+        <span id="musicDropLabel">Choose a file, or drag one here</span>
       </label>
       <input type="file" id="musicFileInput" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;">
 
@@ -78,11 +78,12 @@ function showMusicUploadForm(cat){
 
   document.getElementById('musicCancel').onclick = ()=> showMusicGallery(cat);
 
+  const musicDrop = document.getElementById('musicDrop');
   const fileInput = document.getElementById('musicFileInput');
   const statusEl = document.getElementById('musicUploadStatus');
   const dropLabel = document.getElementById('musicDropLabel');
-  fileInput.onchange = async ()=>{
-    const file = fileInput.files[0];
+
+  async function handleMusicFile(file){
     if(!file) return;
     dropLabel.textContent = file.name;
     statusEl.textContent = 'Decoding audio…';
@@ -103,7 +104,22 @@ function showMusicUploadForm(cat){
     } catch(err){
       statusEl.textContent = 'Could not read this audio file — try a different format.';
     }
-  };
+  }
+
+  fileInput.onchange = ()=> handleMusicFile(fileInput.files[0]);
+
+  musicDrop.addEventListener('dragover', (e)=>{
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    musicDrop.classList.add('dragover');
+  });
+  musicDrop.addEventListener('dragleave', ()=> musicDrop.classList.remove('dragover'));
+  musicDrop.addEventListener('drop', (e)=>{
+    e.preventDefault();
+    musicDrop.classList.remove('dragover');
+    const file = e.dataTransfer.files && e.dataTransfer.files[0];
+    if(file) handleMusicFile(file);
+  });
 }
 
 async function buildMusicTrack(file){

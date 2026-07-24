@@ -108,6 +108,17 @@ function buildShotPrompt(shot, scene){
   if(shot.cameraMove && shot.cameraMove!=='Static') parts.push(shot.cameraMove.toLowerCase()+' camera movement');
   if(shot.lighting) parts.push(shot.lighting);
 
+  // props assigned to the scene — present in every shot of it, not tied to a character
+  if(scene && scene.props && scene.props.length){
+    const propCat = state.categories.find(c=>c.key==='props');
+    const props = propCat ? propCat.items : [];
+    scene.props.forEach(propId=>{
+      const p = props.find(x=>x.id===propId);
+      if(!p) return;
+      parts.push('with ' + p.name + (p.description ? ' (' + p.description + ')' : '') + ' present');
+    });
+  }
+
   // location — pull its saved description too, not just the name
   if(scene && scene.location){
     const locCat = state.categories.find(c=>c.key==='locations');
@@ -157,7 +168,7 @@ function generateShotPreviewImage(shot, scene){
 function buildReferenceCardText(it, kind){
   kind = kind || 'character';
   const lines = [];
-  lines.push(kind==='location' ? '# LOCATION REFERENCE CARD' : '# CHARACTER REFERENCE CARD');
+  lines.push(kind==='location' ? '# LOCATION REFERENCE CARD' : kind==='prop' ? '# PROP REFERENCE CARD' : '# CHARACTER REFERENCE CARD');
   lines.push('name: ' + it.name);
   if(it.role) lines.push('role: ' + it.role);
   lines.push('primary_photo: ' + (it.photo ? 'attached (1)' : 'none'));
@@ -176,6 +187,11 @@ function buildReferenceCardText(it, kind){
     lines.push('  a shot explicitly overrides a detail (e.g. "after the fight",');
     lines.push('  "smoke-filled", "red lighting") — those overrides apply to');
     lines.push('  that shot only and reset on the next one unless carried forward.');
+  } else if(kind==='prop'){
+    lines.push('  Always render this object matching the shape, material, color');
+    lines.push('  and wear captured above, in every shot of any scene it is');
+    lines.push('  assigned to. Only deviate when a shot explicitly overrides a');
+    lines.push('  detail — that override applies to that shot only.');
   } else {
     lines.push('  Always render this character matching the face, hair, build');
     lines.push('  and wardrobe captured above. Only deviate when a shot');
@@ -265,7 +281,7 @@ function renderGenBlock(sectionEl, data, refText, onGenerate, opts){
   } else {
     sectionEl.innerHTML = `
       <button class="gen-btn" id="genBtn">Generate this ${kind} for AI use <span class="gen-cost">${GEN_COST_LABEL}</span></button>
-      <div class="gen-hint">Builds a turnaround sheet from your reference photos plus a structured text card (no paid API yet — this runs locally). Future shot generations will point to this so ${kind==='location'?'the location':'this character'} stays consistent from shot to shot.</div>`;
+      <div class="gen-hint">Builds a turnaround sheet from your reference photos plus a structured text card (no paid API yet — this runs locally). Future shot generations will point to this so ${kind==='location'?'the location':kind==='prop'?'the prop':'this character'} stays consistent from shot to shot.</div>`;
     sectionEl.querySelector('#genBtn').onclick = ()=> runGenBlock(sectionEl, data, onGenerate, opts);
   }
 }

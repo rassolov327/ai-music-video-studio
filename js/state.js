@@ -5,6 +5,7 @@ const state = {
     {key:'band', name:'Band / Characters', icon:'ti-users', addType:'character', collapsed:true, items:[]},
     {key:'looks', name:'Looks', icon:'ti-shirt', addType:'look', collapsed:true, items:[]},
     {key:'locations', name:'Locations', icon:'ti-map-pin', addType:'location', collapsed:true, items:[]},
+    {key:'props', name:'Props', icon:'ti-box', addType:'prop', collapsed:true, items:[]},
     {key:'scenes', name:'Scenes', icon:'ti-movie', addType:'scene', collapsed:true, items:[]},
   ],
   scenes: [],
@@ -12,7 +13,7 @@ const state = {
   projectMeta: { id:null, name:'Untitled Project', format:'horizontal', width:1920, height:1080, fps:25, createdAt:null, updatedAt:null },
 };
 
-let sceneSeq = 1, shotSeq = 1, paletteSeq = 0, charSeq = 1, locSeq = 1, trackSeq = 1, lookSeq = 1;
+let sceneSeq = 1, shotSeq = 1, paletteSeq = 0, charSeq = 1, locSeq = 1, trackSeq = 1, lookSeq = 1, propSeq = 1;
 let focus = { sceneId: null, shotId: null };
 let timelineMode = 'assembly'; // 'assembly' (spaced, insert-between) | 'edit' (flush clips, drag-to-reorder within scene)
 let playheadX = 0;
@@ -72,6 +73,9 @@ function noteSvg(size){
 }
 function shirtSvg(size){
   return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4l4 3-2.5 3-1.5-1v10a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V9l-1.5 1L4 7l4-3 2 2h4l2-2z"></path></svg>`;
+}
+function propSvg(size){
+  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8l-9-5-9 5 9 5 9-5z"></path><path d="M3 8v8l9 5 9-5V8"></path><path d="M12 13v8"></path></svg>`;
 }
 function lookStatus(it){
   if(!it.name || !it.description) return 'red';

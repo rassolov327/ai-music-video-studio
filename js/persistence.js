@@ -140,7 +140,7 @@ async function createProject({ name, format, width, height, fps, folderHandle })
   focus = { sceneId:null, shotId:null };
   timelineMode = 'assembly';
   playheadX = 0;
-  sceneSeq = 1; shotSeq = 1; paletteSeq = 0; charSeq = 1; locSeq = 1; trackSeq = 1; lookSeq = 1;
+  sceneSeq = 1; shotSeq = 1; paletteSeq = 0; charSeq = 1; locSeq = 1; trackSeq = 1; lookSeq = 1; propSeq = 1;
   PROJECT_FPS = meta.fps;
   applyProjectFrame();
   renderAssets();
@@ -360,6 +360,8 @@ async function migrateAssetsToDisk(){
   if(bandCat) for(const item of bandCat.items) await migrateImageFieldsToDisk(item, 'band');
   const locCat = state.categories.find(c=>c.key==='locations');
   if(locCat) for(const item of locCat.items) await migrateImageFieldsToDisk(item, 'locations');
+  const propCat = state.categories.find(c=>c.key==='props');
+  if(propCat) for(const item of propCat.items) await migrateImageFieldsToDisk(item, 'props');
 }
 async function migrateImageFieldsToDisk(item, catKey){
   if(!item._assetFiles) return;
@@ -561,6 +563,71 @@ async function deleteLocationImages(location){
   }
 }
 
+// Called once, right after a prop is saved.
+async function persistPropImages(prop){
+  if(!prop.id) return;
+  prop._assetFiles = prop._assetFiles || {};
+  const assetsDir = diskDirHandle ? await getAssetsDirHandle(true) : null;
+  const jobs = [];
+  if(prop.photo && prop.photo.indexOf('data:')===0){
+    jobs.push(
+      persistImageAsset(pid() + ':props:' + prop.id + ':photo', prop.photo, assetsDir)
+        .then(fileName=>{ prop._assetFiles['photo'] = fileName; })
+    );
+  }
+  if(prop.angles){
+    for(let i=0; i<prop.angles.length; i++){
+      const val = prop.angles[i];
+      const fieldKey = 'angle-' + i;
+      if(val && val.indexOf('data:')===0){
+        jobs.push(
+          persistImageAsset(pid() + ':props:' + prop.id + ':' + fieldKey, val, assetsDir)
+            .then(fileName=>{ prop._assetFiles[fieldKey] = fileName; })
+        );
+      }
+    }
+  }
+  await Promise.all(jobs);
+  console.log('[ProjectStore] persisted ' + jobs.length + ' image(s) for prop "' + prop.name + '"', prop._assetFiles);
+}
+async function restorePropImages(prop){
+  if(!prop._assetFiles) return { found:0, total:0, missing:[] };
+  const assetsDir = diskDirHandle ? await getAssetsDirHandle(false).catch(()=>null) : null;
+  const missing = [];
+  let found = 0;
+  const fieldKeys = Object.keys(prop._assetFiles);
+  const jobs = fieldKeys.map(async (fieldKey)=>{
+    const fileName = prop._assetFiles[fieldKey];
+    const assetKey = pid() + ':props:' + prop.id + ':' + fieldKey;
+    const url = await loadImageAsset(assetKey, fileName, assetsDir);
+    if(fieldKey==='photo') prop.photo = url;
+    else if(fieldKey.indexOf('angle-')===0){
+      const idx = parseInt(fieldKey.slice(6), 10);
+      if(!prop.angles) prop.angles = [];
+      prop.angles[idx] = url;
+    }
+    if(url) found++;
+    else missing.push(fieldKey + ' (expected "' + fileName + '")');
+  });
+  await Promise.all(jobs);
+  return { found, total: fieldKeys.length, missing };
+}
+async function deletePropImages(prop){
+  if(!prop._assetFiles) return;
+  for(const fieldKey of Object.keys(prop._assetFiles)){
+    const assetKey = pid() + ':props:' + prop.id + ':' + fieldKey;
+    try{ await idbDelete(STORE_ASSETS, assetKey); } catch(err){}
+  }
+  if(diskDirHandle){
+    try{
+      const assetsDir = await getAssetsDirHandle(false);
+      for await (const name of assetsDir.keys()){
+        if(name.indexOf('props_' + prop.id + '_')===0 || name.indexOf(pid()+'_props_'+prop.id+'_')===0) await assetsDir.removeEntry(name);
+      }
+    } catch(err){}
+  }
+}
+
 // ---- disk folder (File System Access API) ----
 async function writeProjectToDisk(dirHandle, projectData){
   const fileHandle = await dirHandle.getFileHandle('project.json', { create:true });
@@ -640,6 +707,10 @@ function serializeProject(){
         copy.photo = null;
         if(copy.angles) copy.angles = copy.angles.map(()=> null);
       }
+      if(cat.key==='props'){
+        copy.photo = null;
+        if(copy.angles) copy.angles = copy.angles.map(()=> null);
+      }
       return copy;
     }),
   }));
@@ -653,7 +724,7 @@ function serializeProject(){
     focus: Object.assign({}, focus),
     timelineMode: timelineMode,
     playheadX: playheadX,
-    seq: { sceneSeq, shotSeq, paletteSeq, charSeq, locSeq, trackSeq, lookSeq },
+    seq: { sceneSeq, shotSeq, paletteSeq, charSeq, locSeq, trackSeq, lookSeq, propSeq },
   };
 }
 
@@ -712,6 +783,24 @@ async function applyProjectData(data, verbose){
       }
     }
   }
+  const propCat = data.categories && data.categories.find(c=>c.key==='props');
+  if(propCat && propCat.items.length){
+    if(verbose) logLoadingStep('Restoring ' + propCat.items.length + ' prop(s)…');
+    for(const item of propCat.items){
+      try{
+        const result = await restorePropImages(item);
+        if(result.missing.length) hadErrors = true;
+        if(verbose){
+          const label = 'Prop "' + item.name + '" — ' + result.found + '/' + result.total + ' image(s) restored';
+          logLoadingStep(label, result.missing.length ? 'error' : 'ok');
+          if(result.missing.length) logLoadingStep('   missing: ' + result.missing.join(', '), 'error');
+        }
+      } catch(err){
+        hadErrors = true;
+        if(verbose) logLoadingStep('Prop "' + item.name + '" — error: ' + err.message, 'error');
+      }
+    }
+  }
   state.categories = data.categories || state.categories;
   state.scenes = data.scenes || [];
   state.timelineAudio = data.timelineAudio || null;
@@ -727,6 +816,7 @@ async function applyProjectData(data, verbose){
     charSeq = data.seq.charSeq || 1;
     locSeq = data.seq.locSeq || 1;
     trackSeq = data.seq.trackSeq || 1;
+    propSeq = data.seq.propSeq || 1;
     lookSeq = data.seq.lookSeq || 1;
   }
   applyProjectFrame();

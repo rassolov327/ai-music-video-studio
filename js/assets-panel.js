@@ -51,10 +51,12 @@ function renderAssets(){
         row.className='item';
         const isChar = cat.addType==='character';
         const isLoc = cat.addType==='location';
+        const isProp = cat.addType==='prop';
         const isMusic = cat.addType==='music';
         const isLook = cat.addType==='look';
         const statusDot = isChar ? `<span class="item-status-dot status-${characterStatus(it)}"></span>`
           : isLoc ? `<span class="item-status-dot status-${locationStatus(it)}"></span>`
+          : isProp ? `<span class="item-status-dot status-${propStatus(it)}"></span>`
           : isLook ? `<span class="item-status-dot status-${lookStatus(it)}"></span>` : '';
         const iconHtml = it.photo
           ? `<span class="item-avatar-wrap"><span class="item-avatar"><img src="${it.photo}"></span>${statusDot}</span>`
@@ -62,7 +64,9 @@ function renderAssets(){
             ? `<span class="item-avatar-wrap" style="color:var(--text-3);">${noteSvg(14)}</span>`
             : isLook
               ? `<span class="item-avatar-wrap" style="color:var(--text-3);position:relative;">${it.previewImage ? `<span class="item-avatar"><img src="${it.previewImage}"></span>` : shirtSvg(14)}${statusDot}</span>`
-              : `<span class="item-avatar-wrap"><i class="ti ${it.icon} itype"></i>${statusDot}</span>`;
+              : isProp
+                ? `<span class="item-avatar-wrap" style="color:var(--text-3);position:relative;">${propSvg(14)}${statusDot}</span>`
+                : `<span class="item-avatar-wrap"><i class="ti ${it.icon} itype"></i>${statusDot}</span>`;
         row.innerHTML = `${iconHtml}<span class="item-name">${it.name}</span>
           <span class="item-del" title="Remove"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></span>`;
         if(isMusic && it.id){
@@ -81,6 +85,8 @@ function renderAssets(){
             showCharacterCard(cat, idx);
           } else if(cat.addType==='location'){
             showLocationCard(cat, idx);
+          } else if(cat.addType==='prop'){
+            showPropCard(cat, idx);
           } else if(cat.addType==='look'){
             showLookForm(cat, idx);
           }
@@ -94,6 +100,7 @@ function renderAssets(){
           if(isMusic && typeof deleteAudioAsset==='function') deleteAudioAsset(it.id);
           if(isChar && typeof deleteCharacterImages==='function') deleteCharacterImages(it);
           if(isLoc && typeof deleteLocationImages==='function') deleteLocationImages(it);
+          if(isProp && typeof deletePropImages==='function') deletePropImages(it);
           cat.items.splice(idx,1);
           renderAssets();
           renderTimeline();
@@ -117,6 +124,8 @@ function renderAssets(){
         showScenesOverview();
       } else if(cat.addType==='location'){
         showLocationGallery(cat);
+      } else if(cat.addType==='prop'){
+        showPropGallery(cat);
       } else if(cat.addType==='music'){
         showMusicGallery(cat);
       } else if(cat.addType==='look'){
@@ -168,6 +177,12 @@ function characterStatus(it){
 }
 
 function locationStatus(it){
+  if(!it.name || !it.photo || !it.description) return 'red';
+  if(!it.referenceCard) return 'yellow';
+  return 'green';
+}
+
+function propStatus(it){
   if(!it.name || !it.photo || !it.description) return 'red';
   if(!it.referenceCard) return 'yellow';
   return 'green';

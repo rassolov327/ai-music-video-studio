@@ -55,6 +55,14 @@ window.addEventListener('keydown', (e)=>{
   } else if(e.code==='Escape'){
     if(inField){ document.activeElement.blur(); return; }
     goHome();
+  } else if(e.code==='ArrowLeft' || e.code==='ArrowRight'){
+    if(inField) return;
+    e.preventDefault();
+    stepPlayheadByFrame(e.code==='ArrowLeft' ? -1 : 1);
+  } else if(e.code==='ArrowUp' || e.code==='ArrowDown'){
+    if(inField) return;
+    e.preventDefault();
+    jumpPlayheadToCut(e.code==='ArrowDown' ? 1 : -1);
   }
 });
 window.addEventListener('resize', drawWave);

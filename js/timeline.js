@@ -422,6 +422,47 @@ function syncFocusToPlayhead(){
   refreshMainPreview();
 }
 
+// Every shot boundary in the project, in absolute timeline px, in playback order —
+// scene by scene, shot by shot — regardless of which timeline mode (Assembly/Edit) is
+// currently displayed, since both share the same underlying duration data.
+function getShotBoundariesPx(){
+  const boundaries = [0];
+  let x = 0;
+  state.scenes.forEach(scene=>{
+    scene.shots.forEach(shot=>{
+      x += Math.round(shot.duration * PX_PER_SEC);
+      boundaries.push(x);
+    });
+  });
+  return boundaries;
+}
+
+// Arrow Left/Right — step the playhead by exactly one frame, at the project's own fps.
+function stepPlayheadByFrame(direction){
+  pausePlayback();
+  const framePx = PX_PER_SEC / (PROJECT_FPS || 25);
+  playheadX = Math.max(0, Math.min(playheadX + direction*framePx, getTotalTimelinePx()));
+  syncFocusToPlayhead();
+}
+
+// Arrow Up/Down — jump to the previous/next cut (shot boundary) on the timeline.
+function jumpPlayheadToCut(direction){
+  pausePlayback();
+  const boundaries = getShotBoundariesPx();
+  const eps = 0.5;
+  if(direction>0){
+    const next = boundaries.find(b => b > playheadX + eps);
+    if(next===undefined) return; // already at (or past) the last cut — nothing further to jump to
+    playheadX = next;
+  } else {
+    let prev = 0;
+    for(const b of boundaries){ if(b < playheadX - eps) prev = b; else break; }
+    playheadX = prev;
+  }
+  playheadX = Math.max(0, Math.min(playheadX, getTotalTimelinePx()));
+  syncFocusToPlayhead();
+}
+
 function wireTimelineDrag(){
   const ruler = document.getElementById('timelineRuler');
   const track = document.getElementById('timelineTrack');
