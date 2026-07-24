@@ -279,19 +279,24 @@ async function persistCharacterImages(character){
   console.log('[ProjectStore] persisted ' + jobs.length + ' image(s) for character "' + character.name + '"', character._assetFiles);
 }
 async function restoreCharacterImages(character){
-  if(!character._assetFiles) return;
+  if(!character._assetFiles) return { found:0, total:0, missing:[] };
   if(!character.angleSlots) character.angleSlots = typeof emptyAngleSlots==='function' ? emptyAngleSlots() : {};
   const assetsDir = diskDirHandle ? await getAssetsDirHandle(false).catch(()=>null) : null;
-  const jobs = Object.keys(character._assetFiles).map(async (fieldKey)=>{
+  const missing = [];
+  let found = 0;
+  const fieldKeys = Object.keys(character._assetFiles);
+  const jobs = fieldKeys.map(async (fieldKey)=>{
     const fileName = character._assetFiles[fieldKey];
     const assetKey = 'band:' + character.id + ':' + fieldKey;
     const url = await loadImageAsset(assetKey, fileName, assetsDir);
     if(fieldKey === 'turnaround') character.turnaroundSheet = url;
     else if(fieldKey.indexOf('angle-')===0) character.angleSlots[fieldKey.slice(6)] = url;
-    if(!url) console.warn('[ProjectStore] character "' + character.name + '": image "' + fieldKey + '" (file "' + fileName + '") could not be found — check assets/ folder');
+    if(url) found++;
+    else missing.push(fieldKey + ' (expected "' + fileName + '")');
   });
   await Promise.all(jobs);
   character.photo = character.angleSlots.front || null;
+  return { found, total: fieldKeys.length, missing };
 }
 async function deleteCharacterImages(character){
   if(!character._assetFiles) return;
@@ -337,9 +342,12 @@ async function persistLocationImages(location){
   console.log('[ProjectStore] persisted ' + jobs.length + ' image(s) for location "' + location.name + '"', location._assetFiles);
 }
 async function restoreLocationImages(location){
-  if(!location._assetFiles) return;
+  if(!location._assetFiles) return { found:0, total:0, missing:[] };
   const assetsDir = diskDirHandle ? await getAssetsDirHandle(false).catch(()=>null) : null;
-  const jobs = Object.keys(location._assetFiles).map(async (fieldKey)=>{
+  const missing = [];
+  let found = 0;
+  const fieldKeys = Object.keys(location._assetFiles);
+  const jobs = fieldKeys.map(async (fieldKey)=>{
     const fileName = location._assetFiles[fieldKey];
     const assetKey = 'locations:' + location.id + ':' + fieldKey;
     const url = await loadImageAsset(assetKey, fileName, assetsDir);
@@ -349,9 +357,11 @@ async function restoreLocationImages(location){
       if(!location.angles) location.angles = [];
       location.angles[idx] = url;
     }
-    if(!url) console.warn('[ProjectStore] location "' + location.name + '": image "' + fieldKey + '" (file "' + fileName + '") could not be found — check assets/ folder');
+    if(url) found++;
+    else missing.push(fieldKey + ' (expected "' + fileName + '")');
   });
   await Promise.all(jobs);
+  return { found, total: fieldKeys.length, missing };
 }
 async function deleteLocationImages(location){
   if(!location._assetFiles) return;
@@ -454,34 +464,59 @@ function serializeProject(){
   };
 }
 
-async function applyProjectData(data){
+async function applyProjectData(data, verbose){
   if(!data) return false;
+  let hadErrors = false;
   const musicCat = data.categories && data.categories.find(c=>c.key==='music');
-  if(musicCat){
-    console.log('[ProjectStore] restoring', musicCat.items.length, 'music track(s)');
+  if(musicCat && musicCat.items.length){
+    if(verbose) logLoadingStep('Restoring ' + musicCat.items.length + ' music track(s)…');
     for(const item of musicCat.items){
       try{
         const blob = await loadAudioAsset(item.id, item.diskFileName);
         item.audioUrl = blob ? URL.createObjectURL(blob) : null;
-        console.log('[ProjectStore] track "' + item.name + '" audio ' + (blob ? 'restored' : 'NOT FOUND'));
+        if(!blob) hadErrors = true;
+        if(verbose) logLoadingStep('Music "' + item.name + '"' + (blob ? ' — audio found' : ' — AUDIO FILE NOT FOUND'), blob ? 'ok' : 'error');
       } catch(err){
-        console.warn('[ProjectStore] failed to restore audio for "' + item.name + '":', err);
         item.audioUrl = null;
+        hadErrors = true;
+        if(verbose) logLoadingStep('Music "' + item.name + '" — error: ' + err.message, 'error');
       }
     }
   }
   const bandCat = data.categories && data.categories.find(c=>c.key==='band');
-  if(bandCat){
+  if(bandCat && bandCat.items.length){
+    if(verbose) logLoadingStep('Restoring ' + bandCat.items.length + ' character(s)…');
     for(const item of bandCat.items){
-      try{ await restoreCharacterImages(item); }
-      catch(err){ console.warn('[ProjectStore] failed to restore images for character "' + item.name + '":', err); }
+      try{
+        const result = await restoreCharacterImages(item);
+        if(result.missing.length) hadErrors = true;
+        if(verbose){
+          const label = 'Character "' + item.name + '" — ' + result.found + '/' + result.total + ' image(s) restored';
+          logLoadingStep(label, result.missing.length ? 'error' : 'ok');
+          if(result.missing.length) logLoadingStep('   missing: ' + result.missing.join(', '), 'error');
+        }
+      } catch(err){
+        hadErrors = true;
+        if(verbose) logLoadingStep('Character "' + item.name + '" — error: ' + err.message, 'error');
+      }
     }
   }
   const locCat = data.categories && data.categories.find(c=>c.key==='locations');
-  if(locCat){
+  if(locCat && locCat.items.length){
+    if(verbose) logLoadingStep('Restoring ' + locCat.items.length + ' location(s)…');
     for(const item of locCat.items){
-      try{ await restoreLocationImages(item); }
-      catch(err){ console.warn('[ProjectStore] failed to restore images for location "' + item.name + '":', err); }
+      try{
+        const result = await restoreLocationImages(item);
+        if(result.missing.length) hadErrors = true;
+        if(verbose){
+          const label = 'Location "' + item.name + '" — ' + result.found + '/' + result.total + ' image(s) restored';
+          logLoadingStep(label, result.missing.length ? 'error' : 'ok');
+          if(result.missing.length) logLoadingStep('   missing: ' + result.missing.join(', '), 'error');
+        }
+      } catch(err){
+        hadErrors = true;
+        if(verbose) logLoadingStep('Location "' + item.name + '" — error: ' + err.message, 'error');
+      }
     }
   }
   state.categories = data.categories || state.categories;
@@ -502,8 +537,7 @@ async function applyProjectData(data){
   renderAssets();
   renderTimelineScenes();
   refreshMainPreview();
-  console.log('[ProjectStore] project restored. timelineAudio:', state.timelineAudio);
-  return true;
+  return hadErrors;
 }
 
 // ---- save orchestration + autosave (JSON only — assets are handled separately) ----
@@ -607,38 +641,73 @@ function wireFolderButton(){
   btn.onclick = ()=> chooseDiskFolder().then(updateFolderButton);
 }
 
-// Returns true if a saved project was found and restored.
+// ---- visible loading/diagnostic screen — replaces silent console.warn with something the
+// user can actually read and screenshot without opening DevTools ----
+function logLoadingStep(text, status){
+  console.log('[ProjectStore] ' + text);
+  const log = document.getElementById('loadingLog');
+  if(!log) return;
+  const line = document.createElement('div');
+  line.className = 'loading-line ' + (status || 'info');
+  const dotChar = status==='ok' ? '✓' : status==='error' ? '✗' : '·';
+  line.innerHTML = '<span class="dot3">' + dotChar + '</span><span class="msg"></span>';
+  line.querySelector('.msg').textContent = text;
+  log.appendChild(line);
+  log.scrollTop = log.scrollHeight;
+}
+function finishLoadingScreen(hadErrors){
+  const btn = document.getElementById('loadingContinueBtn');
+  const screen = document.getElementById('loadingScreen');
+  if(btn) btn.style.display = '';
+  if(btn) btn.onclick = ()=>{ if(screen) screen.classList.add('hidden'); };
+  if(!hadErrors && screen){
+    setTimeout(()=> screen.classList.add('hidden'), 900);
+  }
+}
+
 async function initProjectStore(){
   updateFolderButton();
   wireFolderButton();
+  logLoadingStep('Checking for a saved project…');
 
   const diskResult = await tryRestoreDiskHandle();
-  console.log('[ProjectStore] startup: disk folder check ->', diskResult === 'granted' ? 'granted' : diskResult && diskResult.needsPermission ? 'needs permission' : 'no folder connected');
+  let hadErrors = false;
   if(diskResult === 'granted'){
+    logLoadingStep('Reconnected to project folder "' + diskDirHandle.name + '"', 'ok');
     const data = await readProjectFromDisk(diskDirHandle);
     if(data){
-      await applyProjectData(data);
+      logLoadingStep('project.json found — restoring…', 'ok');
+      hadErrors = await applyProjectData(data, true);
       updateFolderButton();
       setSaveStatus('saved');
       lastSavedJSON = JSON.stringify(serializeProject());
       autosaveTimer = setInterval(autosaveTick, 3000);
       wireExitSave();
+      logLoadingStep(hadErrors ? 'Done — some assets could not be found (see above).' : 'Done — everything restored.', hadErrors ? 'error' : 'ok');
+      finishLoadingScreen(hadErrors);
       return true;
     }
-    console.log('[ProjectStore] connected folder has no project.json yet');
+    logLoadingStep('Connected folder has no project.json yet — starting fresh.', 'info');
   } else if(diskResult && diskResult.needsPermission){
+    logLoadingStep('Project folder needs permission again — click "Reconnect project folder" above.', 'error');
     showReconnectFolderBanner(diskResult.needsPermission);
+  } else {
+    logLoadingStep('No project folder connected — using browser storage.', 'info');
   }
 
   const idbData = await idbGet(STORE_PROJECT, 'current');
-  console.log('[ProjectStore] startup: browser storage (IndexedDB) ->', idbData ? 'found a saved project' : 'nothing saved yet');
   if(idbData){
-    await applyProjectData(idbData);
+    logLoadingStep('Found a saved project in browser storage — restoring…', 'ok');
+    hadErrors = await applyProjectData(idbData, true);
     setSaveStatus('saved');
     lastSavedJSON = JSON.stringify(serializeProject());
+  } else {
+    logLoadingStep('Nothing saved yet — starting a fresh project.', 'info');
   }
   autosaveTimer = setInterval(autosaveTick, 3000);
   wireExitSave();
+  logLoadingStep(hadErrors ? 'Done — some assets could not be found (see above).' : 'Done.', hadErrors ? 'error' : 'ok');
+  finishLoadingScreen(hadErrors);
   return !!idbData;
 }
 

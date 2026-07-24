@@ -552,3 +552,28 @@
   ::-webkit-scrollbar{width:8px;height:8px;}
   ::-webkit-scrollbar-thumb{background:#33373f;border-radius:4px;}
   ::-webkit-scrollbar-track{background:transparent;}
+
+  /* ---- Loading / diagnostic screen ---- */
+  .loading-screen{
+    position:fixed;inset:0;background:var(--bg-app);z-index:1000;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .loading-screen.hidden{display:none;}
+  .loading-box{width:520px;max-width:90vw;max-height:80vh;display:flex;flex-direction:column;}
+  .loading-title{
+    display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600;color:var(--text-1);
+    margin-bottom:14px;
+  }
+  .loading-title i{color:var(--accent);font-size:18px;}
+  .loading-log{
+    background:var(--bg-panel);border:1px solid var(--line);border-radius:8px;
+    padding:12px 14px;font-family:var(--font-mono);font-size:11.5px;line-height:1.9;
+    overflow-y:auto;max-height:50vh;margin-bottom:14px;
+  }
+  .loading-line{display:flex;gap:8px;align-items:flex-start;}
+  .loading-line .dot3{flex:0 0 auto;width:8px;text-align:center;margin-top:2px;}
+  .loading-line.ok{color:#5fae7a;}
+  .loading-line.ok .msg{color:var(--text-2);}
+  .loading-line.error{color:#d9695f;}
+  .loading-line.info{color:var(--text-3);}
+  .loading-box .cf-btn{align-self:flex-end;}
