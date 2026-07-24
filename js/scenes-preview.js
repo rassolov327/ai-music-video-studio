@@ -479,11 +479,12 @@ async function renderPaidGenSlot(scene, shot){
   const freshSlot = document.getElementById('paidGenSlot');
   if(!freshSlot) return;
   if(!available){
-    freshSlot.innerHTML = `<div class="gen-hint" style="margin-top:10px;">Paid generation (${PAID_GEN_MODEL_LABEL}) isn't connected on this deployment yet.</div>`;
+    freshSlot.innerHTML = `<div class="gen-hint" style="margin-top:10px;">Paid generation isn't connected on this deployment yet.</div>`;
     return;
   }
   freshSlot.innerHTML = `
-    <button class="cf-btn primary" id="shotPaidGenBtn" style="width:100%;margin-top:10px;">Generate (real AI) <span class="gen-cost">${PAID_GEN_COST_LABEL}</span></button>`;
+    <button class="cf-btn primary" id="shotPaidGenBtn" style="width:100%;margin-top:10px;">Generate (real AI) <span class="gen-cost">${PAID_GEN_COST_LABEL}</span></button>
+    <div class="gen-hint" style="margin-top:6px;">Runs in the background — check the TASKS tab at the bottom for progress. You can keep working on other scenes while it generates.</div>`;
   document.getElementById('shotPaidGenBtn').onclick = ()=> runShotGenerationPaid(scene, shot);
 }
 
@@ -504,33 +505,28 @@ function runShotGeneration(scene, shot){
     });
 }
 
+// Fire-and-forget: queues the task on the server and immediately hands control back to
+// the Inspector — no blocking wait here anymore. The Tasks tab (and a background watcher
+// that runs regardless of which tab is open) pick the result up once KIE's webhook (or,
+// failing that, the server's own fallback poll) reports it done, and drop it onto this
+// exact shot automatically.
 async function runShotGenerationPaid(scene, shot){
-  const section = document.getElementById('shotGenSection');
-  if(!section) return;
-  const setStatus = (text)=>{
-    const el = document.getElementById('shotGenSection');
-    if(el) el.innerHTML = `<button class="gen-btn" disabled><span class="gen-spin"></span>${text}</button>`;
-  };
-  setStatus('Starting generation with ' + PAID_GEN_MODEL_LABEL + '…');
-  const prompt = buildShotPrompt(shot, scene);
-  const meta = state.projectMeta || { width:1920, height:1080 };
+  const btn = document.getElementById('shotPaidGenBtn');
+  if(btn){ btn.disabled = true; btn.innerHTML = '<span class="gen-spin"></span>Queuing…'; }
   try{
-    const imageUrl = await generateImageViaBackend(prompt, meta.width, meta.height, (elapsedSec)=>{
-      setStatus('Generating… ' + elapsedSec + 's elapsed (real AI generation, this can take a couple of minutes)');
-    });
-    shot.previewImage = imageUrl;
-    renderTimelineScenes();
-    if(focus.sceneId===scene.id && focus.shotId===shot.id) refreshMainPreview();
-    else renderShotGenSection(scene, shot);
-    if(typeof saveProjectSoon==='function') saveProjectSoon();
+    await startPaidGenerationTask(scene, shot);
+    const slot = document.getElementById('paidGenSlot');
+    if(slot){
+      slot.innerHTML = `<div class="gen-hint" style="color:#5fae7a;">Queued — see the TASKS tab for progress. This card doesn't need to stay open.</div>`;
+    }
   } catch(err){
-    const el = document.getElementById('shotGenSection');
-    if(el) el.innerHTML = `
-      <div class="gen-hint" style="color:var(--danger);">Generation failed: ${err.message}</div>
-      <button class="cf-btn" id="paidGenDismissBtn" style="width:100%;margin-top:8px;">OK</button>`;
-    const dismissBtn = document.getElementById('paidGenDismissBtn');
-    if(dismissBtn) dismissBtn.onclick = ()=> renderShotGenSection(scene, shot);
+    const slot = document.getElementById('paidGenSlot');
+    if(slot){
+      slot.innerHTML = `
+        <div class="gen-hint" style="color:var(--danger);">Could not start generation: ${err.message}</div>
+        <button class="cf-btn" id="paidGenRetryBtn" style="width:100%;margin-top:8px;">Try again</button>`;
+      const retryBtn = document.getElementById('paidGenRetryBtn');
+      if(retryBtn) retryBtn.onclick = ()=> renderPaidGenSlot(scene, shot);
+    }
   }
 }
-
-

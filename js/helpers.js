@@ -57,6 +57,9 @@ const PAID_GEN_COST_LABEL = '$0.03';
 
 // ---------- paid generation, proxied through our own backend (server.js) ----------
 // The browser never sees the KIE.ai key — it only ever calls this same-origin endpoint.
+// Task creation is fire-and-forget (see js/tasks.js) — the server tracks progress via
+// KIE's webhook (with a polling fallback) and the Tasks tab / background watcher pick up
+// the result, so there's no client-side polling loop here anymore.
 let _kieConfiguredCache = null;
 async function checkPaidGenerationAvailable(){
   if(_kieConfiguredCache !== null) return _kieConfiguredCache;
@@ -68,39 +71,6 @@ async function checkPaidGenerationAvailable(){
     _kieConfiguredCache = false;
   }
   return _kieConfiguredCache;
-}
-async function generateImageViaBackend(prompt, width, height, onProgress){
-  const startRes = await fetch('/api/generate-image/start', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt, width, height }),
-  });
-  const startData = await startRes.json().catch(()=> null);
-  if(!startRes.ok || !startData || !startData.taskId){
-    const message = (startData && startData.message) || ('Request failed (HTTP ' + startRes.status + ')');
-    throw new Error(message);
-  }
-  const taskId = startData.taskId;
-
-  const deadline = Date.now() + 300000; // 5 minutes — real paid generation can genuinely take a while
-  let elapsed = 0;
-  while(Date.now() < deadline){
-    await new Promise(r=> setTimeout(r, 3000));
-    elapsed += 3;
-    const statusRes = await fetch('/api/generate-image/status?taskId=' + encodeURIComponent(taskId));
-    const statusData = await statusRes.json().catch(()=> null);
-    if(!statusRes.ok || !statusData){
-      throw new Error('Lost contact with the server while checking on the generation.');
-    }
-    if(statusData.status === 'success' && statusData.imageUrl){
-      return statusData.imageUrl;
-    }
-    if(statusData.status === 'failed'){
-      throw new Error(statusData.message || 'Generation failed.');
-    }
-    if(onProgress) onProgress(elapsed, statusData.kieStatus);
-  }
-  throw new Error('Generation is still running after 5 minutes — it may finish on KIE\'s side, but this attempt gave up waiting. Try again in a bit.');
 }
 
 // ---------- free rough-preview generation via Pollinations.ai (no key required) ----------

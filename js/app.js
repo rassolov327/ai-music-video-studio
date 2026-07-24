@@ -10,6 +10,9 @@ function goHome(){
   wireToolsMenu();
   wireCheckReport();
   wireFolderButton();
+  wirePageTabs();
+  loadModelList();
+  startBackgroundTaskWatcher();
   const restored = await initProjectStore();
   if(restored){
     updateProjTitleDisplay();
