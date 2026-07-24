@@ -9,14 +9,14 @@ function showCharacterCard(cat, idx){
   const coreDone = filledCoreAngleCount(it.angleSlots);
   const anglesHtml = filledSlots.length
     ? `<div class="char-card-section-title">Reference angles — ${coreDone}/${coreAngleCountTotal()} core</div>
-       <div class="char-card-angles">${filledSlots.map(s=>`<div class="char-card-angle" style="background-image:url(${it.angleSlots[s.key]})" title="${s.label}"></div>`).join('')}</div>`
+       <div class="char-card-angles">${filledSlots.map(s=>`<div class="char-card-angle" title="${s.label}"><img src="${it.angleSlots[s.key]}"></div>`).join('')}</div>`
     : `<div class="char-card-section-title">Reference angles — 0/${coreAngleCountTotal()} core</div>
        <div class="gen-hint" style="margin-top:0;">Add reference photos via Edit to build a full turnaround.</div>`;
 
   previewEl.innerHTML = `
     <div class="char-card" id="charCard">
-      <div class="char-card-photo" id="cardPhoto" style="${it.photo ? `background-image:url(${it.photo})` : ''}">
-        ${it.photo ? '' : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="8" r="4"></circle><path d="M4 21c0-4 4-6 8-6s8 2 8 6"></path></svg>'}
+      <div class="char-card-photo" id="cardPhoto">
+        ${it.photo ? `<img src="${it.photo}">` : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="8" r="4"></circle><path d="M4 21c0-4 4-6 8-6s8 2 8 6"></path></svg>'}
       </div>
       <div class="char-card-body">
         <p class="char-card-name">${it.name}</p>

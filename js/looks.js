@@ -14,8 +14,8 @@ function showLookGallery(cat){
 
   const tiles = cat.items.map((it,idx)=>`
     <div class="char-tile" data-idx="${idx}">
-      <div class="char-tile-photo" style="${it.previewImage ? `background-image:url(${it.previewImage});` : ''}">
-        ${it.previewImage ? '' : shirtSvg(26)}
+      <div class="char-tile-photo">
+        ${it.previewImage ? `<img src="${it.previewImage}">` : shirtSvg(26)}
         <div class="char-tile-status status-${lookStatus(it)}" title="${it.approved?'Approved':it.previewImage?'Preview generated, not approved':'Missing required fields'}"></div>
         <div class="char-tile-del" data-del-idx="${idx}" title="Remove">${trashSvg(13)}</div>
       </div>

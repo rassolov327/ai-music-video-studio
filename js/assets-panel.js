@@ -57,11 +57,11 @@ function renderAssets(){
           : isLoc ? `<span class="item-status-dot status-${locationStatus(it)}"></span>`
           : isLook ? `<span class="item-status-dot status-${lookStatus(it)}"></span>` : '';
         const iconHtml = it.photo
-          ? `<span class="item-avatar-wrap"><span class="item-avatar" style="background-image:url(${it.photo})"></span>${statusDot}</span>`
+          ? `<span class="item-avatar-wrap"><span class="item-avatar"><img src="${it.photo}"></span>${statusDot}</span>`
           : isMusic
             ? `<span class="item-avatar-wrap" style="color:var(--text-3);">${noteSvg(14)}</span>`
             : isLook
-              ? `<span class="item-avatar-wrap" style="color:var(--text-3);position:relative;">${it.previewImage ? `<span class="item-avatar" style="background-image:url(${it.previewImage})"></span>` : shirtSvg(14)}${statusDot}</span>`
+              ? `<span class="item-avatar-wrap" style="color:var(--text-3);position:relative;">${it.previewImage ? `<span class="item-avatar"><img src="${it.previewImage}"></span>` : shirtSvg(14)}${statusDot}</span>`
               : `<span class="item-avatar-wrap"><i class="ti ${it.icon} itype"></i>${statusDot}</span>`;
         row.innerHTML = `${iconHtml}<span class="item-name">${it.name}</span>
           <span class="item-del" title="Remove"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></span>`;
@@ -181,8 +181,8 @@ function showCharacterGallery(cat){
 
   const tiles = cat.items.map((it,idx)=>`
     <div class="char-tile" data-idx="${idx}">
-      <div class="char-tile-photo" style="${it.photo ? `background-image:url(${it.photo})` : ''}">
-        ${it.photo ? '' : '<i class="ti ti-user"></i>'}
+      <div class="char-tile-photo">
+        ${it.photo ? `<img src="${it.photo}">` : '<i class="ti ti-user"></i>'}
         <div class="char-tile-status status-${characterStatus(it)}" title="${characterStatus(it)==='green'?'AI reference generated':characterStatus(it)==='yellow'?'Character complete, reference not generated':'Missing required fields'}"></div>
         <div class="char-tile-del" title="Remove"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></div>
       </div>

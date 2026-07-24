@@ -7,8 +7,8 @@ function showLocationGallery(cat){
 
   const tiles = cat.items.map((it,idx)=>`
     <div class="char-tile" data-idx="${idx}">
-      <div class="char-tile-photo" style="${it.photo ? `background-image:url(${it.photo})` : ''}">
-        ${it.photo ? '' : '<i class="ti ti-map-pin"></i>'}
+      <div class="char-tile-photo">
+        ${it.photo ? `<img src="${it.photo}">` : '<i class="ti ti-map-pin"></i>'}
         <div class="char-tile-status status-${locationStatus(it)}" title="${locationStatus(it)==='green'?'AI reference generated':locationStatus(it)==='yellow'?'Location complete, reference not generated':'Missing required fields'}"></div>
         <div class="char-tile-del" title="Remove"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></div>
       </div>
@@ -56,13 +56,13 @@ function showLocationCard(cat, idx){
 
   const anglesHtml = (it.angles && it.angles.length)
     ? `<div class="char-card-section-title">Additional views</div>
-       <div class="char-card-angles">${it.angles.map(a=>`<div class="char-card-angle" style="background-image:url(${a})"></div>`).join('')}</div>`
+       <div class="char-card-angles">${it.angles.map(a=>`<div class="char-card-angle"><img src="${a}"></div>`).join('')}</div>`
     : '';
 
   previewEl.innerHTML = `
     <div class="char-card" id="locCard">
-      <div class="char-card-photo" id="locCardPhoto" style="${it.photo ? `background-image:url(${it.photo})` : ''}">
-        ${it.photo ? '' : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 21s7-6.5 7-12a7 7 0 0 0-14 0c0 5.5 7 12 7 12z"></path><circle cx="12" cy="9" r="2.5"></circle></svg>'}
+      <div class="char-card-photo" id="locCardPhoto">
+        ${it.photo ? `<img src="${it.photo}">` : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 21s7-6.5 7-12a7 7 0 0 0-14 0c0 5.5 7 12 7 12z"></path><circle cx="12" cy="9" r="2.5"></circle></svg>'}
       </div>
       <div class="char-card-body">
         <p class="char-card-name">${it.name}</p>
@@ -129,7 +129,8 @@ function showLocationForm(cat, editIdx){
       </div>
 
       <div class="form-tab-panel" id="tabDetails">
-        <label class="photo-drop${existing && existing.photo ? ' has-photo' : ''}" id="locPhotoDrop" for="locPhotoInput" style="${existing && existing.photo ? `background-image:url(${existing.photo})` : ''}">
+        <label class="photo-drop${existing && existing.photo ? ' has-photo' : ''}" id="locPhotoDrop" for="locPhotoInput">
+          ${existing && existing.photo ? `<img id="locPhotoDropImg" src="${existing.photo}">` : ''}
           <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"></path><circle cx="12" cy="13" r="3.5"></circle></svg>
           <span>Add photo</span>
           <div class="photo-remove" id="locPhotoRemove"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
@@ -196,7 +197,8 @@ function showLocationForm(cat, editIdx){
 
   function renderAngles(){
     anglesRow.innerHTML = anglePhotos.map((src,idx)=>`
-      <div class="angle-tile" style="background-image:url(${src})" data-idx="${idx}">
+      <div class="angle-tile" data-idx="${idx}">
+        <img src="${src}">
         <div class="angle-tile-del" title="Remove"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
       </div>
     `).join('') + `
@@ -234,13 +236,23 @@ function showLocationForm(cat, editIdx){
   let photoDataUrl = existing ? existing.photo || null : null;
   if(photoDataUrl) applyNaturalAspect(photoDrop, photoDataUrl);
 
+  function setPhotoDropImage(url){
+    let img = document.getElementById('locPhotoDropImg');
+    if(!img){
+      img = document.createElement('img');
+      img.id = 'locPhotoDropImg';
+      photoDrop.prepend(img);
+    }
+    img.src = url;
+  }
+
   photoInput.onchange = async ()=>{
     const file = photoInput.files[0];
     if(!file) return;
     try{
       photoDataUrl = await loadImageAsDataURL(file);
       photoDrop.classList.add('has-photo');
-      photoDrop.style.backgroundImage = `url(${photoDataUrl})`;
+      setPhotoDropImage(photoDataUrl);
       applyNaturalAspect(photoDrop, photoDataUrl);
       refreshFormGen();
     } catch(err){}
@@ -250,7 +262,8 @@ function showLocationForm(cat, editIdx){
     e.stopPropagation();
     photoDataUrl = null;
     photoDrop.classList.remove('has-photo');
-    photoDrop.style.backgroundImage='';
+    const img = document.getElementById('locPhotoDropImg');
+    if(img) img.remove();
     photoDrop.style.aspectRatio='';
     photoInput.value='';
     refreshFormGen();
@@ -282,7 +295,7 @@ function showLocationForm(cat, editIdx){
         document.getElementById('useAiPhotoBtn').onclick = ()=>{
           photoDataUrl = url;
           photoDrop.classList.add('has-photo');
-          photoDrop.style.backgroundImage = `url(${url})`;
+          setPhotoDropImage(url);
           applyNaturalAspect(photoDrop, url);
           refreshFormGen();
           previewEl.querySelector('[data-tab="details"]').click();
