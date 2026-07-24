@@ -214,12 +214,12 @@ function extFromDataUrl(dataUrl){
 // Writes one image (only if it's a local data: URL — remote Pollinations links are left
 // untouched, they're already lightweight) and returns the filename used on disk, or null
 // if it went into IndexedDB instead.
-async function persistImageAsset(assetKey, dataUrl){
+async function persistImageAsset(assetKey, dataUrl, assetsDirHandle){
   if(!dataUrl || dataUrl.indexOf('data:')!==0) return undefined; // nothing to do
   const blob = dataUrlToBlobSync(dataUrl);
   if(diskDirHandle){
     try{
-      const assetsDir = await getAssetsDirHandle(true);
+      const assetsDir = assetsDirHandle || await getAssetsDirHandle(true);
       const fileName = assetKey.replace(/[:]/g,'_') + extFromDataUrl(dataUrl);
       const fileHandle = await assetsDir.getFileHandle(fileName, { create:true });
       const writable = await fileHandle.createWritable();
@@ -231,11 +231,12 @@ async function persistImageAsset(assetKey, dataUrl){
   await idbSet(STORE_ASSETS, assetKey, blob);
   return null;
 }
-async function loadImageAsset(assetKey, fileName){
-  if(diskDirHandle && fileName){
+async function loadImageAsset(assetKey, fileName, assetsDirHandle){
+  if(diskDirHandle){
     try{
-      const assetsDir = await getAssetsDirHandle(false);
-      const fileHandle = await assetsDir.getFileHandle(fileName);
+      const assetsDir = assetsDirHandle || await getAssetsDirHandle(false);
+      const lookupName = fileName || assetKey.replace(/[:]/g,'_');
+      const fileHandle = await assetsDir.getFileHandle(lookupName);
       const file = await fileHandle.getFile();
       return URL.createObjectURL(file);
     } catch(err){ console.warn('[ProjectStore] image asset "' + fileName + '" not found on disk, trying browser storage:', err); }
@@ -250,6 +251,11 @@ async function loadImageAsset(assetKey, fileName){
 async function persistCharacterImages(character){
   if(!character.id) return;
   character._assetFiles = character._assetFiles || {};
+  // Resolve (and create if needed) the assets/ directory ONCE before writing anything —
+  // this is the piece that broke: several parallel getDirectoryHandle({create:true}) calls
+  // for the *same* "assets" folder can race each other. Music never hit this because it
+  // only ever writes one file at a time; characters write up to 7 at once.
+  const assetsDir = diskDirHandle ? await getAssetsDirHandle(true) : null;
   const jobs = [];
   if(character.angleSlots){
     for(const slotKey of Object.keys(character.angleSlots)){
@@ -257,7 +263,7 @@ async function persistCharacterImages(character){
       const fieldKey = 'angle-' + slotKey;
       if(val && val.indexOf('data:')===0){
         jobs.push(
-          persistImageAsset('band:' + character.id + ':' + fieldKey, val)
+          persistImageAsset('band:' + character.id + ':' + fieldKey, val, assetsDir)
             .then(fileName=>{ character._assetFiles[fieldKey] = fileName; })
         );
       }
@@ -265,20 +271,21 @@ async function persistCharacterImages(character){
   }
   if(character.turnaroundSheet && character.turnaroundSheet.indexOf('data:')===0){
     jobs.push(
-      persistImageAsset('band:' + character.id + ':turnaround', character.turnaroundSheet)
+      persistImageAsset('band:' + character.id + ':turnaround', character.turnaroundSheet, assetsDir)
         .then(fileName=>{ character._assetFiles['turnaround'] = fileName; })
     );
   }
   await Promise.all(jobs);
-  console.log('[ProjectStore] persisted ' + jobs.length + ' image(s) for character "' + character.name + '"');
+  console.log('[ProjectStore] persisted ' + jobs.length + ' image(s) for character "' + character.name + '"', character._assetFiles);
 }
 async function restoreCharacterImages(character){
   if(!character._assetFiles) return;
   if(!character.angleSlots) character.angleSlots = typeof emptyAngleSlots==='function' ? emptyAngleSlots() : {};
+  const assetsDir = diskDirHandle ? await getAssetsDirHandle(false).catch(()=>null) : null;
   const jobs = Object.keys(character._assetFiles).map(async (fieldKey)=>{
     const fileName = character._assetFiles[fieldKey];
     const assetKey = 'band:' + character.id + ':' + fieldKey;
-    const url = await loadImageAsset(assetKey, fileName);
+    const url = await loadImageAsset(assetKey, fileName, assetsDir);
     if(fieldKey === 'turnaround') character.turnaroundSheet = url;
     else if(fieldKey.indexOf('angle-')===0) character.angleSlots[fieldKey.slice(6)] = url;
     if(!url) console.warn('[ProjectStore] character "' + character.name + '": image "' + fieldKey + '" (file "' + fileName + '") could not be found — check assets/ folder');
@@ -306,10 +313,11 @@ async function deleteCharacterImages(character){
 async function persistLocationImages(location){
   if(!location.id) return;
   location._assetFiles = location._assetFiles || {};
+  const assetsDir = diskDirHandle ? await getAssetsDirHandle(true) : null;
   const jobs = [];
   if(location.photo && location.photo.indexOf('data:')===0){
     jobs.push(
-      persistImageAsset('locations:' + location.id + ':photo', location.photo)
+      persistImageAsset('locations:' + location.id + ':photo', location.photo, assetsDir)
         .then(fileName=>{ location._assetFiles['photo'] = fileName; })
     );
   }
@@ -319,21 +327,22 @@ async function persistLocationImages(location){
       const fieldKey = 'angle-' + i;
       if(val && val.indexOf('data:')===0){
         jobs.push(
-          persistImageAsset('locations:' + location.id + ':' + fieldKey, val)
+          persistImageAsset('locations:' + location.id + ':' + fieldKey, val, assetsDir)
             .then(fileName=>{ location._assetFiles[fieldKey] = fileName; })
         );
       }
     }
   }
   await Promise.all(jobs);
-  console.log('[ProjectStore] persisted ' + jobs.length + ' image(s) for location "' + location.name + '"');
+  console.log('[ProjectStore] persisted ' + jobs.length + ' image(s) for location "' + location.name + '"', location._assetFiles);
 }
 async function restoreLocationImages(location){
   if(!location._assetFiles) return;
+  const assetsDir = diskDirHandle ? await getAssetsDirHandle(false).catch(()=>null) : null;
   const jobs = Object.keys(location._assetFiles).map(async (fieldKey)=>{
     const fileName = location._assetFiles[fieldKey];
     const assetKey = 'locations:' + location.id + ':' + fieldKey;
-    const url = await loadImageAsset(assetKey, fileName);
+    const url = await loadImageAsset(assetKey, fileName, assetsDir);
     if(fieldKey==='photo') location.photo = url;
     else if(fieldKey.indexOf('angle-')===0){
       const idx = parseInt(fieldKey.slice(6), 10);

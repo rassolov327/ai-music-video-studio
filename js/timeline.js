@@ -379,7 +379,8 @@ function positionPlayhead(){
   if(old) old.remove();
   playheadX = Math.max(0, Math.min(playheadX, getTotalTimelinePx()));
   const labelsRow = timelineScenesEl.querySelector('.edit-labels-row');
-  const totalHeight = ruler.offsetHeight + (labelsRow ? labelsRow.offsetHeight : 0) + track.offsetHeight;
+  const waveformWrap = document.getElementById('waveformWrap');
+  const totalHeight = ruler.offsetHeight + (labelsRow ? labelsRow.offsetHeight : 0) + track.offsetHeight + (waveformWrap ? waveformWrap.offsetHeight : 0);
   const marker = document.createElement('div');
   marker.className = 'playhead-hit';
   marker.id = 'timelinePlayhead';
