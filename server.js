@@ -45,6 +45,26 @@ app.get('/api/health', (req, res) => {
   res.json({ ok: true, kieConfigured: !!KIE_API_KEY });
 });
 
+// ---- diagnostic only: shows EXACTLY what KIE's record-info endpoint returns for a given
+// taskId, completely unmodified — no guessing at field names, just the raw truth. Use this
+// with a taskId that KIE's own dashboard already shows as "успешно" (successful) to see
+// precisely what a real completed response looks like.
+app.get('/api/debug/task/:taskId', async (req, res) => {
+  if (!KIE_API_KEY) {
+    return res.status(503).json({ error: 'not_configured', message: 'KIE_API_KEY is not set on the server yet.' });
+  }
+  try {
+    const pollRes = await fetch(`${KIE_BASE}/api/v1/gpt4o-image/record-info?taskId=${encodeURIComponent(req.params.taskId)}`, {
+      headers: { Authorization: `Bearer ${KIE_API_KEY}` },
+    });
+    const text = await pollRes.text();
+    res.setHeader('Content-Type', 'application/json');
+    res.status(pollRes.status).send(text);
+  } catch (err) {
+    res.status(500).json({ error: 'server_error', message: String(err && err.message || err) });
+  }
+});
+
 // ---- paid image generation, proxied through KIE.ai's GPT-Image-1 ----
 // KIE's gpt4o-image model only accepts a few fixed aspect ratios, not arbitrary pixel
 // sizes — pick the closest one to the project's actual width/height.
