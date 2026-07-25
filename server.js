@@ -29,7 +29,7 @@ const KIE_BASE = 'https://api.kie.ai';
 // intentionally simple/free rather than routed through KIE, since it's a different kind of
 // job (text, not paid image/video generation).
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
-const GEMINI_MODEL = 'gemini-2.5-flash'; // update here if Google renames/retires this
+const GEMINI_MODEL = 'gemini-3.6-flash'; // Google retires these fast — if this 404s again, check ai.google.dev/gemini-api/docs/models for the current GA Flash model and update just this line
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 // Railway sets this automatically; needed to build a callBackUrl KIE can reach.
 const PUBLIC_URL = process.env.RAILWAY_PUBLIC_DOMAIN
