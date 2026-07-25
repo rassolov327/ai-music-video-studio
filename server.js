@@ -36,7 +36,7 @@ const PUBLIC_URL = process.env.RAILWAY_PUBLIC_DOMAIN
   ? 'https://' + process.env.RAILWAY_PUBLIC_DOMAIN
   : (process.env.PUBLIC_URL || '');
 
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '20mb' }));
 
 // Same CSP shape the project already relied on (Caddyfile), with blob: explicitly present
 // in img-src and media-src — omitting it silently breaks restored photos/audio with no
