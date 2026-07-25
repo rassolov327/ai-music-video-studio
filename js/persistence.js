@@ -140,8 +140,9 @@ async function createProject({ name, format, width, height, fps, folderHandle })
   focus = { sceneId:null, shotId:null };
   timelineMode = 'assembly';
   playheadX = 0;
-  sceneSeq = 1; shotSeq = 1; paletteSeq = 0; charSeq = 1; locSeq = 1; trackSeq = 1; lookSeq = 1; propSeq = 1; draftTaskSeq = 1;
+  sceneSeq = 1; shotSeq = 1; paletteSeq = 0; charSeq = 1; locSeq = 1; trackSeq = 1; lookSeq = 1; propSeq = 1; draftTaskSeq = 1; archiveSeq = 1;
   state.taskQueue = [];
+  state.archive = [];
   PROJECT_FPS = meta.fps;
   applyProjectFrame();
   renderAssets();
@@ -453,12 +454,18 @@ async function persistImageAsset(assetKey, dataUrl, assetsDirHandle){
 // same way as any other local asset. This is what stops a paid generation from becoming a
 // dead link once the provider's own retention window expires (KIE's is 14 days).
 async function persistRemoteImageAsset(assetKey, remoteUrl, assetsDirHandle){
-  const res = await fetch('/api/proxy-image?url=' + encodeURIComponent(remoteUrl));
-  if(!res.ok){
-    const data = await res.json().catch(()=> null);
-    throw new Error((data && data.message) || ('Could not download the generated image (HTTP ' + res.status + ')'));
+  let blob;
+  if(remoteUrl.indexOf('blob:')===0){
+    // already local (e.g. copying an archived generation to a new target) — no network needed
+    blob = await (await fetch(remoteUrl)).blob();
+  } else {
+    const res = await fetch('/api/proxy-image?url=' + encodeURIComponent(remoteUrl));
+    if(!res.ok){
+      const data = await res.json().catch(()=> null);
+      throw new Error((data && data.message) || ('Could not download the generated image (HTTP ' + res.status + ')'));
+    }
+    blob = await res.blob();
   }
-  const blob = await res.blob();
   const fileName = await persistBlobAsset(assetKey, blob, extFromMimeType(blob.type), assetsDirHandle);
   return { fileName, blob };
 }
@@ -867,6 +874,11 @@ function serializeProject(){
     });
     return scene;
   });
+  const archiveOut = JSON.parse(JSON.stringify(state.archive || [])).map((entry)=>{
+    const live = (state.archive || []).find(a=> a.id===entry.id);
+    if(live && live._assetFiles && ('photo' in live._assetFiles)) entry.photo = null;
+    return entry;
+  });
   return {
     version: 3,
     savedAt: Date.now(),
@@ -878,7 +890,8 @@ function serializeProject(){
     timelineMode: timelineMode,
     playheadX: playheadX,
     taskQueue: JSON.parse(JSON.stringify(state.taskQueue || [])),
-    seq: { sceneSeq, shotSeq, paletteSeq, charSeq, locSeq, trackSeq, lookSeq, propSeq, draftTaskSeq },
+    archive: archiveOut,
+    seq: { sceneSeq, shotSeq, paletteSeq, charSeq, locSeq, trackSeq, lookSeq, propSeq, draftTaskSeq, archiveSeq },
   };
 }
 
@@ -969,6 +982,18 @@ async function applyProjectData(data, verbose){
   state.timelineAudio = data.timelineAudio || null;
   state.projectMeta = data.projectMeta || state.projectMeta;
   state.taskQueue = data.taskQueue || [];
+  state.archive = data.archive || [];
+
+  let archiveRestored = 0;
+  for(const entry of state.archive){
+    if(entry._assetFiles && ('photo' in entry._assetFiles)){
+      try{ const ok = await restoreGeneratedAssetImage(entry, 'archive', 'photo'); if(ok) archiveRestored++; else hadErrors = true; }
+      catch(err){ hadErrors = true; }
+    }
+  }
+  if(state.archive.length && verbose){
+    logLoadingStep('Restored ' + archiveRestored + '/' + state.archive.length + ' archived generation(s)', archiveRestored===state.archive.length ? 'ok' : 'error');
+  }
 
   let shotPreviewCount = 0, shotPreviewRestored = 0;
   for(const scene of state.scenes){
@@ -1000,6 +1025,7 @@ async function applyProjectData(data, verbose){
     propSeq = data.seq.propSeq || 1;
     lookSeq = data.seq.lookSeq || 1;
     draftTaskSeq = data.seq.draftTaskSeq || 1;
+    archiveSeq = data.seq.archiveSeq || 1;
   }
   applyProjectFrame();
   renderAssets();

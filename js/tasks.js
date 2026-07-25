@@ -29,6 +29,8 @@ function showPage(page){
   document.querySelectorAll('.page-tab').forEach(t=> t.classList.toggle('active', t.dataset.page===page));
   document.getElementById('workPage').classList.toggle('hidden', page!=='work');
   document.getElementById('tasksPage').classList.toggle('hidden', page!=='tasks');
+  document.getElementById('archivePage').classList.toggle('hidden', page!=='archive');
+  if(page==='archive') renderArchiveGrid();
   if(page==='tasks'){
     refreshTasks();
     if(tasksRefreshTimer) clearInterval(tasksRefreshTimer);
@@ -86,14 +88,16 @@ function updateTasksBadge(){
   badge.textContent = String(total);
 }
 
-function modelSelectHtml(selectedId, extraClass){
-  const opts = modelOptions.map(m=> `<option value="${m.id}" ${m.id===selectedId?'selected':''}>${m.label}${m.supportsReferenceImage?' (ref)':''}${m.costUsd?' — '+formatCost(m.costUsd):''}</option>`).join('');
-  return `<select class="${extraClass||''}">${opts}</select>`;
+function modelSelectHtml(selectedId, extraClass, onlyReferenceCapable){
+  const pool = onlyReferenceCapable ? modelOptions.filter(m=> m.supportsReferenceImage) : modelOptions;
+  const opts = pool.map(m=> `<option value="${m.id}" ${m.id===selectedId?'selected':''}>${m.label}${m.supportsReferenceImage?' (ref)':''}${m.costUsd?' — '+formatCost(m.costUsd):''}</option>`).join('');
+  return `<select class="${extraClass||''}">${opts || '<option>No compatible model available</option>'}</select>`;
 }
 
 // Draft display labels — shots show "Scene / Shot", asset drafts show "Kind / Name".
 function draftTitleLines(t){
   if(t.kind==='shot') return [t.sceneName || 'Scene', t.shotName || 'Shot'];
+  if(t.kind==='archive-derive') return ['New idea', t.assetName || ''];
   const kindLabel = t.kind==='looks' ? 'Look' : t.kind==='locations' ? 'Location' : t.kind==='props' ? 'Prop' : 'Asset';
   return [kindLabel, t.assetName || ''];
 }
@@ -148,6 +152,7 @@ function renderTasksGrid(){
             ? '<div class="gen-hint" style="margin-top:6px;color:#5fae7a;">Will use the uploaded photo as a reference.</div>'
             : '<div class="gen-hint" style="margin-top:6px;">Has a reference photo, but this model won\'t use it — pick a model marked (ref) to use it.</div>')
         : '';
+      const noRefModelAvailable = t.kind==='archive-derive' && modelOptions.filter(m=> m.supportsReferenceImage).length===0;
       return `
         <div class="task-tile draft${selected ? ' selected' : ''}" data-draft-id="${t.id}">
           <div class="task-tile-thumb" title="Click to select for batch generate">
@@ -159,9 +164,10 @@ function renderTasksGrid(){
           <div class="task-tile-body">
             <div class="task-tile-scene">${line1}</div>
             <div class="task-tile-shot">${line2}</div>
-            ${modelSelectHtml(t.model || (modelOptions[0] && modelOptions[0].id), 'task-tile-model-select')}
+            ${modelSelectHtml(t.model || (modelOptions[0] && modelOptions[0].id), 'task-tile-model-select', t.kind==='archive-derive')}
             ${refHint}
-            <button class="cf-btn primary task-tile-send-btn" style="width:100%;margin-top:8px;">Generate${model && model.costUsd ? ' — ' + formatCost(model.costUsd) : ''}</button>
+            ${noRefModelAvailable ? '<div class="gen-hint" style="margin-top:6px;color:var(--danger);">No connected model supports reference images yet — can\'t generate this.</div>' : ''}
+            <button class="cf-btn primary task-tile-send-btn" style="width:100%;margin-top:8px;" ${noRefModelAvailable?'disabled':''}>Generate${model && model.costUsd ? ' — ' + formatCost(model.costUsd) : ''}</button>
           </div>
         </div>`;
     } else {
@@ -174,6 +180,7 @@ function renderTasksGrid(){
           : `<div class="task-tile-spin"></div>`;
       const line1 = meta.kind==='shot' || !meta.kind ? (meta.sceneName || 'Scene') : (meta.kind==='looks'?'Look':meta.kind==='locations'?'Location':meta.kind==='props'?'Prop':'Asset');
       const line2 = meta.kind==='shot' || !meta.kind ? (meta.shotName || 'Shot') : (meta.assetName || '');
+      const canRegen = t.status==='success' || t.status==='failed';
       return `
         <div class="task-tile" data-task-id="${t.taskId}">
           <div class="task-tile-thumb">
@@ -185,6 +192,7 @@ function renderTasksGrid(){
             <div class="task-tile-scene">${line1}</div>
             <div class="task-tile-shot">${line2}</div>
             <div class="task-tile-model">${t.model || ''}</div>
+            ${canRegen ? `<button class="cf-btn task-tile-regen-btn" style="width:100%;margin-top:8px;">Regenerate</button>` : ''}
           </div>
         </div>`;
     }
@@ -196,7 +204,7 @@ function renderTasksGrid(){
 }
 
 function wireDraftTiles(){
-  document.querySelectorAll('.task-tile.draft').forEach(tile=>{
+  document.querySelectorAll('#tasksGrid .task-tile.draft').forEach(tile=>{
     const draftId = tile.dataset.draftId;
     const draft = (state.taskQueue||[]).find(t=> t.id===draftId);
     if(!draft) return;
@@ -227,7 +235,7 @@ function wireDraftTiles(){
 }
 
 function wireLiveTiles(){
-  document.querySelectorAll('.task-tile:not(.draft)').forEach(tile=>{
+  document.querySelectorAll('#tasksGrid .task-tile:not(.draft)').forEach(tile=>{
     const taskId = tile.dataset.taskId;
     tile.querySelector('.task-tile-trash').onclick = async (e)=>{
       e.stopPropagation();
@@ -236,6 +244,14 @@ function wireLiveTiles(){
       renderTasksGrid();
       updateTasksBadge();
     };
+    const regenBtn = tile.querySelector('.task-tile-regen-btn');
+    if(regenBtn){
+      regenBtn.onclick = (e)=>{
+        e.stopPropagation();
+        const t = liveTasks.find(x=> x.taskId===taskId);
+        if(t) requeueFromFinishedTask(t);
+      };
+    }
     tile.onclick = ()=>{
       const t = liveTasks.find(x=> x.taskId===taskId);
       if(t && t.status==='success' && t.imageUrl){
@@ -244,6 +260,37 @@ function wireLiveTiles(){
       }
     };
   });
+}
+
+// "Regenerate" doesn't instantly re-charge — it puts a new draft back in the queue with
+// the same source and model already selected, so a disappointing result costs a review
+// step before spending again, same as any other draft.
+function requeueFromFinishedTask(t){
+  const meta = t.meta || {};
+  if(!meta.kind || meta.kind==='shot'){
+    const scene = state.scenes.find(s=> s.id===meta.sceneId);
+    const shot = scene && scene.shots.find(sh=> sh.id===meta.shotId);
+    if(!scene || !shot){ alert('That shot no longer exists.'); return; }
+    state.taskQueue = state.taskQueue || [];
+    state.taskQueue.push({
+      id: 'dt' + (draftTaskSeq++), kind:'shot',
+      sceneId: scene.id, shotId: shot.id, sceneName: scene.name, shotName: shot.name,
+      model: t.model, createdAt: Date.now(),
+    });
+  } else {
+    const cat = state.categories.find(c=> c.key===meta.kind);
+    const item = cat && cat.items.find(x=> x.id===meta.assetId);
+    if(!item){ alert('That ' + meta.kind.slice(0,-1) + ' no longer exists.'); return; }
+    state.taskQueue = state.taskQueue || [];
+    state.taskQueue.push({
+      id: 'dt' + (draftTaskSeq++), kind: meta.kind,
+      assetId: item.id, assetName: item.name,
+      model: t.model, createdAt: Date.now(),
+    });
+  }
+  if(typeof saveProjectSoon==='function') saveProjectSoon();
+  renderTasksGrid();
+  updateTasksBadge();
 }
 
 // Shows how many are selected AND the running total cost of everything currently checked —
@@ -299,6 +346,12 @@ async function sendGenerationTask(draft){
     if(!scene || !shot) throw new Error('This shot no longer exists.');
     prompt = buildShotPrompt(shot, scene);
     taskMeta = { projectId: currentProjectId, kind:'shot', sceneId: scene.id, sceneName: scene.name, shotId: shot.id, shotName: shot.name };
+  } else if(draft.kind==='archive-derive'){
+    const entry = (state.archive||[]).find(a=> a.id===draft.archiveEntryId);
+    if(!entry || !entry.photo) throw new Error('The original generation this was based on is no longer available.');
+    prompt = draft.promptOverride || '';
+    taskMeta = { projectId: currentProjectId, kind: 'archive-derive', assetName: draft.assetName };
+    referenceImageUrl = await uploadReferencePhoto(entry.photo);
   } else {
     const cat = state.categories.find(c=> c.key===draft.kind);
     const item = cat && cat.items.find(x=> x.id===draft.assetId);
@@ -363,18 +416,22 @@ async function applyFinishedTasks(list){
   for(const t of list){
     if(t.status!=='success' || !t.imageUrl) continue;
     if(appliedTaskIds.has(t.taskId)) continue;
+    appliedTaskIds.add(t.taskId); // mark handled up front — archiving happens exactly once regardless of what follows
+
+    if(typeof archiveGeneration==='function') await archiveGeneration(t);
+    appliedAny = true;
+
     const meta = t.meta || {};
+    if(meta.kind==='archive-derive'){
+      continue; // no live target — lands in the Archive only, applied to a shot manually via the down-arrow
+    }
     if(!meta.kind || meta.kind==='shot'){
       const scene = state.scenes.find(s=> s.id===meta.sceneId);
       const shot = scene && scene.shots.find(sh=> sh.id===meta.shotId);
       if(scene && shot){
         if(typeof persistShotPreviewImage==='function') await persistShotPreviewImage(shot, t.imageUrl);
         else shot.previewImage = t.imageUrl;
-        appliedTaskIds.add(t.taskId);
-        appliedAny = true;
         if(focus.sceneId===scene.id && focus.shotId===shot.id) touchedCurrentView = true;
-      } else {
-        appliedTaskIds.add(t.taskId);
       }
     } else {
       const cat = state.categories.find(c=> c.key===meta.kind);
@@ -383,10 +440,6 @@ async function applyFinishedTasks(list){
         const field = meta.kind==='looks' ? 'previewImage' : 'photo';
         if(typeof persistGeneratedAssetImage==='function') await persistGeneratedAssetImage(item, meta.kind, field, t.imageUrl);
         else item[field] = t.imageUrl;
-        appliedTaskIds.add(t.taskId);
-        appliedAny = true;
-      } else {
-        appliedTaskIds.add(t.taskId);
       }
     }
   }
@@ -394,8 +447,33 @@ async function applyFinishedTasks(list){
     renderAssets();
     renderTimelineScenes();
     if(touchedCurrentView) refreshMainPreview();
+    if(typeof renderArchiveGrid==='function') renderArchiveGrid();
     if(typeof saveProjectSoon==='function') saveProjectSoon();
   }
+}
+
+// Every successful generation gets a permanent record here — even after the shot/asset it
+// was made for is deleted, or the task itself is removed from the Tasks list. Nothing ever
+// removes an entry once it's archived.
+async function archiveGeneration(t){
+  const meta = t.meta || {};
+  const kind = meta.kind || 'shot';
+  const sourceLabel = kind==='shot'
+    ? ((meta.sceneName || 'Scene') + ' / ' + (meta.shotName || 'Shot'))
+    : kind==='archive-derive'
+      ? 'New idea from archive'
+      : ((kind==='looks'?'Look':kind==='locations'?'Location':kind==='props'?'Prop':'Asset') + ' / ' + (meta.assetName || ''));
+  const entry = {
+    id: 'arc' + (archiveSeq++),
+    kind, sourceLabel,
+    model: t.model || '', prompt: t.prompt || '',
+    photo: null, createdAt: Date.now(),
+  };
+  state.archive = state.archive || [];
+  state.archive.push(entry);
+  if(typeof persistGeneratedAssetImage==='function') await persistGeneratedAssetImage(entry, 'archive', 'photo', t.imageUrl);
+  else entry.photo = t.imageUrl;
+  if(typeof saveProjectSoon==='function') saveProjectSoon();
 }
 
 // Adds a Look/Location/Prop to the queue — called from each asset form's "Add to Tasks"

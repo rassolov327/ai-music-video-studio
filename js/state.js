@@ -15,9 +15,13 @@ const state = {
   // any provider until you pick a model and hit Generate on the tile (or batch-select
   // several and hit the big Generate button), same idea as DaVinci's render queue.
   taskQueue: [], // [{ id, kind:'image', sceneId, shotId, sceneName, shotName, model, createdAt }]
+  // Every successful generation ever made in this project, kept forever (even if removed
+  // from the Tasks list or the shot/asset it was made for gets deleted) — a running history
+  // to pull old results back from, not just a queue of current work.
+  archive: [], // [{ id, kind, sourceLabel, model, prompt, photo, _assetFiles, createdAt }]
 };
 
-let sceneSeq = 1, shotSeq = 1, paletteSeq = 0, charSeq = 1, locSeq = 1, trackSeq = 1, lookSeq = 1, propSeq = 1, draftTaskSeq = 1;
+let sceneSeq = 1, shotSeq = 1, paletteSeq = 0, charSeq = 1, locSeq = 1, trackSeq = 1, lookSeq = 1, propSeq = 1, draftTaskSeq = 1, archiveSeq = 1;
 let focus = { sceneId: null, shotId: null };
 let timelineMode = 'assembly'; // 'assembly' (spaced, insert-between) | 'edit' (flush clips, drag-to-reorder within scene)
 let playheadX = 0;

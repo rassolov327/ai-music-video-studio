@@ -255,7 +255,7 @@ app.post('/api/generate-image/start', async (req, res) => {
       });
     }
     tasks.set(taskId, {
-      status: 'pending', imageUrl: null, message: null, model: modelId,
+      status: 'pending', imageUrl: null, message: null, model: modelId, prompt,
       meta: meta || {}, createdAt: Date.now(), updatedAt: Date.now(),
     });
     if (!callBackUrl) {
