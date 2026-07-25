@@ -363,6 +363,24 @@ async function migrateAssetsToDisk(){
   if(locCat) for(const item of locCat.items) await migrateImageFieldsToDisk(item, 'locations');
   const propCat = state.categories.find(c=>c.key==='props');
   if(propCat) for(const item of propCat.items) await migrateImageFieldsToDisk(item, 'props');
+  for(const scene of state.scenes){
+    for(const shot of (scene.shots||[])){
+      if(!shot._assetFiles || shot._assetFiles.preview) continue; // nothing saved, or already a disk file
+      try{
+        const assetKey = pid() + ':shots:' + shot.id;
+        const blob = await idbGet(STORE_ASSETS, assetKey);
+        if(blob){
+          const assetsDir = await getAssetsDirHandle(true);
+          const fileName = assetKey.replace(/[:]/g,'_') + '.png';
+          const fileHandle = await assetsDir.getFileHandle(fileName, { create:true });
+          const writable = await fileHandle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+          shot._assetFiles.preview = fileName;
+        }
+      } catch(err){ console.warn('[ProjectStore] could not migrate shot preview:', err); }
+    }
+  }
 }
 async function migrateImageFieldsToDisk(item, catKey){
   if(!item._assetFiles) return;
@@ -403,22 +421,46 @@ function extFromDataUrl(dataUrl){
   const map = { jpeg:'jpg', 'svg+xml':'svg' };
   return '.' + (map[m[1]] || m[1]);
 }
-async function persistImageAsset(assetKey, dataUrl, assetsDirHandle){
-  if(!dataUrl || dataUrl.indexOf('data:')!==0) return undefined;
-  const blob = dataUrlToBlobSync(dataUrl);
+function extFromMimeType(mime){
+  const map = { 'image/png':'.png', 'image/jpeg':'.jpg', 'image/webp':'.webp', 'image/gif':'.gif' };
+  return (mime && map[mime]) || '.png';
+}
+// Shared by both persistImageAsset (local uploads, already a data: URL) and
+// persistRemoteImageAsset (downloaded generations) — writes a Blob to disk or IndexedDB.
+async function persistBlobAsset(assetKey, blob, ext, assetsDirHandle){
   if(diskDirHandle){
     try{
       const assetsDir = assetsDirHandle || await getAssetsDirHandle(true);
-      const fileName = assetKey.replace(/[:]/g,'_') + extFromDataUrl(dataUrl);
+      const fileName = assetKey.replace(/[:]/g,'_') + ext;
       const fileHandle = await assetsDir.getFileHandle(fileName, { create:true });
       const writable = await fileHandle.createWritable();
       await writable.write(blob);
       await writable.close();
       return fileName;
-    } catch(err){ console.warn('[ProjectStore] could not write image asset to disk:', err); }
+    } catch(err){ console.warn('[ProjectStore] could not write asset to disk:', err); }
   }
   await idbSet(STORE_ASSETS, assetKey, blob);
   return null;
+}
+async function persistImageAsset(assetKey, dataUrl, assetsDirHandle){
+  if(!dataUrl || dataUrl.indexOf('data:')!==0) return undefined;
+  const blob = dataUrlToBlobSync(dataUrl);
+  return persistBlobAsset(assetKey, blob, extFromDataUrl(dataUrl), assetsDirHandle);
+}
+// Downloads a generated image (KIE's temp hosting, Pollinations, etc.) through our own
+// server (see /api/proxy-image — a direct browser fetch of a cross-origin image can be
+// silently blocked by that host's CORS policy, which we don't control) and saves it the
+// same way as any other local asset. This is what stops a paid generation from becoming a
+// dead link once the provider's own retention window expires (KIE's is 14 days).
+async function persistRemoteImageAsset(assetKey, remoteUrl, assetsDirHandle){
+  const res = await fetch('/api/proxy-image?url=' + encodeURIComponent(remoteUrl));
+  if(!res.ok){
+    const data = await res.json().catch(()=> null);
+    throw new Error((data && data.message) || ('Could not download the generated image (HTTP ' + res.status + ')'));
+  }
+  const blob = await res.blob();
+  const fileName = await persistBlobAsset(assetKey, blob, extFromMimeType(blob.type), assetsDirHandle);
+  return { fileName, blob };
 }
 async function loadImageAsset(assetKey, fileName, assetsDirHandle){
   if(diskDirHandle){
@@ -629,6 +671,55 @@ async function deletePropImages(prop){
   }
 }
 
+// Called once, right after a shot generation (free or paid) finishes — downloads the
+// result and saves it as a real local asset instead of just keeping the provider's link,
+// which is what protects against KIE's 14-day media retention (or any host eventually
+// taking the file down) silently breaking an already-paid-for generation.
+async function persistShotPreviewImage(shot, resultUrl){
+  if(!shot || !shot.id || !resultUrl) return;
+  try{
+    const assetKey = pid() + ':shots:' + shot.id;
+    let fileName, blob;
+    if(resultUrl.indexOf('data:')===0){
+      // offline canvas fallback — already local, no download needed
+      blob = dataUrlToBlobSync(resultUrl);
+      fileName = await persistBlobAsset(assetKey, blob, extFromDataUrl(resultUrl));
+    } else {
+      const result = await persistRemoteImageAsset(assetKey, resultUrl);
+      fileName = result.fileName;
+      blob = result.blob;
+    }
+    shot.previewImage = URL.createObjectURL(blob);
+    shot._assetFiles = shot._assetFiles || {};
+    shot._assetFiles.preview = fileName;
+    console.log('[ProjectStore] saved shot preview locally for "' + shot.name + '"');
+  } catch(err){
+    console.warn('[ProjectStore] could not save shot preview locally, keeping the provider link only (it may expire later):', err);
+    shot.previewImage = resultUrl;
+  }
+  if(typeof saveProjectSoon==='function') saveProjectSoon();
+}
+async function restoreShotPreviewImage(shot, assetsDirHandle){
+  if(!shot._assetFiles || !('preview' in shot._assetFiles)) return true; // nothing saved locally for this shot
+  const assetKey = pid() + ':shots:' + shot.id;
+  const url = await loadImageAsset(assetKey, shot._assetFiles.preview, assetsDirHandle);
+  if(url){ shot.previewImage = url; return true; }
+  return false;
+}
+async function deleteShotPreviewImage(shot){
+  if(!shot._assetFiles || !('preview' in shot._assetFiles)) return;
+  const assetKey = pid() + ':shots:' + shot.id;
+  try{ await idbDelete(STORE_ASSETS, assetKey); } catch(err){}
+  if(diskDirHandle){
+    try{
+      const assetsDir = await getAssetsDirHandle(false);
+      for await (const name of assetsDir.keys()){
+        if(name.indexOf('shots_' + shot.id + '_')===0 || name.indexOf(pid()+'_shots_'+shot.id)===0) await assetsDir.removeEntry(name);
+      }
+    } catch(err){}
+  }
+}
+
 // ---- disk folder (File System Access API) ----
 async function writeProjectToDisk(dirHandle, projectData){
   const fileHandle = await dirHandle.getFileHandle('project.json', { create:true });
@@ -715,12 +806,21 @@ function serializeProject(){
       return copy;
     }),
   }));
+  const scenesOut = JSON.parse(JSON.stringify(state.scenes)).map((scene)=>{
+    const liveScene = state.scenes.find(s=> s.id===scene.id);
+    scene.shots = (scene.shots||[]).map((shot)=>{
+      const liveShot = liveScene && liveScene.shots.find(sh=> sh.id===shot.id);
+      if(liveShot && liveShot._assetFiles && ('preview' in liveShot._assetFiles)) shot.previewImage = null;
+      return shot;
+    });
+    return scene;
+  });
   return {
     version: 3,
     savedAt: Date.now(),
     projectMeta: JSON.parse(JSON.stringify(state.projectMeta)),
     categories: categoriesOut,
-    scenes: JSON.parse(JSON.stringify(state.scenes)),
+    scenes: scenesOut,
     timelineAudio: state.timelineAudio ? JSON.parse(JSON.stringify(state.timelineAudio)) : null,
     focus: Object.assign({}, focus),
     timelineMode: timelineMode,
@@ -808,6 +908,23 @@ async function applyProjectData(data, verbose){
   state.timelineAudio = data.timelineAudio || null;
   state.projectMeta = data.projectMeta || state.projectMeta;
   state.taskQueue = data.taskQueue || [];
+
+  let shotPreviewCount = 0, shotPreviewRestored = 0;
+  for(const scene of state.scenes){
+    for(const shot of (scene.shots||[])){
+      if(shot._assetFiles && ('preview' in shot._assetFiles)){
+        shotPreviewCount++;
+        try{
+          const ok = await restoreShotPreviewImage(shot);
+          if(ok) shotPreviewRestored++; else hadErrors = true;
+        } catch(err){ hadErrors = true; }
+      }
+    }
+  }
+  if(shotPreviewCount && verbose){
+    logLoadingStep('Restored ' + shotPreviewRestored + '/' + shotPreviewCount + ' saved shot preview(s)', shotPreviewRestored===shotPreviewCount ? 'ok' : 'error');
+  }
+
   focus = data.focus || { sceneId:null, shotId:null };
   timelineMode = data.timelineMode || 'assembly';
   playheadX = data.playheadX || 0;

@@ -134,6 +134,60 @@ function wireAiAssistButton(btnId, textareaId, instruction, onApply){
   });
 }
 
+// General awareness of what already exists in the project, so AI-assist suggestions for
+// Looks/Locations/Props read like they belong to this world instead of being generic —
+// e.g. it can mention an existing character or prop by its real name instead of inventing
+// a new one that never gets used anywhere.
+function buildAssetContextSummary(){
+  const bandCat = state.categories.find(c=>c.key==='band');
+  const characters = (bandCat ? bandCat.items : []);
+  const propCat = state.categories.find(c=>c.key==='props');
+  const props = (propCat ? propCat.items : []);
+  const locCat = state.categories.find(c=>c.key==='locations');
+  const locations = (locCat ? locCat.items : []);
+  const looksCat = state.categories.find(c=>c.key==='looks');
+  const looks = (looksCat ? looksCat.items : []);
+
+  const parts = [];
+  if(characters.length) parts.push('Characters already in this project: ' + characters.map(c=> c.name + (c.role ? ' (' + c.role + ')' : '')).join(', ') + '.');
+  if(looks.length) parts.push('Looks/outfits already in this project: ' + looks.map(l=> l.name).join(', ') + '.');
+  if(locations.length) parts.push('Locations already in this project: ' + locations.map(l=> l.name).join(', ') + '.');
+  if(props.length) parts.push('Props already in this project: ' + props.map(p=> p.name).join(', ') + '.');
+  if(parts.length===0) return '';
+  return 'Context — this project already has: ' + parts.join(' ') + ' Feel free to reference these by name where it genuinely fits; don\'t invent new named characters/props/locations.';
+}
+
+// For a SHOT specifically: everything the scene already fixes (which character, which
+// look they're wearing, which location, which props) has to stay untouched — those get
+// woven into the final generation prompt separately (see buildShotPrompt), so if the
+// AI-assisted description also describes them, the two can contradict each other and the
+// shot stops looking like the rest of the project. This tells the assist exactly what's
+// off-limits to redescribe, by name, rather than trusting a generic instruction alone.
+function buildShotFixedElementsContext(scene){
+  const bandCat = state.categories.find(c=>c.key==='band');
+  const characters = (bandCat ? bandCat.items : []);
+  const looksCat = state.categories.find(c=>c.key==='looks');
+  const looks = (looksCat ? looksCat.items : []);
+  const propCat = state.categories.find(c=>c.key==='props');
+  const props = (propCat ? propCat.items : []);
+
+  const lines = [];
+  (scene.characters||[]).forEach(entry=>{
+    const c = characters.find(x=> x.id===entry.characterId);
+    if(!c) return;
+    const look = entry.lookId ? looks.find(l=> l.id===entry.lookId) : null;
+    lines.push('- Character "' + c.name + '"' + (look ? ', wearing the look "' + look.name + '"' : ''));
+  });
+  if(scene.location) lines.push('- Location: "' + scene.location + '"');
+  (scene.props||[]).forEach(propId=>{
+    const p = props.find(x=> x.id===propId);
+    if(p) lines.push('- Prop present: "' + p.name + '"');
+  });
+  if(lines.length===0) return '';
+  return 'This shot already has these FIXED elements, locked in separately:\n' + lines.join('\n')
+    + '\nDo not describe what any of them look like, wear, or the environment\'s appearance — that would risk contradicting what\'s already locked in. Describe only the action, pose, and moment happening in this shot.';
+}
+
 // ---------- free rough-preview generation via Pollinations.ai (no key required) ----------
 function buildPollinationsUrl(prompt, w, h){
   const seed = Math.floor(Math.random()*1000000);

@@ -81,6 +81,31 @@ app.get('/api/health', (req, res) => {
   res.json({ ok: true, kieConfigured: !!KIE_API_KEY, publicUrlConfigured: !!PUBLIC_URL, geminiConfigured: !!GEMINI_API_KEY });
 });
 
+// ---- image download proxy ----
+// Used when the browser needs to download a generated image (from KIE's temp hosting or
+// Pollinations) to save it as a real local asset. A direct browser fetch() of a
+// cross-origin image can be silently blocked depending on that host's CORS headers, which
+// we have no control over and can't guarantee — routing through our own same-origin server
+// sidesteps that entirely, since server-to-server requests aren't subject to CORS.
+app.get('/api/proxy-image', async (req, res) => {
+  const url = req.query.url;
+  if (!url || typeof url !== 'string' || !/^https?:\/\//i.test(url)) {
+    return res.status(400).json({ error: 'bad_request', message: 'A valid url query param is required.' });
+  }
+  try {
+    const upstream = await fetch(url);
+    if (!upstream.ok) {
+      return res.status(502).json({ error: 'provider_error', message: 'Could not fetch the image (HTTP ' + upstream.status + ').' });
+    }
+    res.setHeader('Content-Type', upstream.headers.get('content-type') || 'image/png');
+    const buffer = Buffer.from(await upstream.arrayBuffer());
+    res.send(buffer);
+  } catch (err) {
+    console.error('[server] /api/proxy-image failed:', err);
+    res.status(500).json({ error: 'server_error', message: String(err && err.message || err) });
+  }
+});
+
 // ---- free text helper (Gemini) — tags, prompt polish, script breakdown, etc. ----
 // Deliberately generic: the client sends a ready-made instruction + the raw text to work
 // from, and gets back plain text. Keeping this generic (rather than one endpoint per

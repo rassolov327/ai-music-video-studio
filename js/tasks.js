@@ -70,7 +70,7 @@ async function refreshTasks(){
   selectedDraftIds.forEach(id=>{ if(!draftIds.has(id)) selectedDraftIds.delete(id); });
 
   renderTasksGrid();
-  applyFinishedTasks(liveTasks);
+  await applyFinishedTasks(liveTasks);
   updateTasksBadge();
 }
 
@@ -275,23 +275,26 @@ async function sendGenerationTask(draft){
 
 // The moment a task shows success, drop its image onto the shot it was generated for —
 // works whether or not that shot happens to be open right now.
-function applyFinishedTasks(list){
+async function applyFinishedTasks(list){
   let touchedCurrentView = false;
-  list.forEach(t=>{
-    if(t.status!=='success' || !t.imageUrl) return;
-    if(appliedTaskIds.has(t.taskId)) return;
+  let appliedAny = false;
+  for(const t of list){
+    if(t.status!=='success' || !t.imageUrl) continue;
+    if(appliedTaskIds.has(t.taskId)) continue;
     const meta = t.meta || {};
     const scene = state.scenes.find(s=> s.id===meta.sceneId);
     const shot = scene && scene.shots.find(sh=> sh.id===meta.shotId);
     if(scene && shot){
-      shot.previewImage = t.imageUrl;
+      if(typeof persistShotPreviewImage==='function') await persistShotPreviewImage(shot, t.imageUrl);
+      else shot.previewImage = t.imageUrl;
       appliedTaskIds.add(t.taskId);
+      appliedAny = true;
       if(focus.sceneId===scene.id && focus.shotId===shot.id) touchedCurrentView = true;
     } else {
       appliedTaskIds.add(t.taskId); // shot/scene no longer exists — nothing to apply, stop retrying
     }
-  });
-  if(appliedTaskIds.size){
+  }
+  if(appliedAny){
     renderTimelineScenes();
     if(touchedCurrentView) refreshMainPreview();
     if(typeof saveProjectSoon==='function') saveProjectSoon();

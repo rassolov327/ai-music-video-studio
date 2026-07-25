@@ -115,6 +115,7 @@ function showLookForm(cat, editIdx){
       <div class="cf-field">
         <label>Description <span style="color:var(--text-3);font-weight:400;">— prompt for the outfit</span></label>
         <textarea id="lkDesc" placeholder="e.g. leather jacket, blue jeans, sneakers" style="min-height:80px;">${existing && existing.description ? existing.description : ''}</textarea>
+        <button class="cf-btn ai-assist-btn" id="lkDescAssistBtn" style="width:100%;margin-top:6px;display:none;">✨ Improve with AI</button>
       </div>
 
       <div class="gen-section" id="lookGenSection"></div>
@@ -141,6 +142,10 @@ function showLookForm(cat, editIdx){
     draft.description = descInput.value;
     renderLookGenSection(document.getElementById('lookGenSection'), draft);
   }
+  wireAiAssistButton('lkDescAssistBtn', 'lkDesc',
+    (typeof buildAssetContextSummary==='function' ? buildAssetContextSummary() + '\n\n' : '')
+    + 'Rewrite this rough outfit idea into a vivid, specific wardrobe description for an AI image generator — materials, colors, fit, condition. One or two sentences. Reply with only the rewritten description, nothing else.',
+    refreshGen);
   nameInput.addEventListener('input', ()=>{ saveBtn.disabled = nameInput.value.trim().length===0; });
   descInput.addEventListener('input', refreshGen);
   refreshGen();

@@ -434,7 +434,8 @@ function renderInspectorPanel(){
 
   renderShotGenSection(scene, shot);
   wireAiAssistButton('shotDescAssistBtn', 'shotDescInput',
-    'Rewrite this rough shot idea into a vivid, specific, camera-ready visual description for an AI image generator. One or two sentences, concrete imagery, no camera-move or shot-size talk (that\'s handled separately). Reply with only the rewritten description, nothing else.',
+    (buildShotFixedElementsContext(scene) ? buildShotFixedElementsContext(scene) + '\n\n' : '')
+    + 'Rewrite this rough shot idea into a vivid, specific, camera-ready visual description for an AI image generator. One or two sentences, concrete imagery, no camera-move or shot-size talk (that\'s handled separately). Reply with only the rewritten description, nothing else.',
     (result)=>{ shot.description = result; });
 
   document.getElementById('jumpToSceneBtn').onclick = ()=> setFocus(scene.id, null);
@@ -500,8 +501,9 @@ function runShotGeneration(scene, shot){
   const size = shotGenerationSize();
   tryLoadImage(buildPollinationsUrl(prompt, size.w, size.h))
     .catch(()=> generateShotPreviewImage(shot, scene))
-    .then((result)=>{
-      shot.previewImage = result;
+    .then(async (result)=>{
+      if(typeof persistShotPreviewImage==='function') await persistShotPreviewImage(shot, result);
+      else shot.previewImage = result;
       renderTimelineScenes();
       if(focus.sceneId===scene.id && focus.shotId===shot.id) refreshMainPreview();
       else renderShotGenSection(scene, shot);

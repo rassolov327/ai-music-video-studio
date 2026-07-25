@@ -140,6 +140,7 @@ function showPropForm(cat, editIdx){
         <div class="cf-field">
           <label>Description</label>
           <textarea id="pfNotes" placeholder="Material, color, wear, size, anything worth remembering">${existing && existing.description ? existing.description : ''}</textarea>
+          <button class="cf-btn ai-assist-btn" id="pfNotesAssistBtn" style="width:100%;margin-top:6px;display:none;">✨ Improve with AI</button>
         </div>
         <div class="cf-field">
           <label>Additional views</label>
@@ -308,6 +309,10 @@ function showPropForm(cat, editIdx){
   function refreshSaveState(){
     saveBtn.disabled = nameInput.value.trim().length===0;
   }
+  wireAiAssistButton('pfNotesAssistBtn', 'pfNotes',
+    (typeof buildAssetContextSummary==='function' ? buildAssetContextSummary() + '\n\n' : '')
+    + 'Rewrite this rough prop idea into a vivid, specific object description for an AI image generator — material, color, wear, size. One or two sentences. Reply with only the rewritten description, nothing else.',
+    refreshFormGen);
   nameInput.addEventListener('input', ()=>{ refreshSaveState(); refreshFormGen(); });
   notesInput.addEventListener('input', refreshFormGen);
   refreshFormGen();

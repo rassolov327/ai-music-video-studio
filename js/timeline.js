@@ -51,10 +51,13 @@ function addShotAt(sceneId, index){
 function deleteShot(sceneId, shotId){
   const scene = state.scenes.find(s=>s.id===sceneId);
   if(!scene) return;
+  const shot = scene.shots.find(sh=>sh.id===shotId);
+  if(shot && typeof deleteShotPreviewImage==='function') deleteShotPreviewImage(shot);
   scene.shots = scene.shots.filter(sh=>sh.id!==shotId);
   if(focus.shotId===shotId) focus = { sceneId, shotId:null };
   renderTimelineScenes();
   refreshMainPreview();
+  if(typeof saveProjectSoon==='function') saveProjectSoon();
 }
 function startRenameShot(sceneId, shotId, labelEl){
   const scene = state.scenes.find(s=>s.id===sceneId);

@@ -140,6 +140,7 @@ function showLocationForm(cat, editIdx){
         <div class="cf-field">
           <label>Description</label>
           <textarea id="lfNotes" placeholder="Layout, furniture, lighting style, anything worth remembering">${existing && existing.description ? existing.description : ''}</textarea>
+          <button class="cf-btn ai-assist-btn" id="lfNotesAssistBtn" style="width:100%;margin-top:6px;display:none;">✨ Improve with AI</button>
         </div>
         <div class="cf-field">
           <label>Additional views</label>
@@ -308,6 +309,10 @@ function showLocationForm(cat, editIdx){
   function refreshSaveState(){
     saveBtn.disabled = nameInput.value.trim().length===0;
   }
+  wireAiAssistButton('lfNotesAssistBtn', 'lfNotes',
+    (typeof buildAssetContextSummary==='function' ? buildAssetContextSummary() + '\n\n' : '')
+    + 'Rewrite this rough location idea into a vivid, specific setting description for an AI image generator — layout, furniture, materials, lighting style. One or two sentences. Reply with only the rewritten description, nothing else.',
+    refreshFormGen);
   nameInput.addEventListener('input', ()=>{ refreshSaveState(); refreshFormGen(); });
   notesInput.addEventListener('input', refreshFormGen);
   refreshFormGen();
