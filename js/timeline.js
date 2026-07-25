@@ -304,21 +304,23 @@ function wireEditModeReorder(){
       if(e.target.closest('.shot-trim') || e.target.closest('.block-del') || e.target.closest('.block-rename')) return;
       const sceneId = el.dataset.scene;
       const shotId = el.dataset.shot;
-      el.setPointerCapture(e.pointerId);
       let moved = false;
       let lastSwapX = e.clientX;
       const onMove = (ev)=>{
         if(Math.abs(ev.clientX - lastSwapX) < 4 && !moved) return;
-        if(!moved){ moved = true; el.classList.add('dragging'); }
+        if(!moved){
+          moved = true;
+          const liveEl = timelineScenesEl.querySelector(`.shot-thumb.edit-clip[data-shot="${shotId}"]`);
+          if(liveEl) liveEl.classList.add('dragging');
+        }
         const scene = state.scenes.find(s=>s.id===sceneId);
         if(!scene) return;
-        const rect = el.getBoundingClientRect();
-        const draggedCenter = rect.left + rect.width/2;
+        const draggedEl = timelineScenesEl.querySelector(`.shot-thumb.edit-clip[data-shot="${shotId}"]`);
+        if(!draggedEl) return;
         const siblings = Array.from(timelineScenesEl.querySelectorAll(`.shot-thumb.edit-clip[data-scene="${sceneId}"]`));
         for(const sib of siblings){
-          if(sib===el) continue;
+          if(sib===draggedEl) continue;
           const sRect = sib.getBoundingClientRect();
-          const sCenter = sRect.left + sRect.width/2;
           const overSib = ev.clientX > sRect.left && ev.clientX < sRect.right;
           if(overSib){
             const fromIdx = scene.shots.findIndex(sh=>sh.id===shotId);
@@ -328,23 +330,28 @@ function wireEditModeReorder(){
               scene.shots.splice(toIdx,0,moved_);
               lastSwapX = ev.clientX;
               renderTimelineScenes();
+              // renderTimelineScenes() just replaced every clip element, including the one
+              // being dragged — re-find it and keep the visual "dragging" state on the new
+              // instance. The listeners here are on document, though, so they keep working
+              // regardless of this replacement.
               const again = timelineScenesEl.querySelector(`.shot-thumb.edit-clip[data-shot="${shotId}"]`);
-              if(again){ again.classList.add('dragging'); again.setPointerCapture(e.pointerId); }
+              if(again) again.classList.add('dragging');
             }
             break;
           }
         }
       };
       const onUp = ()=>{
-        el.removeEventListener('pointermove', onMove);
-        el.removeEventListener('pointerup', onUp);
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
         if(moved){
           const stillHere = timelineScenesEl.querySelector(`.shot-thumb.edit-clip[data-shot="${shotId}"]`);
           if(stillHere){ stillHere.classList.remove('dragging'); stillHere.dataset.wasDragged = '1'; }
+          if(typeof saveProjectSoon==='function') saveProjectSoon();
         }
       };
-      el.addEventListener('pointermove', onMove);
-      el.addEventListener('pointerup', onUp);
+      document.addEventListener('pointermove', onMove);
+      document.addEventListener('pointerup', onUp);
     });
   });
 }

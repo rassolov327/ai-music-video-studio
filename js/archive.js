@@ -25,7 +25,7 @@ function renderArchiveGrid(){
     return;
   }
   grid.innerHTML = entries.map(entry=>{
-    const showInsert = entry.kind==='shot' || !entry.kind; // inserting only makes sense for shot-style images
+    const showInsert = entry.kind==='shot' || entry.kind==='archive-derive' || !entry.kind; // inserting only makes sense for shot-style images
     return `
       <div class="task-tile" data-archive-id="${entry.id}">
         <div class="task-tile-thumb">
