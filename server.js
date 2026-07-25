@@ -25,6 +25,12 @@ const PORT = process.env.PORT || 8080;
 
 const KIE_API_KEY = process.env.KIE_API_KEY || '';
 const KIE_BASE = 'https://api.kie.ai';
+// Free-tier text helper (tags, prompt polish, script breakdown) — separate provider, kept
+// intentionally simple/free rather than routed through KIE, since it's a different kind of
+// job (text, not paid image/video generation).
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+const GEMINI_MODEL = 'gemini-2.5-flash'; // update here if Google renames/retires this
+const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 // Railway sets this automatically; needed to build a callBackUrl KIE can reach.
 const PUBLIC_URL = process.env.RAILWAY_PUBLIC_DOMAIN
   ? 'https://' + process.env.RAILWAY_PUBLIC_DOMAIN
@@ -72,7 +78,44 @@ setInterval(pruneOldTasks, 10 * 60 * 1000).unref();
 
 // ---- health check ----
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true, kieConfigured: !!KIE_API_KEY, publicUrlConfigured: !!PUBLIC_URL });
+  res.json({ ok: true, kieConfigured: !!KIE_API_KEY, publicUrlConfigured: !!PUBLIC_URL, geminiConfigured: !!GEMINI_API_KEY });
+});
+
+// ---- free text helper (Gemini) — tags, prompt polish, script breakdown, etc. ----
+// Deliberately generic: the client sends a ready-made instruction + the raw text to work
+// from, and gets back plain text. Keeping this generic (rather than one endpoint per
+// feature) means new AI-assist buttons in the UI don't need new server routes.
+app.post('/api/assist/text', async (req, res) => {
+  if (!GEMINI_API_KEY) {
+    return res.status(503).json({ error: 'not_configured', message: 'GEMINI_API_KEY is not set on the server yet.' });
+  }
+  const { instruction, input } = req.body || {};
+  if (!instruction || typeof instruction !== 'string') {
+    return res.status(400).json({ error: 'bad_request', message: 'instruction is required.' });
+  }
+  const promptText = input ? (instruction + '\n\n---\n\n' + input) : instruction;
+  try {
+    const geminiRes = await fetch(`${GEMINI_BASE}/models/${GEMINI_MODEL}:generateContent`, {
+      method: 'POST',
+      headers: { 'x-goog-api-key': GEMINI_API_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: promptText }] }] }),
+    });
+    const data = await geminiRes.json().catch(() => null);
+    if (!geminiRes.ok) {
+      console.warn('[server] Gemini request failed:', JSON.stringify(data));
+      return res.status(502).json({ error: 'provider_error', message: (data && data.error && data.error.message) || ('Gemini rejected the request (HTTP ' + geminiRes.status + ').') });
+    }
+    const text = data && data.candidates && data.candidates[0] && data.candidates[0].content
+      && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text;
+    if (!text) {
+      console.warn('[server] Gemini returned no usable text:', JSON.stringify(data));
+      return res.status(502).json({ error: 'provider_error', message: 'Gemini returned an empty response — it may have been blocked by a safety filter.' });
+    }
+    res.json({ text: text.trim() });
+  } catch (err) {
+    console.error('[server] /api/assist/text failed:', err);
+    res.status(500).json({ error: 'server_error', message: String(err && err.message || err) });
+  }
 });
 
 // ---- known models — the client's "choose a model" list reads from this ----

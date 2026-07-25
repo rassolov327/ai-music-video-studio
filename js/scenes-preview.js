@@ -426,12 +426,16 @@ function renderInspectorPanel(){
       </div>
       <div class="cf-field"><label>Description <span style="color:var(--text-3);font-weight:400;">— prompt for AI generation</span></label>
         <textarea id="shotDescInput" style="min-height:90px;" placeholder="Describe exactly what should happen in this shot...">${shot.description||''}</textarea>
+        <button class="cf-btn ai-assist-btn" id="shotDescAssistBtn" style="width:100%;margin-top:6px;display:none;">✨ Improve with AI</button>
       </div>
 
       <div class="gen-section" id="shotGenSection"></div>
     </div>`;
 
   renderShotGenSection(scene, shot);
+  wireAiAssistButton('shotDescAssistBtn', 'shotDescInput',
+    'Rewrite this rough shot idea into a vivid, specific, camera-ready visual description for an AI image generator. One or two sentences, concrete imagery, no camera-move or shot-size talk (that\'s handled separately). Reply with only the rewritten description, nothing else.',
+    (result)=>{ shot.description = result; });
 
   document.getElementById('jumpToSceneBtn').onclick = ()=> setFocus(scene.id, null);
   document.getElementById('jumpToSceneBtn2').onclick = ()=> setFocus(scene.id, null);

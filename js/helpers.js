@@ -73,6 +73,67 @@ async function checkPaidGenerationAvailable(){
   return _kieConfiguredCache;
 }
 
+// ---------- free text helper, proxied through our own backend (server.js -> Gemini) ----------
+// Same "never expose the key to the browser" pattern as paid image generation. Generic by
+// design: any textarea in the app can get an "Improve with AI" button by calling
+// wireAiAssistButton() with an instruction — no new server route needed per feature.
+let _geminiConfiguredCache = null;
+async function checkAssistAvailable(){
+  if(_geminiConfiguredCache !== null) return _geminiConfiguredCache;
+  try{
+    const res = await fetch('/api/health');
+    const data = await res.json();
+    _geminiConfiguredCache = !!(data && data.geminiConfigured);
+  } catch(err){
+    _geminiConfiguredCache = false;
+  }
+  return _geminiConfiguredCache;
+}
+async function callAiAssist(instruction, input){
+  const res = await fetch('/api/assist/text', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ instruction, input }),
+  });
+  const data = await res.json().catch(()=> null);
+  if(!res.ok || !data || !data.text){
+    throw new Error((data && data.message) || ('Request failed (HTTP ' + res.status + ')'));
+  }
+  return data.text;
+}
+// Shows the button only if Gemini is actually configured on this deployment, and wires it
+// to: read the textarea's current (rough) text, send it with `instruction`, and hand the
+// result to `onApply` (which should update both the textarea and the underlying data).
+function wireAiAssistButton(btnId, textareaId, instruction, onApply){
+  checkAssistAvailable().then(available=>{
+    const btn = document.getElementById(btnId);
+    if(!btn || !available) return;
+    btn.style.display = '';
+    btn.onclick = async ()=>{
+      const textarea = document.getElementById(textareaId);
+      const input = textarea ? textarea.value.trim() : '';
+      if(!input){
+        alert('Write a rough idea first, then click Improve.');
+        return;
+      }
+      const originalLabel = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Thinking…';
+      try{
+        const result = await callAiAssist(instruction, input);
+        if(textarea) textarea.value = result;
+        onApply(result);
+        if(typeof saveProjectSoon==='function') saveProjectSoon();
+      } catch(err){
+        alert('AI assist failed: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = originalLabel;
+      }
+    };
+  });
+}
+
 // ---------- free rough-preview generation via Pollinations.ai (no key required) ----------
 function buildPollinationsUrl(prompt, w, h){
   const seed = Math.floor(Math.random()*1000000);

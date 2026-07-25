@@ -826,3 +826,11 @@
   .task-tile-model-select:hover{border-color:#3a3e48;}
   .task-tile-model-select:focus{outline:none;border-color:var(--accent);}
   .task-tile.draft .task-tile-thumb{color:var(--text-3);}
+
+  /* ---- AI-assist button (Gemini-powered "Improve with AI") ---- */
+  .ai-assist-btn{
+    background:linear-gradient(135deg, rgba(224,152,60,.12), rgba(224,152,60,.05));
+    border:1px solid #5a4526;color:var(--accent-text);font-size:11.5px;
+  }
+  .ai-assist-btn:hover{background:linear-gradient(135deg, rgba(224,152,60,.22), rgba(224,152,60,.1));}
+  .ai-assist-btn:disabled{opacity:.6;cursor:default;}
