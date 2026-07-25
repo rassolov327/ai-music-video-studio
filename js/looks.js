@@ -38,9 +38,11 @@ function showLookGallery(cat){
     btn.onclick = (e)=>{
       e.stopPropagation();
       const idx = parseInt(e.target.closest('[data-del-idx]').dataset.delIdx, 10);
+      if(typeof deleteGeneratedAssetImage==='function') deleteGeneratedAssetImage(cat.items[idx], 'looks', 'previewImage');
       cat.items.splice(idx,1);
       renderAssets();
       showLookGallery(cat);
+      if(typeof saveProjectSoon==='function') saveProjectSoon();
     };
   });
   previewEl.querySelectorAll('.char-tile:not(.char-tile-add)').forEach(tile=>{
@@ -69,6 +71,7 @@ function renderLookGenSection(sectionEl, look){
   } else {
     html += `<button class="cf-btn${look.approved?'':' primary'}" id="lookApproveBtn" style="width:100%;margin-top:8px;">${look.approved ? 'Approved ✓ — this is the locked look' : 'Approve this look'}</button>`;
   }
+  html += `<div id="lookTaskSlot"></div>`;
   sectionEl.innerHTML = html;
 
   document.getElementById('lookGenBtn').onclick = ()=>{
@@ -76,8 +79,12 @@ function renderLookGenSection(sectionEl, look){
     const prompt = buildLookPrompt(look.description.trim());
     tryLoadImage(buildPollinationsUrl(prompt, 480, 640))
       .catch(()=> null)
-      .then((url)=>{
-        if(url){ look.previewImage = url; look.approved = false; }
+      .then(async (url)=>{
+        if(url){
+          if(typeof persistGeneratedAssetImage==='function' && look.id) await persistGeneratedAssetImage(look, 'looks', 'previewImage', url);
+          else look.previewImage = url;
+          look.approved = false;
+        }
         renderLookGenSection(sectionEl, look);
         renderAssets();
       });
@@ -90,6 +97,21 @@ function renderLookGenSection(sectionEl, look){
       renderAssets();
     };
   }
+  renderLookTaskSlot(look);
+}
+
+async function renderLookTaskSlot(look){
+  const slot = document.getElementById('lookTaskSlot');
+  if(!slot || !look.id) return; // not saved yet — needs an id before it can be queued
+  const available = await checkPaidGenerationAvailable();
+  const freshSlot = document.getElementById('lookTaskSlot');
+  if(!freshSlot) return;
+  if(!available) return;
+  freshSlot.innerHTML = `<button class="cf-btn" id="lookAddToTasksBtn" style="width:100%;margin-top:8px;">Add to Tasks (real AI)</button>`;
+  document.getElementById('lookAddToTasksBtn').onclick = ()=>{
+    queueAssetGeneration('looks', look);
+    freshSlot.innerHTML = `<div class="gen-hint" style="margin-top:8px;color:#5fae7a;">Added to the TASKS queue.</div>`;
+  };
 }
 
 function showLookForm(cat, editIdx){

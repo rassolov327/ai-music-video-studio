@@ -531,10 +531,10 @@ function queueShotGeneration(scene, shot){
   state.taskQueue = state.taskQueue || [];
   state.taskQueue.push({
     id: 'dt' + (draftTaskSeq++),
-    kind: 'image',
+    kind: 'shot',
     sceneId: scene.id, shotId: shot.id,
     sceneName: scene.name, shotName: shot.name,
-    model: (typeof selectedModelId!=='undefined' && selectedModelId) || null,
+    model: (modelOptions[0] && modelOptions[0].id) || null,
     createdAt: Date.now(),
   });
   if(typeof saveProjectSoon==='function') saveProjectSoon();

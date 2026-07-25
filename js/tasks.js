@@ -1,7 +1,7 @@
 // ---------- WORK / TASKS bottom page tabs (DaVinci-Resolve style render queue) ----------
 let tasksRefreshTimer = null;
 let liveTasks = []; // last fetched snapshot from the server
-let modelOptions = [];
+let modelOptions = []; // [{id, label, costUsd, supportsReferenceImage}]
 let appliedTaskIds = new Set(); // avoid re-applying the same finished result repeatedly
 // Selection lives here, not in the DOM — renderTasksGrid() rebuilds the tiles every few
 // seconds (autosave-driven and its own refresh loop both touch this), and DOM-held state
@@ -41,7 +41,7 @@ function showPage(page){
 
 // Tasks keep working in the background regardless of which page is showing — this timer
 // is separate from the tab's own refresh loop and just needs to catch completed results
-// so they land on their shot even if the user never opens the Tasks tab at all.
+// so they land on their target even if the user never opens the Tasks tab at all.
 function startBackgroundTaskWatcher(){
   setInterval(refreshTasks, 6000);
 }
@@ -55,6 +55,8 @@ async function loadModelList(){
     modelOptions = [];
   }
 }
+function modelById(id){ return modelOptions.find(m=> m.id===id) || modelOptions[0] || null; }
+function formatCost(usd){ return usd ? ('$' + usd.toFixed(usd < 0.01 ? 4 : 2).replace(/0+$/,'').replace(/\.$/,'')) : ''; }
 
 async function refreshTasks(){
   if(!currentProjectId) return;
@@ -85,8 +87,15 @@ function updateTasksBadge(){
 }
 
 function modelSelectHtml(selectedId, extraClass){
-  const opts = modelOptions.map(m=> `<option value="${m.id}" ${m.id===selectedId?'selected':''}>${m.label}</option>`).join('');
+  const opts = modelOptions.map(m=> `<option value="${m.id}" ${m.id===selectedId?'selected':''}>${m.label}${m.supportsReferenceImage?' (ref)':''}${m.costUsd?' — '+formatCost(m.costUsd):''}</option>`).join('');
   return `<select class="${extraClass||''}">${opts}</select>`;
+}
+
+// Draft display labels — shots show "Scene / Shot", asset drafts show "Kind / Name".
+function draftTitleLines(t){
+  if(t.kind==='shot') return [t.sceneName || 'Scene', t.shotName || 'Shot'];
+  const kindLabel = t.kind==='looks' ? 'Look' : t.kind==='locations' ? 'Location' : t.kind==='props' ? 'Prop' : 'Asset';
+  return [kindLabel, t.assetName || ''];
 }
 
 // Status priority for the default sort — drafts need a decision, pending is in progress,
@@ -108,12 +117,20 @@ function getSortedEntries(){
   return all;
 }
 
+function assetHasPhoto(t){
+  if(t.kind==='shot') return false;
+  const cat = state.categories.find(c=> c.key===t.kind);
+  const item = cat && cat.items.find(x=> x.id===t.assetId);
+  const field = t.kind==='looks' ? 'previewImage' : 'photo';
+  return !!(item && item[field]);
+}
+
 function renderTasksGrid(){
   const grid = document.getElementById('tasksGrid');
   if(!grid) return;
   const entries = getSortedEntries();
   if(entries.length===0){
-    grid.innerHTML = `<div class="tasks-empty">No generation tasks yet. Use "Add to Tasks (real AI)" on a shot to queue one — pick a model here and hit Generate whenever you're ready.</div>`;
+    grid.innerHTML = `<div class="tasks-empty">No generation tasks yet. Use "Add to Tasks" on a shot, look, location, or prop to queue one — pick a model here and hit Generate whenever you're ready.</div>`;
     updateGenerateSelectedButton();
     return;
   }
@@ -122,6 +139,15 @@ function renderTasksGrid(){
     if(entry.type==='draft'){
       const t = entry.data;
       const selected = selectedDraftIds.has(t.id);
+      const [line1, line2] = draftTitleLines(t);
+      const model = modelById(t.model);
+      const hasPhoto = assetHasPhoto(t);
+      const willUseRef = hasPhoto && model && model.supportsReferenceImage;
+      const refHint = hasPhoto
+        ? (willUseRef
+            ? '<div class="gen-hint" style="margin-top:6px;color:#5fae7a;">Will use the uploaded photo as a reference.</div>'
+            : '<div class="gen-hint" style="margin-top:6px;">Has a reference photo, but this model won\'t use it — pick a model marked (ref) to use it.</div>')
+        : '';
       return `
         <div class="task-tile draft${selected ? ' selected' : ''}" data-draft-id="${t.id}">
           <div class="task-tile-thumb" title="Click to select for batch generate">
@@ -131,10 +157,11 @@ function renderTasksGrid(){
             <div class="task-tile-trash" title="Remove from queue"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></div>
           </div>
           <div class="task-tile-body">
-            <div class="task-tile-scene">${t.sceneName || 'Scene'}</div>
-            <div class="task-tile-shot">${t.shotName || 'Shot'}</div>
+            <div class="task-tile-scene">${line1}</div>
+            <div class="task-tile-shot">${line2}</div>
             ${modelSelectHtml(t.model || (modelOptions[0] && modelOptions[0].id), 'task-tile-model-select')}
-            <button class="cf-btn primary task-tile-send-btn" style="width:100%;margin-top:8px;">Generate</button>
+            ${refHint}
+            <button class="cf-btn primary task-tile-send-btn" style="width:100%;margin-top:8px;">Generate${model && model.costUsd ? ' — ' + formatCost(model.costUsd) : ''}</button>
           </div>
         </div>`;
     } else {
@@ -145,6 +172,8 @@ function renderTasksGrid(){
         : t.status==='failed'
           ? `<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="9"></circle><line x1="9" y1="9" x2="15" y2="15"></line><line x1="15" y1="9" x2="9" y2="15"></line></svg>`
           : `<div class="task-tile-spin"></div>`;
+      const line1 = meta.kind==='shot' || !meta.kind ? (meta.sceneName || 'Scene') : (meta.kind==='looks'?'Look':meta.kind==='locations'?'Location':meta.kind==='props'?'Prop':'Asset');
+      const line2 = meta.kind==='shot' || !meta.kind ? (meta.shotName || 'Shot') : (meta.assetName || '');
       return `
         <div class="task-tile" data-task-id="${t.taskId}">
           <div class="task-tile-thumb">
@@ -153,8 +182,8 @@ function renderTasksGrid(){
             <div class="task-tile-trash" title="Remove from list"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></div>
           </div>
           <div class="task-tile-body">
-            <div class="task-tile-scene">${meta.sceneName || 'Scene'}</div>
-            <div class="task-tile-shot">${meta.shotName || 'Shot'}</div>
+            <div class="task-tile-scene">${line1}</div>
+            <div class="task-tile-shot">${line2}</div>
             <div class="task-tile-model">${t.model || ''}</div>
           </div>
         </div>`;
@@ -174,8 +203,10 @@ function wireDraftTiles(){
     tile.querySelector('.task-tile-model-select').onchange = (e)=>{
       draft.model = e.target.value;
       if(typeof saveProjectSoon==='function') saveProjectSoon();
+      renderTasksGrid();
     };
-    tile.querySelector('.task-tile-thumb').onclick = ()=>{
+    tile.querySelector('.task-tile-thumb').onclick = (e)=>{
+      if(e.target.closest('select')) return;
       if(selectedDraftIds.has(draftId)) selectedDraftIds.delete(draftId);
       else selectedDraftIds.add(draftId);
       renderTasksGrid();
@@ -215,12 +246,19 @@ function wireLiveTiles(){
   });
 }
 
+// Shows how many are selected AND the running total cost of everything currently checked —
+// mirrors a render queue where you stack up jobs, see the bill, then commit.
 function updateGenerateSelectedButton(){
   const btn = document.getElementById('tasksGenerateSelectedBtn');
   if(!btn) return;
-  const count = selectedDraftIds.size;
+  const selected = (state.taskQueue||[]).filter(t=> selectedDraftIds.has(t.id));
+  const count = selected.length;
+  const total = selected.reduce((sum, t)=>{
+    const m = modelById(t.model);
+    return sum + (m && m.costUsd ? m.costUsd : 0);
+  }, 0);
   btn.disabled = count===0;
-  btn.textContent = count ? ('Generate (' + count + ')') : 'Generate';
+  btn.textContent = count ? ('Generate (' + count + ')' + (total ? ' — ' + formatCost(total) : '')) : 'Generate';
 }
 
 async function sendDraftTask(draftId){
@@ -248,23 +286,40 @@ async function generateSelectedDraftTasks(){
   }
 }
 
-// Looks up the scene/shot for a draft, builds its prompt, and sends it to the server —
-// used both for the per-tile "Generate" button and the batch button.
+// Builds the request for whichever kind of draft this is (shot, or a Look/Location/Prop
+// asset) and sends it to the server — used by both the per-tile Generate button and the
+// batch button.
 async function sendGenerationTask(draft){
-  const scene = state.scenes.find(s=> s.id===draft.sceneId);
-  const shot = scene && scene.shots.find(sh=> sh.id===draft.shotId);
-  if(!scene || !shot){
-    throw new Error('This shot no longer exists.');
-  }
-  const prompt = buildShotPrompt(shot, scene);
   const meta = state.projectMeta || { width:1920, height:1080 };
+  let prompt, taskMeta, referenceImageUrl;
+
+  if(draft.kind==='shot'){
+    const scene = state.scenes.find(s=> s.id===draft.sceneId);
+    const shot = scene && scene.shots.find(sh=> sh.id===draft.shotId);
+    if(!scene || !shot) throw new Error('This shot no longer exists.');
+    prompt = buildShotPrompt(shot, scene);
+    taskMeta = { projectId: currentProjectId, kind:'shot', sceneId: scene.id, sceneName: scene.name, shotId: shot.id, shotName: shot.name };
+  } else {
+    const cat = state.categories.find(c=> c.key===draft.kind);
+    const item = cat && cat.items.find(x=> x.id===draft.assetId);
+    if(!item) throw new Error('This ' + draft.kind.slice(0,-1) + ' no longer exists.');
+    prompt = buildAssetGenPrompt(draft.kind, item);
+    taskMeta = { projectId: currentProjectId, kind: draft.kind, assetId: item.id, assetName: item.name };
+
+    // Reference photo — a real photo of the actual location/prop, uploaded so the paid
+    // model can use it as a basis instead of guessing purely from text.
+    const model = modelById(draft.model);
+    const photoField = draft.kind==='looks' ? 'previewImage' : 'photo';
+    const livePhoto = item[photoField];
+    if(model && model.supportsReferenceImage && livePhoto){
+      referenceImageUrl = await uploadReferencePhoto(livePhoto);
+    }
+  }
+
   const res = await fetch('/api/generate-image/start', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      prompt, width: meta.width, height: meta.height, model: draft.model,
-      meta: { projectId: currentProjectId, sceneId: scene.id, sceneName: scene.name, shotId: shot.id, shotName: shot.name },
-    }),
+    body: JSON.stringify({ prompt, width: meta.width, height: meta.height, model: draft.model, meta: taskMeta, referenceImageUrl }),
   });
   const data = await res.json().catch(()=> null);
   if(!res.ok || !data || !data.taskId){
@@ -273,8 +328,35 @@ async function sendGenerationTask(draft){
   return data.taskId;
 }
 
-// The moment a task shows success, drop its image onto the shot it was generated for —
-// works whether or not that shot happens to be open right now.
+// The reference photo lives as a local blob:/data: URL — KIE needs a fetchable link, so
+// hand it to our own server first (see /api/upload-reference-image), which hands back a
+// short-lived public URL.
+async function uploadReferencePhoto(photoUrl){
+  let dataUrl = photoUrl;
+  if(photoUrl.indexOf('blob:')===0){
+    const blob = await (await fetch(photoUrl)).blob();
+    dataUrl = await new Promise((resolve, reject)=>{
+      const fr = new FileReader();
+      fr.onload = ()=> resolve(fr.result);
+      fr.onerror = reject;
+      fr.readAsDataURL(blob);
+    });
+  }
+  const res = await fetch('/api/upload-reference-image', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dataUrl }),
+  });
+  const data = await res.json().catch(()=> null);
+  if(!res.ok || !data || !data.url){
+    console.warn('[tasks] could not upload reference photo, generating without it:', data && data.message);
+    return undefined;
+  }
+  return data.url;
+}
+
+// The moment a task shows success, drop its image onto whatever it was generated for
+// (a shot, or a Look/Location/Prop) — works whether or not that item happens to be open.
 async function applyFinishedTasks(list){
   let touchedCurrentView = false;
   let appliedAny = false;
@@ -282,21 +364,51 @@ async function applyFinishedTasks(list){
     if(t.status!=='success' || !t.imageUrl) continue;
     if(appliedTaskIds.has(t.taskId)) continue;
     const meta = t.meta || {};
-    const scene = state.scenes.find(s=> s.id===meta.sceneId);
-    const shot = scene && scene.shots.find(sh=> sh.id===meta.shotId);
-    if(scene && shot){
-      if(typeof persistShotPreviewImage==='function') await persistShotPreviewImage(shot, t.imageUrl);
-      else shot.previewImage = t.imageUrl;
-      appliedTaskIds.add(t.taskId);
-      appliedAny = true;
-      if(focus.sceneId===scene.id && focus.shotId===shot.id) touchedCurrentView = true;
+    if(!meta.kind || meta.kind==='shot'){
+      const scene = state.scenes.find(s=> s.id===meta.sceneId);
+      const shot = scene && scene.shots.find(sh=> sh.id===meta.shotId);
+      if(scene && shot){
+        if(typeof persistShotPreviewImage==='function') await persistShotPreviewImage(shot, t.imageUrl);
+        else shot.previewImage = t.imageUrl;
+        appliedTaskIds.add(t.taskId);
+        appliedAny = true;
+        if(focus.sceneId===scene.id && focus.shotId===shot.id) touchedCurrentView = true;
+      } else {
+        appliedTaskIds.add(t.taskId);
+      }
     } else {
-      appliedTaskIds.add(t.taskId); // shot/scene no longer exists — nothing to apply, stop retrying
+      const cat = state.categories.find(c=> c.key===meta.kind);
+      const item = cat && cat.items.find(x=> x.id===meta.assetId);
+      if(item){
+        const field = meta.kind==='looks' ? 'previewImage' : 'photo';
+        if(typeof persistGeneratedAssetImage==='function') await persistGeneratedAssetImage(item, meta.kind, field, t.imageUrl);
+        else item[field] = t.imageUrl;
+        appliedTaskIds.add(t.taskId);
+        appliedAny = true;
+      } else {
+        appliedTaskIds.add(t.taskId);
+      }
     }
   }
   if(appliedAny){
+    renderAssets();
     renderTimelineScenes();
     if(touchedCurrentView) refreshMainPreview();
     if(typeof saveProjectSoon==='function') saveProjectSoon();
   }
+}
+
+// Adds a Look/Location/Prop to the queue — called from each asset form's "Add to Tasks"
+// button. Mirrors queueShotGeneration in scenes-preview.js.
+function queueAssetGeneration(catKey, item){
+  state.taskQueue = state.taskQueue || [];
+  state.taskQueue.push({
+    id: 'dt' + (draftTaskSeq++),
+    kind: catKey, // 'looks' | 'locations' | 'props'
+    assetId: item.id, assetName: item.name,
+    model: (modelOptions[0] && modelOptions[0].id) || null,
+    createdAt: Date.now(),
+  });
+  if(typeof saveProjectSoon==='function') saveProjectSoon();
+  refreshTasks();
 }

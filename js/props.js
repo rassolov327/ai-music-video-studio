@@ -76,10 +76,12 @@ function showPropCard(cat, idx){
           </div>
         </div>
         <div class="gen-section" id="propGenSection"></div>
+        <div id="propTaskSlot"></div>
       </div>
     </div>`;
 
   renderPropGenSection(cat, idx);
+  renderPropTaskSlot(it);
 
   document.getElementById('propCardBack').onclick = ()=> showPropGallery(cat);
   document.getElementById('propCardEdit').onclick = ()=> showPropForm(cat, idx);
@@ -92,6 +94,23 @@ function showPropCard(cat, idx){
   };
   previewEl.onclick = (e)=>{
     if(e.target === previewEl) showPropGallery(cat);
+  };
+}
+
+async function renderPropTaskSlot(it){
+  const slot = document.getElementById('propTaskSlot');
+  if(!slot || !it.id) return;
+  const available = await checkPaidGenerationAvailable();
+  const freshSlot = document.getElementById('propTaskSlot');
+  if(!freshSlot) return;
+  if(!available) return;
+  const hasPhoto = !!it.photo;
+  freshSlot.innerHTML = `
+    <button class="cf-btn" id="propAddToTasksBtn" style="width:100%;margin-top:8px;">Add to Tasks (real AI)</button>
+    ${hasPhoto ? '<div class="gen-hint" style="margin-top:6px;">Has a photo — pick a model marked (ref) in Tasks to generate from it, like a real object you photographed yourself.</div>' : ''}`;
+  document.getElementById('propAddToTasksBtn').onclick = ()=>{
+    queueAssetGeneration('props', it);
+    freshSlot.innerHTML = `<div class="gen-hint" style="margin-top:8px;color:#5fae7a;">Added to the TASKS queue.</div>`;
   };
 }
 

@@ -76,10 +76,12 @@ function showLocationCard(cat, idx){
           </div>
         </div>
         <div class="gen-section" id="locGenSection"></div>
+        <div id="locTaskSlot"></div>
       </div>
     </div>`;
 
   renderLocGenSection(cat, idx);
+  renderLocTaskSlot(it);
 
   document.getElementById('locCardBack').onclick = ()=> showLocationGallery(cat);
   document.getElementById('locCardEdit').onclick = ()=> showLocationForm(cat, idx);
@@ -92,6 +94,23 @@ function showLocationCard(cat, idx){
   };
   previewEl.onclick = (e)=>{
     if(e.target === previewEl) showLocationGallery(cat);
+  };
+}
+
+async function renderLocTaskSlot(it){
+  const slot = document.getElementById('locTaskSlot');
+  if(!slot || !it.id) return;
+  const available = await checkPaidGenerationAvailable();
+  const freshSlot = document.getElementById('locTaskSlot');
+  if(!freshSlot) return;
+  if(!available) return;
+  const hasPhoto = !!it.photo;
+  freshSlot.innerHTML = `
+    <button class="cf-btn" id="locAddToTasksBtn" style="width:100%;margin-top:8px;">Add to Tasks (real AI)</button>
+    ${hasPhoto ? '<div class="gen-hint" style="margin-top:6px;">Has a photo — pick a model marked (ref) in Tasks to generate from it, like a real location you photographed yourself.</div>' : ''}`;
+  document.getElementById('locAddToTasksBtn').onclick = ()=>{
+    queueAssetGeneration('locations', it);
+    freshSlot.innerHTML = `<div class="gen-hint" style="margin-top:8px;color:#5fae7a;">Added to the TASKS queue.</div>`;
   };
 }
 

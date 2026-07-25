@@ -148,13 +148,15 @@ app.post('/api/assist/text', async (req, res) => {
 // listing ones with a plain {prompt, aspect_ratio-ish} input shape — anything needing
 // image inputs (image-to-image variants) doesn't fit "generate a shot from a prompt" yet.
 const MODELS = [
-  { id: 'z-image', label: 'Z-Image (fastest, cheapest)', supportsAspectRatio: true },
-  { id: 'gpt-image/1.5-text-to-image', label: 'GPT-Image 1.5', supportsAspectRatio: true, supportsQuality: true },
-  { id: 'qwen2/text-to-image', label: 'Qwen2', supportsImageSize: true },
-  { id: 'nano-banana-pro', label: 'Nano Banana Pro', supportsAspectRatio: true, supportsResolution: true },
+  { id: 'z-image', label: 'Z-Image (fastest, cheapest)', supportsAspectRatio: true, costUsd: 0.01 },
+  { id: 'gpt-image/1.5-text-to-image', label: 'GPT-Image 1.5', supportsAspectRatio: true, supportsQuality: true, costUsd: 0.03 },
+  { id: 'qwen2/text-to-image', label: 'Qwen2', supportsImageSize: true, costUsd: 0.02 },
+  { id: 'nano-banana-pro', label: 'Nano Banana Pro', supportsAspectRatio: true, supportsResolution: true, supportsReferenceImage: true, costUsd: 0.04 },
 ];
 app.get('/api/models', (req, res) => {
-  res.json({ models: MODELS.map(m => ({ id: m.id, label: m.label })) });
+  // Costs are our best estimate from KIE's own published credit pricing ($0.005/credit) —
+  // shown to the user as an approximation, not an invoice.
+  res.json({ models: MODELS.map(m => ({ id: m.id, label: m.label, costUsd: m.costUsd, supportsReferenceImage: !!m.supportsReferenceImage })) });
 });
 
 function closestAspectRatio(width, height) {
@@ -169,7 +171,7 @@ function closestAspectRatio(width, height) {
   return best;
 }
 
-function buildInputFor(modelId, prompt, width, height) {
+function buildInputFor(modelId, prompt, width, height, referenceImageUrl) {
   const model = MODELS.find(m => m.id === modelId) || MODELS[0];
   const ratio = closestAspectRatio(width, height);
   const input = { prompt };
@@ -177,8 +179,48 @@ function buildInputFor(modelId, prompt, width, height) {
   else if (model.supportsAspectRatio) input.aspect_ratio = ratio;
   if (model.supportsQuality) input.quality = 'high';
   if (model.supportsResolution) input.resolution = '2K';
+  if (model.supportsReferenceImage && referenceImageUrl) input.image_input = [referenceImageUrl];
   return input;
 }
+
+// ---- reference image upload — for generating a location/prop from a real photo of it ----
+// In-memory only (same lifetime as the task store): the browser can't hand KIE a local
+// blob/data: URL, only a fetchable link, so we hold the photo here just long enough for
+// KIE to pull it during generation.
+const referenceImages = new Map(); // id -> { buffer, mime, createdAt }
+function pruneOldReferenceImages(){
+  const cutoff = Date.now() - 60 * 60 * 1000; // 1 hour is plenty — generation finishes in minutes
+  for(const [id, img] of referenceImages){ if(img.createdAt < cutoff) referenceImages.delete(id); }
+}
+setInterval(pruneOldReferenceImages, 15 * 60 * 1000).unref();
+
+app.post('/api/upload-reference-image', (req, res) => {
+  if(!PUBLIC_URL){
+    return res.status(503).json({ error: 'not_configured', message: 'No public URL detected for this deployment — KIE can\'t fetch a reference image without one.' });
+  }
+  const { dataUrl } = req.body || {};
+  if(!dataUrl || typeof dataUrl !== 'string' || dataUrl.indexOf('data:')!==0){
+    return res.status(400).json({ error: 'bad_request', message: 'dataUrl is required.' });
+  }
+  try{
+    const commaIdx = dataUrl.indexOf(',');
+    const header = dataUrl.slice(0, commaIdx);
+    const mimeMatch = header.match(/data:(.*?);base64/);
+    const mime = mimeMatch ? mimeMatch[1] : 'image/png';
+    const buffer = Buffer.from(dataUrl.slice(commaIdx + 1), 'base64');
+    const id = 'ref_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    referenceImages.set(id, { buffer, mime, createdAt: Date.now() });
+    res.json({ url: PUBLIC_URL + '/api/reference-image/' + id });
+  } catch(err){
+    res.status(500).json({ error: 'server_error', message: String(err && err.message || err) });
+  }
+});
+app.get('/api/reference-image/:id', (req, res) => {
+  const img = referenceImages.get(req.params.id);
+  if(!img) return res.status(404).end();
+  res.setHeader('Content-Type', img.mime);
+  res.send(img.buffer);
+});
 
 // ---- start a generation task ----
 // `meta` carries scene/shot context purely for display in the Tasks tab — it never goes
@@ -187,12 +229,12 @@ app.post('/api/generate-image/start', async (req, res) => {
   if (!KIE_API_KEY) {
     return res.status(503).json({ error: 'not_configured', message: 'KIE_API_KEY is not set on the server yet.' });
   }
-  const { prompt, width, height, model, meta } = req.body || {};
+  const { prompt, width, height, model, meta, referenceImageUrl } = req.body || {};
   if (!prompt || typeof prompt !== 'string') {
     return res.status(400).json({ error: 'bad_request', message: 'prompt is required.' });
   }
   const modelId = (MODELS.find(m => m.id === model) || MODELS[0]).id;
-  const input = buildInputFor(modelId, prompt, width, height);
+  const input = buildInputFor(modelId, prompt, width, height, referenceImageUrl);
   const callBackUrl = PUBLIC_URL ? PUBLIC_URL + '/api/webhook/kie' : undefined;
 
   try {

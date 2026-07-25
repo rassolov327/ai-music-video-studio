@@ -188,6 +188,16 @@ function buildShotFixedElementsContext(scene){
     + '\nDo not describe what any of them look like, wear, or the environment\'s appearance — that would risk contradicting what\'s already locked in. Describe only the action, pose, and moment happening in this shot.';
 }
 
+// Same prompt style already used for each asset type's free-generation flow (Pollinations),
+// reused here so the paid path produces a comparable result, not a differently-worded one.
+function buildAssetGenPrompt(catKey, item){
+  const desc = (item.description || item.name || '').trim();
+  if(catKey==='looks') return (typeof buildLookPrompt==='function') ? buildLookPrompt(desc) : desc;
+  if(catKey==='locations') return desc + ', location establishing shot, cinematic';
+  if(catKey==='props') return desc + ', product reference photo, plain neutral background, studio lighting';
+  return desc;
+}
+
 // ---------- free rough-preview generation via Pollinations.ai (no key required) ----------
 function buildPollinationsUrl(prompt, w, h){
   const seed = Math.floor(Math.random()*1000000);

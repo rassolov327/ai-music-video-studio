@@ -720,6 +720,53 @@ async function deleteShotPreviewImage(shot){
   }
 }
 
+// Generic version of the above, for a generated Look/Location/Prop image (not a shot) —
+// same protection against a provider's temp-hosting link expiring later.
+async function persistGeneratedAssetImage(item, catKey, fieldKey, resultUrl){
+  if(!item || !item.id || !resultUrl) return;
+  try{
+    const assetKey = pid() + ':' + catKey + ':' + item.id + ':' + fieldKey;
+    let fileName, blob;
+    if(resultUrl.indexOf('data:')===0){
+      blob = dataUrlToBlobSync(resultUrl);
+      fileName = await persistBlobAsset(assetKey, blob, extFromDataUrl(resultUrl));
+    } else {
+      const result = await persistRemoteImageAsset(assetKey, resultUrl);
+      fileName = result.fileName;
+      blob = result.blob;
+    }
+    const url = URL.createObjectURL(blob);
+    item[fieldKey] = url;
+    item._assetFiles = item._assetFiles || {};
+    item._assetFiles[fieldKey] = fileName;
+    console.log('[ProjectStore] saved generated ' + fieldKey + ' locally for "' + item.name + '" (' + catKey + ')');
+  } catch(err){
+    console.warn('[ProjectStore] could not save generated image locally, keeping the provider link only (it may expire later):', err);
+    item[fieldKey] = resultUrl;
+  }
+  if(typeof saveProjectSoon==='function') saveProjectSoon();
+}
+async function restoreGeneratedAssetImage(item, catKey, fieldKey, assetsDirHandle){
+  if(!item._assetFiles || !(fieldKey in item._assetFiles)) return true; // nothing saved locally
+  const assetKey = pid() + ':' + catKey + ':' + item.id + ':' + fieldKey;
+  const url = await loadImageAsset(assetKey, item._assetFiles[fieldKey], assetsDirHandle);
+  if(url){ item[fieldKey] = url; return true; }
+  return false;
+}
+async function deleteGeneratedAssetImage(item, catKey, fieldKey){
+  if(!item._assetFiles || !(fieldKey in item._assetFiles)) return;
+  const assetKey = pid() + ':' + catKey + ':' + item.id + ':' + fieldKey;
+  try{ await idbDelete(STORE_ASSETS, assetKey); } catch(err){}
+  if(diskDirHandle){
+    try{
+      const assetsDir = await getAssetsDirHandle(false);
+      for await (const name of assetsDir.keys()){
+        if(name.indexOf(catKey + '_' + item.id + '_')===0 || name.indexOf(pid()+'_'+catKey+'_'+item.id)===0) await assetsDir.removeEntry(name);
+      }
+    } catch(err){}
+  }
+}
+
 // ---- disk folder (File System Access API) ----
 async function writeProjectToDisk(dirHandle, projectData){
   const fileHandle = await dirHandle.getFileHandle('project.json', { create:true });
@@ -796,12 +843,17 @@ function serializeProject(){
         copy.photo = null; // reconstructed from angleSlots.front on restore
       }
       if(cat.key==='locations'){
-        if(copy.photo && copy.photo.indexOf('data:')===0) copy.photo = null;
+        if(copy._assetFiles && ('photo' in copy._assetFiles)) copy.photo = null;
+        else if(copy.photo && copy.photo.indexOf('data:')===0) copy.photo = null;
         if(copy.angles) copy.angles = copy.angles.map(a => (a && a.indexOf('data:')===0) ? null : a);
       }
       if(cat.key==='props'){
-        if(copy.photo && copy.photo.indexOf('data:')===0) copy.photo = null;
+        if(copy._assetFiles && ('photo' in copy._assetFiles)) copy.photo = null;
+        else if(copy.photo && copy.photo.indexOf('data:')===0) copy.photo = null;
         if(copy.angles) copy.angles = copy.angles.map(a => (a && a.indexOf('data:')===0) ? null : a);
+      }
+      if(cat.key==='looks'){
+        if(copy._assetFiles && ('previewImage' in copy._assetFiles)) copy.previewImage = null;
       }
       return copy;
     }),
@@ -900,6 +952,15 @@ async function applyProjectData(data, verbose){
       } catch(err){
         hadErrors = true;
         if(verbose) logLoadingStep('Prop "' + item.name + '" — error: ' + err.message, 'error');
+      }
+    }
+  }
+  const looksCatData = data.categories && data.categories.find(c=>c.key==='looks');
+  if(looksCatData){
+    for(const item of looksCatData.items){
+      if(item._assetFiles && ('previewImage' in item._assetFiles)){
+        try{ await restoreGeneratedAssetImage(item, 'looks', 'previewImage'); }
+        catch(err){ hadErrors = true; }
       }
     }
   }
