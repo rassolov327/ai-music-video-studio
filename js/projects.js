@@ -176,47 +176,62 @@ function wireNewProjectScreen(){
 }
 
 // ---------- Project menu (topbar) ----------
-function wireProjectMenu(){
-  const btn = document.getElementById('menuProjectBtn');
-  const dropdown = document.getElementById('menuProjectDropdown');
+// Shared by every top-menu dropdown (File/Project/Tools) — opening one now always closes
+// any other that might be open, instead of each dropdown only knowing about itself.
+function closeAllMenuDropdowns(except){
+  document.querySelectorAll('.menu-dropdown.open').forEach(d=>{
+    if(d !== except) d.classList.remove('open');
+  });
+}
+function wireMenuDropdown(btnId, dropdownId, onAction){
+  const btn = document.getElementById(btnId);
+  const dropdown = document.getElementById(dropdownId);
   if(!btn || !dropdown) return;
   btn.addEventListener('click', (e)=>{
     e.stopPropagation();
-    dropdown.classList.toggle('open');
+    const willOpen = !dropdown.classList.contains('open');
+    closeAllMenuDropdowns();
+    if(willOpen) dropdown.classList.add('open');
   });
   document.addEventListener('click', ()=> dropdown.classList.remove('open'));
   dropdown.querySelectorAll('[data-action]').forEach(item=>{
     item.onclick = async (e)=>{
       e.stopPropagation();
       dropdown.classList.remove('open');
-      const action = item.dataset.action;
-      if(action==='new') showNewProjectScreen();
-      else if(action==='all'){ if(currentProjectId) await saveProjectNow(); showHomeScreen(); }
-      else if(action==='rename'){
-        const name = prompt('Project name:', state.projectMeta.name);
-        if(name!==null && currentProjectId){
-          await renameProject(currentProjectId, name);
-          updateProjTitleDisplay();
-        }
-      }
+      await onAction(item.dataset.action);
     };
   });
 }
 
-function wireToolsMenu(){
-  const btn = document.getElementById('menuToolsBtn');
-  const dropdown = document.getElementById('menuToolsDropdown');
-  if(!btn || !dropdown) return;
-  btn.addEventListener('click', (e)=>{
-    e.stopPropagation();
-    dropdown.classList.toggle('open');
-  });
-  document.addEventListener('click', ()=> dropdown.classList.remove('open'));
-  dropdown.querySelectorAll('[data-action]').forEach(item=>{
-    item.onclick = (e)=>{
-      e.stopPropagation();
-      dropdown.classList.remove('open');
-      if(item.dataset.action==='check') showCheckReport();
-    };
+function wireFileMenu(){
+  wireMenuDropdown('menuFileBtn', 'menuFileDropdown', async (action)=>{
+    if(action==='save'){
+      if(currentProjectId) await saveProjectNow();
+    } else if(action==='close'){
+      if(currentProjectId) await saveProjectNow();
+      pausePlayback();
+      showHomeScreen();
+    }
   });
 }
+
+function wireProjectMenu(){
+  wireMenuDropdown('menuProjectBtn', 'menuProjectDropdown', async (action)=>{
+    if(action==='new') showNewProjectScreen();
+    else if(action==='all'){ if(currentProjectId) await saveProjectNow(); showHomeScreen(); }
+    else if(action==='rename'){
+      const name = prompt('Project name:', state.projectMeta.name);
+      if(name!==null && currentProjectId){
+        await renameProject(currentProjectId, name);
+        updateProjTitleDisplay();
+      }
+    }
+  });
+}
+
+function wireToolsMenu(){
+  wireMenuDropdown('menuToolsBtn', 'menuToolsDropdown', async (action)=>{
+    if(action==='check') showCheckReport();
+  });
+}
+

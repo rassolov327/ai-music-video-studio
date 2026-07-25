@@ -258,7 +258,6 @@ function wireCommonTimelineHandlers(){
       const thumbEl = el.parentElement;
       const startX = e.clientX;
       const startDuration = shot.duration;
-      el.setPointerCapture(e.pointerId);
       document.body.style.cursor = 'ew-resize';
       const MIN_SEC = 0.5;
       const onMove = (ev)=>{
@@ -266,24 +265,35 @@ function wireCommonTimelineHandlers(){
         const deltaSec = deltaPx / PX_PER_SEC;
         const raw = side==='right' ? startDuration + deltaSec : startDuration - deltaSec;
         const newDuration = Math.max(MIN_SEC, Math.round(raw*10)/10);
-        const wpx = Math.round(newDuration * PX_PER_SEC);
-        thumbEl.style.width = wpx + 'px';
-        thumbEl.style.flexBasis = wpx + 'px';
-        const meta = thumbEl.querySelector('.st-meta');
-        if(meta) meta.textContent = newDuration.toFixed(1) + 's';
-        thumbEl.dataset.pendingDuration = newDuration;
+        // The element being dragged (and its parent thumb) may have been replaced by a
+        // periodic re-render since the drag started (autosave-adjacent timers, Tasks
+        // refresh) — re-look-up the current live element by the same data-trim key
+        // instead of trusting the possibly-stale thumbEl/el closures.
+        const liveHandle = timelineScenesEl.querySelector(`[data-trim="${sid}|${shid}|${side}"]`);
+        const liveThumb = liveHandle ? liveHandle.parentElement : thumbEl;
+        if(liveThumb){
+          const wpx = Math.round(newDuration * PX_PER_SEC);
+          liveThumb.style.width = wpx + 'px';
+          liveThumb.style.flexBasis = wpx + 'px';
+          const meta = liveThumb.querySelector('.st-meta');
+          if(meta) meta.textContent = newDuration.toFixed(1) + 's';
+          liveThumb.dataset.pendingDuration = newDuration;
+        }
       };
       const onUp = ()=>{
-        el.removeEventListener('pointermove', onMove);
-        el.removeEventListener('pointerup', onUp);
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
         document.body.style.cursor = '';
-        const pending = parseFloat(thumbEl.dataset.pendingDuration);
+        const liveHandle = timelineScenesEl.querySelector(`[data-trim="${sid}|${shid}|${side}"]`);
+        const liveThumb = liveHandle ? liveHandle.parentElement : thumbEl;
+        const pending = liveThumb ? parseFloat(liveThumb.dataset.pendingDuration) : NaN;
         if(!isNaN(pending)) shot.duration = pending;
         renderTimelineScenes();
         if(focus.sceneId===sid && focus.shotId===shid) renderInspectorPanel();
+        if(typeof saveProjectSoon==='function') saveProjectSoon();
       };
-      el.addEventListener('pointermove', onMove);
-      el.addEventListener('pointerup', onUp);
+      document.addEventListener('pointermove', onMove);
+      document.addEventListener('pointerup', onUp);
     });
   });
 }

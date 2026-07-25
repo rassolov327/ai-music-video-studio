@@ -6,6 +6,7 @@ function goHome(){
 }
 (async function(){
   wireNewProjectScreen();
+  wireFileMenu();
   wireProjectMenu();
   wireToolsMenu();
   wireCheckReport();

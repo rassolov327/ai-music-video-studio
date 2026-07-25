@@ -80,7 +80,6 @@ function renderRealAudioTrack(track){
       const startX = e.clientX;
       const startIn = ta.trimIn, startOut = ta.trimOut;
       const MIN_SEC = 1;
-      handle.setPointerCapture(e.pointerId);
       document.body.style.cursor = 'ew-resize';
       const onMove = (ev)=>{
         const deltaSec = ((ev.clientX - startX) / ZOOM) / PX_PER_SEC;
@@ -89,17 +88,22 @@ function renderRealAudioTrack(track){
         } else {
           ta.trimIn = Math.max(0, Math.min(startOut-MIN_SEC, startIn + deltaSec));
         }
+        // clipWrap may belong to a since-replaced render pass (a periodic re-render can
+        // happen mid-drag) — look it up fresh so the live width update still lands
+        // somewhere visible instead of on a detached element.
+        const liveClipWrap = document.getElementById('audioClipWrap') || clipWrap;
         const wpx = Math.max(20, Math.round((ta.trimOut - ta.trimIn) * PX_PER_SEC));
-        clipWrap.style.width = wpx + 'px';
+        if(liveClipWrap) liveClipWrap.style.width = wpx + 'px';
         drawRealWave(track, ta.trimIn, ta.trimOut);
       };
       const onUp = ()=>{
-        handle.removeEventListener('pointermove', onMove);
-        handle.removeEventListener('pointerup', onUp);
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
         document.body.style.cursor = '';
+        if(typeof saveProjectSoon==='function') saveProjectSoon();
       };
-      handle.addEventListener('pointermove', onMove);
-      handle.addEventListener('pointerup', onUp);
+      document.addEventListener('pointermove', onMove);
+      document.addEventListener('pointerup', onUp);
     });
   }
   wireAudioTrim('audioTrimLeft', 'left');

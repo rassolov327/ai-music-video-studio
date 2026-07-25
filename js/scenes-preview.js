@@ -273,6 +273,10 @@ function renderSceneSettingsPanel(body, scene){
           ${TIME_OF_DAY.map(t=>`<option ${scene.timeOfDay===t?'selected':''}>${t}</option>`).join('')}
         </select>
       </div>
+      <div class="cf-field"><label>Lighting</label>
+        <input type="text" id="sceneLightInput" placeholder="e.g. low key, back light, blue rim" value="${scene.lighting||''}">
+        <div class="gen-hint" style="margin-top:4px;">Set once for the whole scene — shots can override this individually if a specific moment needs different light.</div>
+      </div>
       <div class="cf-field"><label>Description</label>
         <textarea id="sceneDescInput" style="min-height:80px;" placeholder="What happens in this scene...">${scene.description||''}</textarea>
       </div>
@@ -301,6 +305,7 @@ function renderSceneSettingsPanel(body, scene){
   });
   document.getElementById('sceneLocInput').addEventListener('change', (e)=>{ scene.location = e.target.value; if(typeof saveProjectSoon==='function') saveProjectSoon(); });
   document.getElementById('sceneTimeInput').addEventListener('change', (e)=>{ scene.timeOfDay = e.target.value; if(typeof saveProjectSoon==='function') saveProjectSoon(); });
+  document.getElementById('sceneLightInput').addEventListener('input', (e)=>{ scene.lighting = e.target.value; if(typeof saveProjectSoon==='function') saveProjectSoon(); });
   document.getElementById('sceneDescInput').addEventListener('input', (e)=>{ scene.description = e.target.value; if(typeof saveProjectSoon==='function') saveProjectSoon(); });
 
   const addBtn = document.getElementById('addCharacterBtn');
@@ -391,6 +396,8 @@ function renderInspectorPanel(){
         return `<div class="char-row checked" style="cursor:default;">${p ? p.name : '(deleted)'}</div>`;
       }).join('');
 
+  const sameAsScene = shot.lightingSameAsScene !== false; // default true — matches how a shoot actually works: light the scene, correct individual shots only when needed
+
   body.innerHTML = `
     <div style="padding:14px;">
       <div class="cat-count" style="font-size:11px;margin-bottom:10px;">${scene.name}</div>
@@ -400,13 +407,12 @@ function renderInspectorPanel(){
       <div class="field-group">
         <div class="field-group-title">Characters <span style="font-weight:400;color:var(--text-3);">— inherited from scene</span></div>
         <div class="char-list">${sceneCharHtml}</div>
-        <button class="cf-btn" id="jumpToSceneBtn" style="margin-top:8px;width:100%;">Edit in Scene settings</button>
       </div>
 
       <div class="field-group">
         <div class="field-group-title">Props <span style="font-weight:400;color:var(--text-3);">— inherited from scene</span></div>
         <div class="char-list">${scenePropHtml}</div>
-        <button class="cf-btn" id="jumpToSceneBtn2" style="margin-top:8px;width:100%;">Edit in Scene settings</button>
+        <button class="cf-btn" id="jumpToSceneBtn" style="margin-top:8px;width:100%;">Edit in Scene settings</button>
       </div>
 
       <div class="cf-field"><label>Shot size</label>
@@ -422,7 +428,10 @@ function renderInspectorPanel(){
         </select>
       </div>
       <div class="cf-field"><label>Lighting</label>
-        <input type="text" id="shotLightInput" placeholder="e.g. low key, back light, blue rim" value="${shot.lighting||''}">
+        <label class="char-row" style="margin-bottom:6px;font-size:11.5px;font-weight:400;">
+          <input type="checkbox" id="shotLightSameChk" ${sameAsScene ? 'checked' : ''}> Same as scene
+        </label>
+        <input type="text" id="shotLightInput" placeholder="e.g. low key, back light, blue rim" value="${sameAsScene ? (scene.lighting||'') : (shot.lighting||'')}" ${sameAsScene ? 'disabled' : ''}>
       </div>
       <div class="cf-field"><label>Description <span style="color:var(--text-3);font-weight:400;">— prompt for AI generation</span></label>
         <textarea id="shotDescInput" style="min-height:90px;" placeholder="Describe exactly what should happen in this shot...">${shot.description||''}</textarea>
@@ -439,7 +448,6 @@ function renderInspectorPanel(){
     (result)=>{ shot.description = result; });
 
   document.getElementById('jumpToSceneBtn').onclick = ()=> setFocus(scene.id, null);
-  document.getElementById('jumpToSceneBtn2').onclick = ()=> setFocus(scene.id, null);
   document.getElementById('shotNameInput').addEventListener('input', (e)=>{
     shot.name = e.target.value;
     renderTimelineScenes();
@@ -451,7 +459,12 @@ function renderInspectorPanel(){
   });
   document.getElementById('shotSizeInput').addEventListener('change', (e)=>{ shot.shotSize = e.target.value; });
   document.getElementById('shotMoveInput').addEventListener('change', (e)=>{ shot.cameraMove = e.target.value; });
-  document.getElementById('shotLightInput').addEventListener('input', (e)=>{ shot.lighting = e.target.value; });
+  document.getElementById('shotLightSameChk').addEventListener('change', (e)=>{
+    shot.lightingSameAsScene = e.target.checked;
+    renderInspectorPanel();
+    if(typeof saveProjectSoon==='function') saveProjectSoon();
+  });
+  document.getElementById('shotLightInput').addEventListener('input', (e)=>{ shot.lighting = e.target.value; if(typeof saveProjectSoon==='function') saveProjectSoon(); });
   document.getElementById('shotDescInput').addEventListener('input', (e)=>{ shot.description = e.target.value; });
 }
 

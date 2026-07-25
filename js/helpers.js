@@ -241,7 +241,8 @@ function buildShotPrompt(shot, scene){
   if(shot.description) parts.push(shot.description);
   if(shot.shotSize) parts.push(shot.shotSize.toLowerCase());
   if(shot.cameraMove && shot.cameraMove!=='Static') parts.push(shot.cameraMove.toLowerCase()+' camera movement');
-  if(shot.lighting) parts.push(shot.lighting);
+  const effectiveLighting = (shot.lightingSameAsScene !== false) ? (scene && scene.lighting) : shot.lighting;
+  if(effectiveLighting) parts.push(effectiveLighting);
 
   // props assigned to the scene — present in every shot of it, not tied to a character
   if(scene && scene.props && scene.props.length){
