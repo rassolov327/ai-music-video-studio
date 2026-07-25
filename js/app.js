@@ -13,6 +13,7 @@ function goHome(){
   wireFolderButton();
   wirePageTabs();
   wireArchivePage();
+  wireCreditsIndicator();
   loadModelList();
   startBackgroundTaskWatcher();
   const restored = await initProjectStore();

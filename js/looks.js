@@ -102,7 +102,10 @@ function renderLookGenSection(sectionEl, look){
 
 async function renderLookTaskSlot(look){
   const slot = document.getElementById('lookTaskSlot');
-  if(!slot || !look.id) return; // not saved yet — needs an id before it can be queued
+  if(!slot) return;
+  const looksCat = state.categories.find(c=>c.key==='looks');
+  const isSaved = looksCat && looksCat.items.some(x=> x.id===look.id);
+  if(!isSaved) return; // not saved yet — needs to actually be in the asset list before it can be queued
   const available = await checkPaidGenerationAvailable();
   const freshSlot = document.getElementById('lookTaskSlot');
   if(!freshSlot) return;
@@ -155,7 +158,7 @@ function showLookForm(cat, editIdx){
 
   // working copy so Cancel doesn't leave a half-generated look behind
   const draft = existing ? Object.assign({}, existing) : {
-    id: null, name: defaultName, description: '',
+    id: 'lk' + (lookSeq++), name: defaultName, description: '',
     previewImage: null, approved: false,
   };
 
@@ -176,11 +179,12 @@ function showLookForm(cat, editIdx){
   saveBtn.onclick = ()=>{
     if(nameInput.value.trim().length===0) return;
     const data = {
-      id: existing && existing.id ? existing.id : 'lk' + (lookSeq++),
+      id: draft.id,
       name: nameInput.value.trim(),
       description: descInput.value.trim(),
       previewImage: draft.previewImage,
       approved: draft.approved,
+      _assetFiles: draft._assetFiles,
     };
     if(isEdit) cat.items[editIdx] = data;
     else cat.items.push(data);

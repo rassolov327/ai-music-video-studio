@@ -126,8 +126,8 @@ function renderLocGenSection(cat, idx){
 // ---------- preview: location creation / edit form ----------
 function showLocationForm(cat, editIdx){
   pausePlayback();
-  const isEdit = typeof editIdx === 'number';
-  const existing = isEdit ? cat.items[editIdx] : null;
+  let isEdit = typeof editIdx === 'number';
+  let existing = isEdit ? cat.items[editIdx] : null;
 
   previewEl.classList.remove('align-tl');
   previewEl.onclick = null;
@@ -174,10 +174,12 @@ function showLocationForm(cat, editIdx){
         <div class="cf-field">
           <label>Prompt</label>
           <textarea id="aiPromptInput" style="min-height:70px;" placeholder="Describe the location — e.g. a dim roadside bar, neon signs, wooden counter, smoke in the air">${existing && existing.description ? existing.description : ''}</textarea>
+          <button class="cf-btn ai-assist-btn" id="aiPromptAssistBtn" style="width:100%;margin-top:6px;display:none;">✨ Improve with AI</button>
         </div>
         <button class="gen-btn" id="aiGenBtn">Generate free preview <span class="gen-cost">Free</span></button>
         <div class="gen-hint">Uses Pollinations.ai — no key, no cost, rough quality. Good for blocking out the look before a real generation pass later.</div>
         <div id="aiResultWrap"></div>
+        <div id="aiPaidGenSlot"></div>
       </div>
 
       <div class="cf-actions">
@@ -292,6 +294,33 @@ function showLocationForm(cat, editIdx){
   const aiGenBtn = document.getElementById('aiGenBtn');
   const aiPromptInput = document.getElementById('aiPromptInput');
   const aiResultWrap = document.getElementById('aiResultWrap');
+  wireAiAssistButton('aiPromptAssistBtn', 'aiPromptInput',
+    (typeof buildAssetContextSummary==='function' ? buildAssetContextSummary() + '\n\n' : '')
+    + 'Rewrite this rough location idea into a vivid, specific setting description for an AI image generator — layout, furniture, materials, lighting style. One or two sentences. Reply with only the rewritten description, nothing else.',
+    ()=>{});
+
+  async function renderAiPaidGenSlot(){
+    const slot = document.getElementById('aiPaidGenSlot');
+    if(!slot) return;
+    const available = await checkPaidGenerationAvailable();
+    const freshSlot = document.getElementById('aiPaidGenSlot');
+    if(!freshSlot) return;
+    if(!available) return;
+    freshSlot.innerHTML = `<button class="cf-btn primary" id="aiPaidGenBtn" style="width:100%;margin-top:10px;">Add to Tasks (real AI)</button>`;
+    document.getElementById('aiPaidGenBtn').onclick = async ()=>{
+      const prompt = aiPromptInput.value.trim();
+      if(!prompt){ alert('Write a prompt first.'); return; }
+      const btn = document.getElementById('aiPaidGenBtn');
+      btn.disabled = true; btn.textContent = 'Saving…';
+      if(!notesInput.value.trim()) notesInput.value = prompt; // so the queued generation's prompt matches what was typed here
+      const saved = await doSave(true); // auto-save, but stay on this tab
+      if(!saved){ btn.disabled = false; btn.textContent = 'Add to Tasks (real AI)'; return; }
+      queueAssetGeneration('locations', saved);
+      freshSlot.innerHTML = `<div class="gen-hint" style="color:#5fae7a;">Added to the TASKS queue.</div>`;
+    };
+  }
+  renderAiPaidGenSlot();
+
   aiGenBtn.onclick = ()=>{
     const prompt = aiPromptInput.value.trim();
     if(!prompt) return;
@@ -340,8 +369,8 @@ function showLocationForm(cat, editIdx){
     if(isEdit) showLocationCard(cat, editIdx);
     else showLocationGallery(cat);
   };
-  saveBtn.onclick = async ()=>{
-    if(nameInput.value.trim().length===0) return;
+  async function doSave(stayOnForm){
+    if(nameInput.value.trim().length===0) return null;
     const data = {
       id: existing && existing.id ? existing.id : 'l' + (locSeq++),
       name: nameInput.value.trim(),
@@ -353,20 +382,27 @@ function showLocationForm(cat, editIdx){
       referenceCard: formRefText,
       _assetFiles: existing ? existing._assetFiles : undefined,
     };
+    let savedIdx;
     if(isEdit){
       cat.items[editIdx] = data;
-      renderAssets();
-      showLocationCard(cat, editIdx);
+      savedIdx = editIdx;
     } else {
       cat.items.push(data);
-      renderAssets();
-      showLocationGallery(cat);
+      savedIdx = cat.items.length - 1;
+      existing = data; isEdit = true; editIdx = savedIdx; // this form now edits the just-created item
+    }
+    renderAssets();
+    if(!stayOnForm){
+      if(isEdit) showLocationCard(cat, savedIdx);
+      else showLocationGallery(cat);
     }
     if(typeof persistLocationImages==='function'){
       if(typeof setSaveStatus==='function') setSaveStatus('saving');
       await persistLocationImages(data);
     }
     if(typeof saveProjectSoon==='function') saveProjectSoon();
-  };
+    return data;
+  }
+  saveBtn.onclick = ()=> doSave(false);
 }
 

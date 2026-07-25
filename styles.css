@@ -851,3 +851,23 @@
   }
   .new-idea-title{font-size:14px;font-weight:600;color:var(--text-1);margin-bottom:12px;}
   .new-idea-ref-img{width:100%;border-radius:8px;margin-bottom:14px;display:block;}
+
+  /* ---- KIE.ai credits indicator — small, fixed bottom-right, visible on every page ---- */
+  .credits-indicator{
+    position:fixed;right:12px;bottom:12px;z-index:900;
+    display:flex;align-items:center;gap:5px;
+    background:var(--bg-panel);border:1px solid var(--line);border-radius:14px;
+    padding:4px 9px;font-size:10.5px;font-family:var(--font-mono);color:var(--text-2);
+    cursor:pointer;user-select:none;box-shadow:0 2px 8px rgba(0,0,0,.25);
+  }
+  .credits-indicator:hover{border-color:#3a3e48;color:var(--text-1);}
+  .credits-dot{width:7px;height:7px;border-radius:50%;background:#6a6f78;flex:0 0 auto;}
+  .credits-dot.green{background:#5fae7a;}
+  .credits-dot.yellow{background:var(--warn);}
+  .credits-dot.red{background:var(--danger);}
+  .credits-dot.grey{background:#6a6f78;}
+  .credits-spinner{
+    width:9px;height:9px;border-radius:50%;border:1.5px solid var(--line);border-top-color:var(--text-2);
+    animation:taskspin .7s linear infinite;flex:0 0 auto;
+  }
+  .credits-spinner.hidden{display:none;}

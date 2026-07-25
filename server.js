@@ -159,6 +159,31 @@ app.get('/api/models', (req, res) => {
   res.json({ models: MODELS.map(m => ({ id: m.id, label: m.label, costUsd: m.costUsd, supportsReferenceImage: !!m.supportsReferenceImage })) });
 });
 
+// ---- KIE.ai credit balance (for the small indicator in the corner of the UI) ----
+const KIE_CREDIT_USD = 0.005; // KIE's own published rate — see docs.kie.ai
+app.get('/api/kie-credits', async (req, res) => {
+  if (!KIE_API_KEY) {
+    return res.status(503).json({ error: 'not_configured', message: 'KIE_API_KEY is not set on the server yet.' });
+  }
+  try {
+    const creditRes = await fetch(`${KIE_BASE}/api/v1/chat/credit`, {
+      headers: { Authorization: `Bearer ${KIE_API_KEY}` },
+    });
+    const data = await creditRes.json().catch(() => null);
+    if (!creditRes.ok || !data || typeof data.data !== 'number') {
+      return res.status(502).json({ error: 'provider_error', message: (data && data.msg) || ('KIE.ai rejected the request (HTTP ' + creditRes.status + ').') });
+    }
+    const credits = data.data;
+    const cheapestModel = MODELS.reduce((min, m) => (m.costUsd && (!min || m.costUsd < min.costUsd)) ? m : min, null);
+    const usd = credits * KIE_CREDIT_USD;
+    const imagesRemaining = cheapestModel ? Math.floor(usd / cheapestModel.costUsd) : null;
+    res.json({ credits, usd, imagesRemaining });
+  } catch (err) {
+    console.error('[server] /api/kie-credits failed:', err);
+    res.status(500).json({ error: 'server_error', message: String(err && err.message || err) });
+  }
+});
+
 function closestAspectRatio(width, height) {
   const ratio = (width && height) ? width / height : 16 / 9;
   const options = ['1:1', '3:2', '2:3', '16:9', '9:16', '4:3', '3:4'];

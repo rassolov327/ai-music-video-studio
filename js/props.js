@@ -126,8 +126,8 @@ function renderPropGenSection(cat, idx){
 // ---------- preview: prop creation / edit form ----------
 function showPropForm(cat, editIdx){
   pausePlayback();
-  const isEdit = typeof editIdx === 'number';
-  const existing = isEdit ? cat.items[editIdx] : null;
+  let isEdit = typeof editIdx === 'number';
+  let existing = isEdit ? cat.items[editIdx] : null;
 
   previewEl.classList.remove('align-tl');
   previewEl.onclick = null;
@@ -174,10 +174,12 @@ function showPropForm(cat, editIdx){
         <div class="cf-field">
           <label>Prompt</label>
           <textarea id="aiPromptInput" style="min-height:70px;" placeholder="Describe the prop — e.g. a worn leather-top wooden bar counter with brass rail">${existing && existing.description ? existing.description : ''}</textarea>
+          <button class="cf-btn ai-assist-btn" id="aiPromptAssistBtn" style="width:100%;margin-top:6px;display:none;">✨ Improve with AI</button>
         </div>
         <button class="gen-btn" id="aiGenBtn">Generate free preview <span class="gen-cost">Free</span></button>
         <div class="gen-hint">Uses Pollinations.ai — no key, no cost, rough quality. Good for blocking out the look before a real generation pass later.</div>
         <div id="aiResultWrap"></div>
+        <div id="aiPaidGenSlot"></div>
       </div>
 
       <div class="cf-actions">
@@ -292,6 +294,33 @@ function showPropForm(cat, editIdx){
   const aiGenBtn = document.getElementById('aiGenBtn');
   const aiPromptInput = document.getElementById('aiPromptInput');
   const aiResultWrap = document.getElementById('aiResultWrap');
+  wireAiAssistButton('aiPromptAssistBtn', 'aiPromptInput',
+    (typeof buildAssetContextSummary==='function' ? buildAssetContextSummary() + '\n\n' : '')
+    + 'Rewrite this rough prop idea into a vivid, specific object description for an AI image generator — material, color, wear, size. One or two sentences. Reply with only the rewritten description, nothing else.',
+    ()=>{});
+
+  async function renderAiPaidGenSlot(){
+    const slot = document.getElementById('aiPaidGenSlot');
+    if(!slot) return;
+    const available = await checkPaidGenerationAvailable();
+    const freshSlot = document.getElementById('aiPaidGenSlot');
+    if(!freshSlot) return;
+    if(!available) return;
+    freshSlot.innerHTML = `<button class="cf-btn primary" id="aiPaidGenBtn" style="width:100%;margin-top:10px;">Add to Tasks (real AI)</button>`;
+    document.getElementById('aiPaidGenBtn').onclick = async ()=>{
+      const prompt = aiPromptInput.value.trim();
+      if(!prompt){ alert('Write a prompt first.'); return; }
+      const btn = document.getElementById('aiPaidGenBtn');
+      btn.disabled = true; btn.textContent = 'Saving…';
+      if(!notesInput.value.trim()) notesInput.value = prompt;
+      const saved = await doSave(true);
+      if(!saved){ btn.disabled = false; btn.textContent = 'Add to Tasks (real AI)'; return; }
+      queueAssetGeneration('props', saved);
+      freshSlot.innerHTML = `<div class="gen-hint" style="color:#5fae7a;">Added to the TASKS queue.</div>`;
+    };
+  }
+  renderAiPaidGenSlot();
+
   aiGenBtn.onclick = ()=>{
     const prompt = aiPromptInput.value.trim();
     if(!prompt) return;
@@ -340,8 +369,8 @@ function showPropForm(cat, editIdx){
     if(isEdit) showPropCard(cat, editIdx);
     else showPropGallery(cat);
   };
-  saveBtn.onclick = async ()=>{
-    if(nameInput.value.trim().length===0) return;
+  async function doSave(stayOnForm){
+    if(nameInput.value.trim().length===0) return null;
     const data = {
       id: existing && existing.id ? existing.id : 'pr' + (propSeq++),
       name: nameInput.value.trim(),
@@ -353,19 +382,26 @@ function showPropForm(cat, editIdx){
       referenceCard: formRefText,
       _assetFiles: existing ? existing._assetFiles : undefined,
     };
+    let savedIdx;
     if(isEdit){
       cat.items[editIdx] = data;
-      renderAssets();
-      showPropCard(cat, editIdx);
+      savedIdx = editIdx;
     } else {
       cat.items.push(data);
-      renderAssets();
-      showPropGallery(cat);
+      savedIdx = cat.items.length - 1;
+      existing = data; isEdit = true; editIdx = savedIdx;
+    }
+    renderAssets();
+    if(!stayOnForm){
+      if(isEdit) showPropCard(cat, savedIdx);
+      else showPropGallery(cat);
     }
     if(typeof persistPropImages==='function'){
       if(typeof setSaveStatus==='function') setSaveStatus('saving');
       await persistPropImages(data);
     }
     if(typeof saveProjectSoon==='function') saveProjectSoon();
-  };
+    return data;
+  }
+  saveBtn.onclick = ()=> doSave(false);
 }
