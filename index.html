@@ -151,7 +151,13 @@
     <div class="tasks-header">
       <div class="tasks-title">Generation Tasks</div>
       <div class="tasks-actions">
-        <label class="tasks-select-all"><input type="checkbox" id="tasksSelectAll"> Select all drafts</label>
+        <div class="tasks-sort-row">
+          <label for="tasksSortSelect">Sort:</label>
+          <select id="tasksSortSelect">
+            <option value="status">By status</option>
+            <option value="newest">Newest first</option>
+          </select>
+        </div>
         <button class="cf-btn primary" id="tasksGenerateSelectedBtn" disabled>Generate</button>
       </div>
     </div>

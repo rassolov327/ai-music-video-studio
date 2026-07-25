@@ -3,6 +3,12 @@ let tasksRefreshTimer = null;
 let liveTasks = []; // last fetched snapshot from the server
 let modelOptions = [];
 let appliedTaskIds = new Set(); // avoid re-applying the same finished result repeatedly
+// Selection lives here, not in the DOM — renderTasksGrid() rebuilds the tiles every few
+// seconds (autosave-driven and its own refresh loop both touch this), and DOM-held state
+// like a checkbox's checked attribute gets wiped out on every rebuild. Keeping it in a
+// plain Set means selection survives re-renders untouched.
+let selectedDraftIds = new Set();
+let tasksSortMode = 'status'; // 'status' | 'newest'
 
 function wirePageTabs(){
   document.querySelectorAll('.page-tab').forEach(tab=>{
@@ -12,11 +18,11 @@ function wirePageTabs(){
   document.getElementById('taskPreviewClose').onclick = ()=> modal.classList.add('hidden');
   modal.onclick = (e)=>{ if(e.target===modal) modal.classList.add('hidden'); };
 
-  document.getElementById('tasksSelectAll').onchange = (e)=>{
-    document.querySelectorAll('.task-tile-select').forEach(cb=>{ cb.checked = e.target.checked; });
-    updateGenerateSelectedButton();
-  };
   document.getElementById('tasksGenerateSelectedBtn').onclick = generateSelectedDraftTasks;
+  document.getElementById('tasksSortSelect').onchange = (e)=>{
+    tasksSortMode = e.target.value;
+    renderTasksGrid();
+  };
 }
 
 function showPage(page){
@@ -59,6 +65,10 @@ async function refreshTasks(){
   } catch(err){
     liveTasks = [];
   }
+  // drop selections for drafts that no longer exist (sent or deleted elsewhere)
+  const draftIds = new Set((state.taskQueue||[]).map(t=> t.id));
+  selectedDraftIds.forEach(id=>{ if(!draftIds.has(id)) selectedDraftIds.delete(id); });
+
   renderTasksGrid();
   applyFinishedTasks(liveTasks);
   updateTasksBadge();
@@ -79,55 +89,78 @@ function modelSelectHtml(selectedId, extraClass){
   return `<select class="${extraClass||''}">${opts}</select>`;
 }
 
+// Status priority for the default sort — drafts need a decision, pending is in progress,
+// failed needs attention, success is already settled.
+const STATUS_ORDER = { draft:0, pending:1, failed:2, success:3 };
+
+function getSortedEntries(){
+  const drafts = (state.taskQueue||[]).map(t=> ({ type:'draft', status:'draft', createdAt:t.createdAt, data:t }));
+  const live = liveTasks.map(t=> ({ type:'live', status:t.status, createdAt:t.createdAt, data:t }));
+  const all = drafts.concat(live);
+  if(tasksSortMode==='newest'){
+    all.sort((a,b)=> b.createdAt - a.createdAt);
+  } else {
+    all.sort((a,b)=>{
+      const diff = (STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9);
+      return diff!==0 ? diff : b.createdAt - a.createdAt;
+    });
+  }
+  return all;
+}
+
 function renderTasksGrid(){
   const grid = document.getElementById('tasksGrid');
   if(!grid) return;
-  const drafts = state.taskQueue || [];
-  if(drafts.length===0 && liveTasks.length===0){
+  const entries = getSortedEntries();
+  if(entries.length===0){
     grid.innerHTML = `<div class="tasks-empty">No generation tasks yet. Use "Add to Tasks (real AI)" on a shot to queue one — pick a model here and hit Generate whenever you're ready.</div>`;
     updateGenerateSelectedButton();
     return;
   }
 
-  const draftTiles = drafts.map(t=>`
-    <div class="task-tile draft" data-draft-id="${t.id}">
-      <div class="task-tile-thumb">
-        <input type="checkbox" class="task-tile-select" title="Select for batch generate">
-        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"></rect><circle cx="9" cy="11" r="2"></circle><path d="M21 16l-5-4-4 3-3-2-6 5"></path></svg>
-        <div class="task-tile-status draft">draft</div>
-        <div class="task-tile-trash" title="Remove from queue"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></div>
-      </div>
-      <div class="task-tile-body">
-        <div class="task-tile-scene">${t.sceneName || 'Scene'}</div>
-        <div class="task-tile-shot">${t.shotName || 'Shot'}</div>
-        ${modelSelectHtml(t.model || (modelOptions[0] && modelOptions[0].id), 'task-tile-model-select')}
-        <button class="cf-btn primary task-tile-send-btn" style="width:100%;margin-top:8px;">Generate</button>
-      </div>
-    </div>`).join('');
-
-  const liveTiles = liveTasks.map(t=>{
-    const meta = t.meta || {};
-    const thumb = t.status==='success' && t.imageUrl
-      ? `<img src="${t.imageUrl}">`
-      : t.status==='failed'
-        ? `<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="9"></circle><line x1="9" y1="9" x2="15" y2="15"></line><line x1="15" y1="9" x2="9" y2="15"></line></svg>`
-        : `<div class="task-tile-spin"></div>`;
-    return `
-      <div class="task-tile" data-task-id="${t.taskId}">
-        <div class="task-tile-thumb">
-          ${thumb}
-          <div class="task-tile-status ${t.status}">${t.status}</div>
-          <div class="task-tile-trash" title="Remove from list"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></div>
-        </div>
-        <div class="task-tile-body">
-          <div class="task-tile-scene">${meta.sceneName || 'Scene'}</div>
-          <div class="task-tile-shot">${meta.shotName || 'Shot'}</div>
-          <div class="task-tile-model">${t.model || ''}</div>
-        </div>
-      </div>`;
+  grid.innerHTML = entries.map(entry=>{
+    if(entry.type==='draft'){
+      const t = entry.data;
+      const selected = selectedDraftIds.has(t.id);
+      return `
+        <div class="task-tile draft${selected ? ' selected' : ''}" data-draft-id="${t.id}">
+          <div class="task-tile-thumb" title="Click to select for batch generate">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"></rect><circle cx="9" cy="11" r="2"></circle><path d="M21 16l-5-4-4 3-3-2-6 5"></path></svg>
+            <div class="task-tile-status draft">draft</div>
+            ${selected ? '<div class="task-tile-selected-badge"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></div>' : ''}
+            <div class="task-tile-trash" title="Remove from queue"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></div>
+          </div>
+          <div class="task-tile-body">
+            <div class="task-tile-scene">${t.sceneName || 'Scene'}</div>
+            <div class="task-tile-shot">${t.shotName || 'Shot'}</div>
+            ${modelSelectHtml(t.model || (modelOptions[0] && modelOptions[0].id), 'task-tile-model-select')}
+            <button class="cf-btn primary task-tile-send-btn" style="width:100%;margin-top:8px;">Generate</button>
+          </div>
+        </div>`;
+    } else {
+      const t = entry.data;
+      const meta = t.meta || {};
+      const thumb = t.status==='success' && t.imageUrl
+        ? `<img src="${t.imageUrl}">`
+        : t.status==='failed'
+          ? `<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="9"></circle><line x1="9" y1="9" x2="15" y2="15"></line><line x1="15" y1="9" x2="9" y2="15"></line></svg>`
+          : `<div class="task-tile-spin"></div>`;
+      return `
+        <div class="task-tile" data-task-id="${t.taskId}">
+          <div class="task-tile-thumb">
+            ${thumb}
+            <div class="task-tile-status ${t.status}">${t.status}</div>
+            <div class="task-tile-trash" title="Remove from list"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></div>
+          </div>
+          <div class="task-tile-body">
+            <div class="task-tile-scene">${meta.sceneName || 'Scene'}</div>
+            <div class="task-tile-shot">${meta.shotName || 'Shot'}</div>
+            <div class="task-tile-model">${t.model || ''}</div>
+          </div>
+        </div>`;
+    }
   }).join('');
 
-  grid.innerHTML = draftTiles + liveTiles;
   wireDraftTiles();
   wireLiveTiles();
   updateGenerateSelectedButton();
@@ -142,10 +175,15 @@ function wireDraftTiles(){
       draft.model = e.target.value;
       if(typeof saveProjectSoon==='function') saveProjectSoon();
     };
-    tile.querySelector('.task-tile-select').onchange = updateGenerateSelectedButton;
+    tile.querySelector('.task-tile-thumb').onclick = ()=>{
+      if(selectedDraftIds.has(draftId)) selectedDraftIds.delete(draftId);
+      else selectedDraftIds.add(draftId);
+      renderTasksGrid();
+    };
     tile.querySelector('.task-tile-trash').onclick = (e)=>{
       e.stopPropagation();
       state.taskQueue = (state.taskQueue||[]).filter(t=> t.id!==draftId);
+      selectedDraftIds.delete(draftId);
       if(typeof saveProjectSoon==='function') saveProjectSoon();
       renderTasksGrid();
       updateTasksBadge();
@@ -180,7 +218,7 @@ function wireLiveTiles(){
 function updateGenerateSelectedButton(){
   const btn = document.getElementById('tasksGenerateSelectedBtn');
   if(!btn) return;
-  const count = document.querySelectorAll('.task-tile-select:checked').length;
+  const count = selectedDraftIds.size;
   btn.disabled = count===0;
   btn.textContent = count ? ('Generate (' + count + ')') : 'Generate';
 }
@@ -194,6 +232,7 @@ async function sendDraftTask(draftId){
   try{
     await sendGenerationTask(draft);
     state.taskQueue = (state.taskQueue||[]).filter(t=> t.id!==draftId);
+    selectedDraftIds.delete(draftId);
     if(typeof saveProjectSoon==='function') saveProjectSoon();
     await refreshTasks();
   } catch(err){
@@ -203,10 +242,8 @@ async function sendDraftTask(draftId){
 }
 
 async function generateSelectedDraftTasks(){
-  const selectedIds = Array.from(document.querySelectorAll('.task-tile.draft')).filter(tile=>
-    tile.querySelector('.task-tile-select').checked
-  ).map(tile=> tile.dataset.draftId);
-  for(const id of selectedIds){
+  const ids = Array.from(selectedDraftIds);
+  for(const id of ids){
     await sendDraftTask(id);
   }
 }
