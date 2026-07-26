@@ -19,9 +19,12 @@ const state = {
   // from the Tasks list or the shot/asset it was made for gets deleted) — a running history
   // to pull old results back from, not just a queue of current work.
   archive: [], // [{ id, kind, sourceLabel, model, prompt, photo, _assetFiles, createdAt }]
+  // Script tab: the pasted text, and the last structured breakdown Gemini produced from it.
+  // Nothing here ever touches the real project until "Export to project" is clicked.
+  script: { text: '', proposal: null },
 };
 
-let sceneSeq = 1, shotSeq = 1, paletteSeq = 0, charSeq = 1, locSeq = 1, trackSeq = 1, lookSeq = 1, propSeq = 1, draftTaskSeq = 1, archiveSeq = 1;
+let sceneSeq = 1, shotSeq = 1, paletteSeq = 0, charSeq = 1, locSeq = 1, trackSeq = 1, lookSeq = 1, propSeq = 1, draftTaskSeq = 1, archiveSeq = 1, scriptItemSeq = 1;
 let focus = { sceneId: null, shotId: null };
 let timelineMode = 'assembly'; // 'assembly' (spaced, insert-between) | 'edit' (flush clips, drag-to-reorder within scene)
 let playheadX = 0;

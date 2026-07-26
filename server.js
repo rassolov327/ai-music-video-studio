@@ -160,6 +160,131 @@ const MODELS = [
   { id: 'qwen2/text-to-image', label: 'Qwen2', supportsImageSize: true, costUsd: 0.02 },
   { id: 'nano-banana-pro', label: 'Nano Banana Pro', supportsAspectRatio: true, supportsResolution: true, supportsReferenceImage: true, costUsd: 0.04 },
 ];
+// ---- Script tab: breaks a pasted script into a structured scenes/characters/locations/
+// props/looks proposal. Uses Gemini's own JSON response mode (responseMimeType +
+// responseSchema) rather than just asking nicely in the prompt — far more reliable than
+// hoping the model's free-text output happens to be valid, parseable JSON.
+app.post('/api/assist/analyze-script', async (req, res) => {
+  if (!GEMINI_API_KEY) {
+    return res.status(503).json({ error: 'not_configured', message: 'GEMINI_API_KEY is not set on the server yet.' });
+  }
+  const { scriptText, existingCharacterNames, shotSizes, cameraMoves, songDurationSec } = req.body || {};
+  if (!scriptText || typeof scriptText !== 'string' || !scriptText.trim()) {
+    return res.status(400).json({ error: 'bad_request', message: 'scriptText is required.' });
+  }
+  const sizesList = Array.isArray(shotSizes) && shotSizes.length ? shotSizes : ['Wide Shot', 'Medium Shot', 'Close-Up'];
+  const movesList = Array.isArray(cameraMoves) && cameraMoves.length ? cameraMoves : ['Static', 'Push In', 'Pull Out'];
+  const knownNames = Array.isArray(existingCharacterNames) ? existingCharacterNames : [];
+
+  const instruction = [
+    'You are a film/music-video director\'s assistant. Break the following script into a structured production breakdown.',
+    'Group the action into scenes (a scene = one location + one continuous span of time), and within each scene propose a shot list — individual camera shots that would actually film that scene\'s action, each with a concrete visual description, a shotSize, and a cameraMove.',
+    'shotSize must be exactly one of: ' + sizesList.join(', ') + '.',
+    'cameraMove must be exactly one of: ' + movesList.join(', ') + '.',
+    knownNames.length ? ('These characters already exist in the project — reuse their exact names if the script refers to them: ' + knownNames.join(', ') + '.') : '',
+    songDurationSec ? ('There is a song on the timeline, ' + songDurationSec + ' seconds long — keep the total number of shots reasonable for that length, but do not force scenes to align to any particular song structure.') : '',
+    'Only include a "looks" entry for a character if the script actually describes specific clothing/outfit — do not invent one. Every character/location/prop/look needs a short name and a short visual description suitable as an image-generation prompt.',
+    'Respond with ONLY the JSON breakdown, nothing else.',
+  ].filter(Boolean).join('\n');
+
+  const responseSchema = {
+    type: 'object',
+    properties: {
+      scenes: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            name: { type: 'string' },
+            location: { type: 'string' },
+            timeOfDay: { type: 'string' },
+            characters: { type: 'array', items: { type: 'string' } },
+            props: { type: 'array', items: { type: 'string' } },
+            shots: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  description: { type: 'string' },
+                  shotSize: { type: 'string' },
+                  cameraMove: { type: 'string' },
+                },
+                required: ['description', 'shotSize', 'cameraMove'],
+              },
+            },
+          },
+          required: ['name', 'location', 'shots'],
+        },
+      },
+      characters: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: { name: { type: 'string' }, role: { type: 'string' }, description: { type: 'string' } },
+          required: ['name', 'description'],
+        },
+      },
+      locations: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: { name: { type: 'string' }, description: { type: 'string' } },
+          required: ['name', 'description'],
+        },
+      },
+      props: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: { name: { type: 'string' }, description: { type: 'string' } },
+          required: ['name', 'description'],
+        },
+      },
+      looks: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: { name: { type: 'string' }, characterName: { type: 'string' }, description: { type: 'string' } },
+          required: ['name', 'characterName', 'description'],
+        },
+      },
+    },
+    required: ['scenes', 'characters', 'locations', 'props', 'looks'],
+  };
+
+  try {
+    const geminiRes = await fetch(`${GEMINI_BASE}/models/${GEMINI_MODEL}:generateContent`, {
+      method: 'POST',
+      headers: { 'x-goog-api-key': GEMINI_API_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: instruction + '\n\n---SCRIPT---\n\n' + scriptText }] }],
+        generationConfig: { responseMimeType: 'application/json', responseSchema },
+      }),
+    });
+    const data = await geminiRes.json().catch(() => null);
+    if (!geminiRes.ok) {
+      console.warn('[server] Gemini script-analysis request failed:', JSON.stringify(data));
+      return res.status(502).json({ error: 'provider_error', message: (data && data.error && data.error.message) || ('Gemini rejected the request (HTTP ' + geminiRes.status + ').') });
+    }
+    const text = data && data.candidates && data.candidates[0] && data.candidates[0].content
+      && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text;
+    if (!text) {
+      console.warn('[server] Gemini returned no usable text for script analysis:', JSON.stringify(data));
+      return res.status(502).json({ error: 'provider_error', message: 'Gemini returned an empty response — it may have been blocked by a safety filter.' });
+    }
+    let parsed;
+    try { parsed = JSON.parse(text); }
+    catch (err) {
+      console.warn('[server] Gemini script-analysis output was not valid JSON:', text.slice(0, 500));
+      return res.status(502).json({ error: 'provider_error', message: 'Gemini returned something that was not valid JSON.' });
+    }
+    res.json({ proposal: parsed });
+  } catch (err) {
+    console.error('[server] /api/assist/analyze-script failed:', err);
+    res.status(500).json({ error: 'server_error', message: String(err && err.message || err) });
+  }
+});
+
 app.get('/api/models', (req, res) => {
   // Costs are our best estimate from KIE's own published credit pricing ($0.005/credit) —
   // shown to the user as an approximation, not an invoice.

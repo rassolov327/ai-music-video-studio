@@ -124,6 +124,28 @@
     </div>
   </div>
 
+  <div class="body-row hidden" id="scriptPage">
+    <div class="script-input-col">
+      <div class="script-input-header">
+        <span>Script</span>
+        <span class="gen-hint" id="scriptStatusHint" style="margin:0;"></span>
+      </div>
+      <div id="scriptTextInput" class="script-textarea" contenteditable="true" data-placeholder="Paste your generated script here..."></div>
+      <div class="script-input-actions">
+        <button class="cf-btn primary" id="scriptAnalyzeBtn">Analyze</button>
+        <button class="cf-btn primary" id="scriptExportBtn" disabled>Export to project</button>
+      </div>
+    </div>
+    <div class="col-resizer" id="resizeScriptTree" title="Drag to resize"></div>
+    <div class="assets" id="scriptTree">
+      <div class="gen-hint" style="padding:14px;">Paste a script on the left and click Analyze — the proposed breakdown will show up here.</div>
+    </div>
+    <div class="inspector" id="scriptInspector">
+      <div class="insp-tabs"><div class="insp-tab" style="cursor:default;">Inspector</div></div>
+      <div class="gen-hint" style="padding:14px;">Click a scene, shot, or asset on the left to see and edit its details here.</div>
+    </div>
+  </div>
+
   <div class="body-row" id="workPage">
 
     <div class="assets" id="assets"></div>
@@ -218,6 +240,7 @@
   </div>
 
   <div class="page-tabs">
+    <div class="page-tab" data-page="script">SCRIPT</div>
     <div class="page-tab active" data-page="work">WORK</div>
     <div class="page-tab" data-page="tasks">TASKS<span class="page-tab-badge" id="tasksBadge" style="display:none;">0</span></div>
     <div class="page-tab" data-page="archive">ARCHIVE</div>
@@ -317,6 +340,7 @@
 <script src="js/tags.js"></script>
 <script src="js/movie.js"></script>
 <script src="js/gemini-chat.js"></script>
+<script src="js/script-tab.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

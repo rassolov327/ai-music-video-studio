@@ -32,6 +32,8 @@ function wirePageTabs(){
 
 function showPage(page){
   document.querySelectorAll('.page-tab').forEach(t=> t.classList.toggle('active', t.dataset.page===page));
+  document.getElementById('scriptPage').classList.toggle('hidden', page!=='script');
+  if(page==='script' && typeof renderScriptPageIfNeeded==='function') renderScriptPageIfNeeded();
   document.getElementById('workPage').classList.toggle('hidden', page!=='work');
   document.getElementById('tasksPage').classList.toggle('hidden', page!=='tasks');
   document.getElementById('archivePage').classList.toggle('hidden', page!=='archive');
