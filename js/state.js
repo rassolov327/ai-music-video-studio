@@ -133,19 +133,11 @@ function emptyCardInputSlots(){
   CARD_INPUT_SLOTS.forEach(s=> obj[s.key]=null);
   return obj;
 }
-// The generated output set — not an exhaustive angle×size matrix (18 images), but the
-// research-backed practical set: full coverage (all 3 framings) on the angle actually used
-// most often (front), and one versatile medium framing on every other angle so nothing is
-// ever generated from scratch without SOME reference.
+// The generated output — a single combined reference sheet (top row: full-body turnaround
+// across a few angles, bottom row: matching close-ups directly below each) rather than many
+// separate paid generations. One call, one image, everything needed is on it.
 const CARD_OUTPUT_SLOTS = [
-  { key:'front-wide',           label:'Front — Wide',            angle:'front',           size:'wide' },
-  { key:'front-medium',         label:'Front — Medium',          angle:'front',           size:'medium' },
-  { key:'front-closeup',        label:'Front — Close-up',        angle:'front',           size:'closeup' },
-  { key:'threeQuarterLeft-medium',  label:'3/4 Left — Medium',   angle:'threeQuarterLeft',size:'medium' },
-  { key:'threeQuarterRight-medium', label:'3/4 Right — Medium',  angle:'threeQuarterRight',size:'medium' },
-  { key:'profileLeft-medium',   label:'Profile Left — Medium',   angle:'profileLeft',     size:'medium' },
-  { key:'profileRight-medium',  label:'Profile Right — Medium',  angle:'profileRight',    size:'medium' },
-  { key:'back-medium',          label:'Back — Medium',           angle:'back',            size:'medium' },
+  { key:'sheet', label:'Reference Sheet' },
 ];
 
 function formatTimecode(seconds){

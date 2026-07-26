@@ -5,10 +5,10 @@ function showCharacterCard(cat, idx){
   const it = cat.items[idx];
   previewBarEl.textContent = 'Character card — ' + it.name;
 
-  const cardImageCount = it.card && it.card.images ? Object.keys(it.card.images).length : 0;
-  const cardStatusHtml = cardImageCount>0
-    ? `<div class="char-card-section-title">Character Card — ${cardImageCount}/${CARD_OUTPUT_SLOTS.length} images</div>
-       <div class="char-card-angles">${CARD_OUTPUT_SLOTS.filter(s=> it.card.images[s.key] && it.card.images[s.key].url).slice(0,6).map(s=>`<div class="char-card-angle" title="${s.label}"><img src="${it.card.images[s.key].url}"></div>`).join('')}</div>`
+  const hasSheet = !!(it.card && it.card.images && it.card.images['sheet'] && it.card.images['sheet'].url);
+  const cardStatusHtml = hasSheet
+    ? `<div class="char-card-section-title">Character Card</div>
+       <div class="char-card-angles"><div class="char-card-angle" style="width:100%;height:90px;" title="Reference sheet"><img src="${it.card.images['sheet'].url}"></div></div>`
     : `<div class="char-card-section-title">Character Card</div>
        <div class="gen-hint" style="margin-top:0;">Not built yet — every generation of this character relies on this card once it exists.</div>`;
 
@@ -29,7 +29,7 @@ function showCharacterCard(cat, idx){
             <button class="cf-btn" id="cardDelete" style="color:var(--danger);">Delete</button>
           </div>
         </div>
-        <button class="cf-btn primary" id="cardBuildBtn" style="width:100%;margin-top:12px;">${cardImageCount>0 ? 'Edit Character Card' : 'Create Character Card'}</button>
+        <button class="cf-btn primary" id="cardBuildBtn" style="width:100%;margin-top:12px;">${hasSheet ? 'Edit Character Card' : 'Create Character Card'}</button>
       </div>
     </div>`;
 
@@ -169,38 +169,24 @@ function pickReferenceCapableModel(){
 // input slot if it was uploaded, otherwise a sensible neighboring angle, and finally
 // whatever photo exists at all (down to the character's own micro-card photo). This is what
 // makes "build the card from whatever's available, even one photo" actually work.
-function pickReferenceForAngle(inputSlots, microPhoto, angle){
-  const fallbackOrder = {
-    front: ['front'],
-    threeQuarterLeft: ['threeQuarterLeft','front','profileLeft'],
-    threeQuarterRight: ['threeQuarterRight','front','profileRight'],
-    profileLeft: ['profileLeft','threeQuarterLeft','front'],
-    profileRight: ['profileRight','threeQuarterRight','front'],
-    back: ['back','profileLeft','profileRight','front'],
-  };
-  for(const key of (fallbackOrder[angle] || ['front'])){
-    if(inputSlots[key]) return inputSlots[key];
-  }
-  for(const s of CARD_INPUT_SLOTS){ if(inputSlots[s.key]) return inputSlots[s.key]; }
-  return microPhoto || null;
+// Every uploaded reference photo goes in as a separate reference image for the one sheet
+// generation — richer than picking just one. Falls back to the character's micro-card
+// photo if nothing else was uploaded, so a card can still be built from just that.
+function gatherReferencePhotos(character){
+  const photos = CARD_INPUT_SLOTS.map(s=> character.card.inputSlots[s.key]).filter(Boolean);
+  if(photos.length===0 && character.photo) photos.push(character.photo);
+  return photos;
 }
 
-function buildCardImagePrompt(character, basePrompt, angle, size, extra){
-  const angleText = {
-    front: 'facing directly at the camera, front view',
-    threeQuarterLeft: 'three-quarter turn to the left, head turned about 45 degrees left',
-    threeQuarterRight: 'three-quarter turn to the right, head turned about 45 degrees right',
-    profileLeft: 'full side profile view, facing left',
-    profileRight: 'full side profile view, facing right',
-    back: 'view from directly behind, back of head and body visible',
-  }[angle] || '';
-  const sizeText = {
-    wide: 'full body shot, head to toe visible',
-    medium: 'medium shot, waist-up framing',
-    closeup: 'close-up portrait, face fills most of the frame',
-  }[size] || '';
-  return [basePrompt, angleText, sizeText, extra, 'plain neutral background, even studio lighting, photoreal, highly detailed, character reference sheet quality']
-    .filter(Boolean).join(', ');
+function buildCardSheetPrompt(character, basePrompt, extra){
+  return [
+    basePrompt || character.description || '',
+    'character reference turnaround sheet, two rows of four panels each, the exact same person with identical face, hair, build, and outfit in every panel',
+    'top row left to right: full-body front view, full-body three-quarter view turned left, full-body three-quarter view turned right, full-body back view',
+    'bottom row left to right: close-up portrait front view, close-up three-quarter view turned left, close-up three-quarter view turned right, close-up back-of-head view — each directly below its matching angle above',
+    extra,
+    'plain neutral background, even studio lighting, photoreal, highly detailed, no text, no labels, no panel borders',
+  ].filter(Boolean).join(', ');
 }
 
 function showCharacterCardBuilder(cat, idx){
@@ -234,7 +220,7 @@ function showCharacterCardBuilder(cat, idx){
         <button class="cf-btn ai-assist-btn" id="cardPromptAssistBtn" style="width:100%;margin-top:6px;display:none;">✨ Improve with AI</button>
       </div>
 
-      <button class="cf-btn primary" id="cardCreateBtn" style="width:100%;">${Object.keys(it.card.images).length ? 'Regenerate full card' : 'Create Character Card'}</button>
+      <button class="cf-btn primary" id="cardCreateBtn" style="width:100%;">${(it.card.images['sheet'] && it.card.images['sheet'].url) ? 'Regenerate Character Card' : 'Create Character Card'}</button>
       <div class="gen-hint" id="cardModelHint" style="margin-top:6px;"></div>
 
       <div class="char-card-section-title" style="margin-top:16px;">Card images</div>
@@ -320,28 +306,23 @@ function renderCardInputGrid(character){
 function renderCardOutputGrid(character){
   const grid = document.getElementById('cardOutputGrid');
   if(!grid) return;
-  grid.innerHTML = CARD_OUTPUT_SLOTS.map(s=>{
-    const entry = character.card.images[s.key];
-    const pending = character.card._pending && character.card._pending[s.key];
-    let inner;
-    if(entry && entry.url) inner = `<img src="${entry.url}">`;
-    else if(pending) inner = `<div class="task-tile-spin"></div>`;
-    else inner = `<span class="card-output-empty">${s.label}</span>`;
-    return `<div class="card-output-tile" data-key="${s.key}" title="${s.label}">${inner}<div class="card-output-label">${s.label}</div></div>`;
-  }).join('');
-  grid.querySelectorAll('.card-output-tile').forEach(tile=>{
-    tile.onclick = ()=>{
-      const key = tile.dataset.key;
-      const entry = character.card.images[key];
-      if(entry && entry.url) openCardImageModal(character, key);
-    };
-  });
+  const entry = character.card.images['sheet'];
+  const pending = character.card._pending && character.card._pending['sheet'];
+  let inner;
+  if(entry && entry.url) inner = `<img src="${entry.url}">`;
+  else if(pending) inner = `<div class="task-tile-spin"></div>`;
+  else inner = `<span class="card-output-empty">Not generated yet</span>`;
+  grid.innerHTML = `<div class="card-sheet-tile" id="cardSheetTile">${inner}</div>`;
+  const tile = document.getElementById('cardSheetTile');
+  if(entry && entry.url){
+    tile.onclick = ()=> openCardImageModal(character, 'sheet');
+  }
 }
 
-// Kicks off all 8 images in parallel (each is its own generation task) so the wait is
-// roughly one generation's worth of time, not eight sequential ones. The actual persisting
-// and archiving of each result happens through the normal shared task pipeline
-// (applyFinishedTasks in tasks.js) — this function only drives the on-screen progress.
+// One generation call, using every uploaded reference photo (not just one) so the model has
+// as much to work with as possible for the whole sheet. The actual persisting and archiving
+// happens through the normal shared task pipeline (applyFinishedTasks in tasks.js) — this
+// function only drives the on-screen progress.
 async function runCreateCard(cat, idx){
   const character = cat.items[idx];
   const model = pickReferenceCapableModel();
@@ -351,41 +332,42 @@ async function runCreateCard(cat, idx){
   const promptText = document.getElementById('cardPromptInput').value.trim();
   character.card.prompt = promptText;
   character.card._pending = character.card._pending || {};
+  character.card._pending['sheet'] = true;
+  renderCardOutputGrid(character);
   const meta = state.projectMeta || { width:1920, height:1080 };
 
-  renderCardOutputGrid(character);
-
-  await Promise.all(CARD_OUTPUT_SLOTS.map(async (slot)=>{
-    character.card._pending[slot.key] = true;
-    renderCardOutputGridIfOpen(character);
-    try{
-      const refPhoto = pickReferenceForAngle(character.card.inputSlots, character.photo, slot.angle);
-      let referenceImageUrl;
-      if(refPhoto) referenceImageUrl = await uploadReferencePhoto(refPhoto);
-      const prompt = buildCardImagePrompt(character, promptText, slot.angle, slot.size);
-      const res = await fetch('/api/generate-image/start', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt, width: meta.width, height: meta.height, model: model.id, referenceImageUrl,
-          meta: { projectId: currentProjectId, kind: 'character-card', characterId: character.id, characterName: character.name, outputKey: slot.key },
-        }),
-      });
-      const data = await res.json().catch(()=> null);
-      if(!res.ok || !data || !data.taskId) throw new Error((data && data.message) || 'Could not start generation.');
-      const imageUrl = await pollCardSlot(data.taskId);
-      // Show the result immediately for a responsive feel — the background task watcher
-      // will persist it locally and archive it within a few seconds regardless.
-      character.card.images[slot.key] = character.card.images[slot.key] || {};
-      character.card.images[slot.key].url = imageUrl;
-    } catch(err){
-      console.warn('[CharacterCard] failed to generate "' + slot.key + '":', err);
-    } finally {
-      delete character.card._pending[slot.key];
-      renderCardOutputGridIfOpen(character);
+  try{
+    const photos = gatherReferencePhotos(character);
+    const referenceImageUrls = [];
+    for(const p of photos){
+      const url = await uploadReferencePhoto(p);
+      if(url) referenceImageUrls.push(url);
     }
-  }));
+    const prompt = buildCardSheetPrompt(character, promptText);
+    const res = await fetch('/api/generate-image/start', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt, width: meta.width, height: meta.height, model: model.id,
+        referenceImageUrl: referenceImageUrls,
+        meta: { projectId: currentProjectId, kind: 'character-card', characterId: character.id, characterName: character.name, outputKey: 'sheet' },
+      }),
+    });
+    const data = await res.json().catch(()=> null);
+    if(!res.ok || !data || !data.taskId) throw new Error((data && data.message) || 'Could not start generation.');
+    const imageUrl = await pollCardSlot(data.taskId);
+    // Show the result immediately for a responsive feel — the background task watcher
+    // will persist it locally and archive it within a few seconds regardless.
+    character.card.images['sheet'] = character.card.images['sheet'] || {};
+    character.card.images['sheet'].url = imageUrl;
+  } catch(err){
+    console.warn('[CharacterCard] failed to generate the sheet:', err);
+    alert('Could not generate the Character Card: ' + err.message);
+  } finally {
+    delete character.card._pending['sheet'];
+    renderCardOutputGridIfOpen(character);
+  }
 
-  if(btn){ btn.disabled = false; btn.textContent = Object.keys(character.card.images).length ? 'Regenerate full card' : 'Create Character Card'; }
+  if(btn){ btn.disabled = false; btn.textContent = (character.card.images['sheet'] && character.card.images['sheet'].url) ? 'Regenerate Character Card' : 'Create Character Card'; }
   renderAssets();
   if(typeof saveProjectSoon==='function') saveProjectSoon();
 }
@@ -436,8 +418,7 @@ function wireCardImageModal(){
     const bandCat = state.categories.find(c=>c.key==='band');
     const character = bandCat && bandCat.items.find(c=>c.id===modal.dataset.characterId);
     const outputKey = modal.dataset.outputKey;
-    const slot = CARD_OUTPUT_SLOTS.find(s=> s.key===outputKey);
-    if(!character || !slot) return;
+    if(!character) return;
     const model = pickReferenceCapableModel();
     if(!model) return;
     const btn = document.getElementById('cardImageRegenBtn');
@@ -445,14 +426,18 @@ function wireCardImageModal(){
     const extra = document.getElementById('cardImageExtraPrompt').value.trim();
     const meta = state.projectMeta || { width:1920, height:1080 };
     try{
-      const refPhoto = pickReferenceForAngle(character.card.inputSlots, character.photo, slot.angle);
-      let referenceImageUrl;
-      if(refPhoto) referenceImageUrl = await uploadReferencePhoto(refPhoto);
-      const prompt = buildCardImagePrompt(character, character.card.prompt || '', slot.angle, slot.size, extra);
+      const photos = gatherReferencePhotos(character);
+      const referenceImageUrls = [];
+      for(const p of photos){
+        const url = await uploadReferencePhoto(p);
+        if(url) referenceImageUrls.push(url);
+      }
+      const prompt = buildCardSheetPrompt(character, character.card.prompt || '', extra);
       const res = await fetch('/api/generate-image/start', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt, width: meta.width, height: meta.height, model: model.id, referenceImageUrl,
+          prompt, width: meta.width, height: meta.height, model: model.id,
+          referenceImageUrl: referenceImageUrls,
           meta: { projectId: currentProjectId, kind: 'character-card', characterId: character.id, characterName: character.name, outputKey },
         }),
       });

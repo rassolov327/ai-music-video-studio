@@ -204,7 +204,9 @@ function buildInputFor(modelId, prompt, width, height, referenceImageUrl) {
   else if (model.supportsAspectRatio) input.aspect_ratio = ratio;
   if (model.supportsQuality) input.quality = 'high';
   if (model.supportsResolution) input.resolution = '2K';
-  if (model.supportsReferenceImage && referenceImageUrl) input.image_input = [referenceImageUrl];
+  if (model.supportsReferenceImage && referenceImageUrl) {
+    input.image_input = Array.isArray(referenceImageUrl) ? referenceImageUrl.filter(Boolean) : [referenceImageUrl];
+  }
   return input;
 }
 
