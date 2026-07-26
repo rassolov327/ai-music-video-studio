@@ -992,7 +992,7 @@
     display:flex;align-items:center;justify-content:space-between;padding:10px 12px;
     border-bottom:1px solid var(--line);font-size:12.5px;font-weight:600;color:var(--text-1);flex:0 0 auto;
   }
-  .gemini-chat-close{cursor:pointer;color:var(--text-2);display:flex;}
+  .gemini-chat-close{cursor:pointer;color:var(--text-2);display:flex;align-items:center;justify-content:center;width:24px;height:24px;padding:5px;pointer-events:auto;}
   .gemini-chat-close:hover{color:var(--text-1);}
   .gemini-chat-messages{flex:1 1 auto;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:8px;}
   .gemini-chat-empty{font-size:11.5px;color:var(--text-3);line-height:1.4;}

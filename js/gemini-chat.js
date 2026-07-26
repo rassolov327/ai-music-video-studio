@@ -11,8 +11,13 @@ function wireGeminiChat(){
   const btn = document.getElementById('geminiAssistBtn');
   if(!btn) return;
   btn.onclick = ()=> setGeminiChatOpen(document.getElementById('geminiChatModal').classList.contains('hidden'));
-  document.getElementById('geminiChatClose').onclick = ()=> setGeminiChatOpen(false);
+  document.getElementById('geminiChatClose').addEventListener('click', ()=> setGeminiChatOpen(false));
   document.getElementById('geminiChatSendBtn').onclick = sendGeminiChatMessage;
+  document.addEventListener('keydown', (e)=>{
+    if(e.key==='Escape' && !document.getElementById('geminiChatModal').classList.contains('hidden')){
+      setGeminiChatOpen(false);
+    }
+  });
   const input = document.getElementById('geminiChatInput');
   input.addEventListener('keydown', (e)=>{
     if(e.key==='Enter' && !e.shiftKey){
