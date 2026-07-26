@@ -262,11 +262,12 @@ function wireCommonTimelineHandlers(){
       const startDuration = shot.duration;
       document.body.style.cursor = 'ew-resize';
       const MIN_SEC = 0.5;
+      const MAX_SEC = shot.videoUrl ? MOVIE_CLIP_DURATION_SEC : Infinity; // a clip's slot can never exceed its actual footage
       const onMove = (ev)=>{
         const deltaPx = (ev.clientX - startX) / ZOOM;
         const deltaSec = deltaPx / PX_PER_SEC;
         const raw = side==='right' ? startDuration + deltaSec : startDuration - deltaSec;
-        const newDuration = Math.max(MIN_SEC, Math.round(raw*10)/10);
+        const newDuration = Math.min(MAX_SEC, Math.max(MIN_SEC, Math.round(raw*10)/10));
         // The element being dragged (and its parent thumb) may have been replaced by a
         // periodic re-render since the drag started (autosave-adjacent timers, Tasks
         // refresh) — re-look-up the current live element by the same data-trim key

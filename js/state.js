@@ -142,6 +142,11 @@ const CARD_OUTPUT_SLOTS = [
 // Fixed, wide, independent of the project's own video format — the sheet's 2-row×4-panel
 // layout needs width regardless of whether the video itself is vertical or horizontal.
 const CARD_SHEET_WIDTH = 1600;
+// Fixed clip length for MOVIE animation — full duration controls are a later task, but even
+// this fixed value needs to be the ONE source of truth: the shot's timeline duration for an
+// animated shot can never exceed how long the actual generated clip is (DaVinci-style — you
+// can't stretch a clip's slot past its source footage).
+const MOVIE_CLIP_DURATION_SEC = 5;
 const CARD_SHEET_HEIGHT = 900;
 
 // ---------- Object Card (Locations & Props — same idea as Character Card) ----------

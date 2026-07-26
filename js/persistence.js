@@ -1207,6 +1207,21 @@ async function applyProjectData(data, verbose){
   if(shotPreviewCount && verbose){
     logLoadingStep('Restored ' + shotPreviewRestored + '/' + shotPreviewCount + ' saved shot preview(s)', shotPreviewRestored===shotPreviewCount ? 'ok' : 'error');
   }
+  // Migration for projects saved before the "clip slot can't exceed its source footage"
+  // rule existed — clamp any already-animated shot's duration down to the clip length now,
+  // rather than leaving it in a state the app itself would no longer create.
+  let migratedDurations = 0;
+  for(const scene of state.scenes){
+    for(const shot of (scene.shots||[])){
+      if(shot.videoUrl && shot.duration > MOVIE_CLIP_DURATION_SEC){
+        shot.duration = MOVIE_CLIP_DURATION_SEC;
+        migratedDurations++;
+      }
+    }
+  }
+  if(migratedDurations && verbose){
+    logLoadingStep('Trimmed ' + migratedDurations + ' animated shot(s) to match their clip length', 'ok');
+  }
   if(shotVideoCount && verbose){
     logLoadingStep('Restored ' + shotVideoRestored + '/' + shotVideoCount + ' animated shot video(s)', shotVideoRestored===shotVideoCount ? 'ok' : 'error');
   }

@@ -523,6 +523,11 @@ async function applyFinishedTasks(list){
       if(shot){
         if(typeof persistShotVideo==='function') await persistShotVideo(shot, t.imageUrl);
         else shot.videoUrl = t.imageUrl;
+        // The clip's slot on the timeline can never exceed the actual generated footage —
+        // same rule DaVinci and every other NLE enforces. Clamp immediately, not just on
+        // the next manual trim, so there's never a moment where the shot claims more
+        // duration than the video actually has.
+        shot.duration = MOVIE_CLIP_DURATION_SEC;
         if(focus.sceneId===meta.sceneId && focus.shotId===meta.shotId) touchedCurrentView = true;
       }
       if(typeof renderMovieGrid==='function' && !document.getElementById('moviePage').classList.contains('hidden')) renderMovieGrid();

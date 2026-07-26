@@ -151,7 +151,7 @@ async function sendMovieShot(shotId){
     const res = await fetch('/api/generate-video/start', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        prompt, imageUrl, duration: 5, model: modelId,
+        prompt, imageUrl, duration: MOVIE_CLIP_DURATION_SEC, model: modelId,
         meta: { projectId: currentProjectId, kind: 'movie', sceneId: scene.id, sceneName: scene.name, shotId: shot.id, shotName: shot.name },
       }),
     });

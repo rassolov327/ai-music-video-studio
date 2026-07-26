@@ -408,7 +408,8 @@ function renderInspectorPanel(){
     <div style="padding:14px;">
       <div class="cat-count" style="font-size:11px;margin-bottom:10px;">${scene.name}</div>
       <div class="cf-field"><label>Name</label><input type="text" id="shotNameInput" value="${shot.name}"></div>
-      <div class="cf-field"><label>Duration (sec)</label><input type="number" id="shotDurInput" min="0.5" step="0.1" value="${shot.duration}"></div>
+      <div class="cf-field"><label>Duration (sec)</label><input type="number" id="shotDurInput" min="0.5" ${shot.videoUrl ? `max="${MOVIE_CLIP_DURATION_SEC}"` : ''} step="0.1" value="${shot.duration}"></div>
+      ${shot.videoUrl ? `<div class="gen-hint" style="margin-top:-6px;">Animated — can't exceed the clip's own ${MOVIE_CLIP_DURATION_SEC}s length.</div>` : ''}
 
       <div class="field-group">
         <div class="field-group-title">Characters <span style="font-weight:400;color:var(--text-3);">— inherited from scene</span></div>
@@ -461,7 +462,9 @@ function renderInspectorPanel(){
     previewBarEl.textContent = scene.name + ' — ' + shot.name;
   });
   document.getElementById('shotDurInput').addEventListener('input', (e)=>{
-    shot.duration = parseFloat(e.target.value) || shot.duration;
+    let val = parseFloat(e.target.value) || shot.duration;
+    if(shot.videoUrl) val = Math.min(val, MOVIE_CLIP_DURATION_SEC);
+    shot.duration = val;
     renderTimelineScenes();
   });
   document.getElementById('shotSizeInput').addEventListener('change', (e)=>{ shot.shotSize = e.target.value; });
