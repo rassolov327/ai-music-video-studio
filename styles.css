@@ -965,3 +965,11 @@
   }
   .archive-meta-popover .row{display:flex;justify-content:space-between;gap:10px;}
   .archive-meta-popover .k{color:var(--text-3);}
+
+  /* ---- Timeline shot-thumb: "animated" badge — bottom-right, clear of the trim strip
+     and the existing top-corner rename/delete icons (that collision was the actual bug) ---- */
+  .shot-thumb-animated-badge{
+    position:absolute;bottom:2px;right:9px;width:13px;height:13px;border-radius:3px;
+    background:rgba(0,0,0,.55);color:#5fae7a;display:flex;align-items:center;justify-content:center;
+    z-index:1;pointer-events:none;
+  }
