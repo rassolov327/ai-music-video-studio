@@ -298,6 +298,7 @@ function showPropForm(cat, editIdx){
     (typeof buildAssetContextSummary==='function' ? buildAssetContextSummary() + '\n\n' : '')
     + 'Rewrite this rough prop idea into a vivid, specific object description for an AI image generator — material, color, wear, size. One or two sentences. Reply with only the rewritten description, nothing else.',
     ()=>{});
+  if(typeof wireTagAutocomplete==='function') wireTagAutocomplete('aiPromptInput');
 
   async function renderAiPaidGenSlot(){
     const slot = document.getElementById('aiPaidGenSlot');

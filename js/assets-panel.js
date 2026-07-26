@@ -171,8 +171,8 @@ function showGenericPlaceholder(cat){
 // ---------- preview: characters gallery (tile grid) ----------
 function characterStatus(it){
   if(!it.name || !it.photo || !it.role || !it.description) return 'red';
-  const coreDone = filledCoreAngleCount(it.angleSlots) >= coreAngleCountTotal();
-  if(!coreDone || !it.referenceCard) return 'yellow';
+  const hasCard = !!(it.card && it.card.images && it.card.images.sheet && it.card.images.sheet.url);
+  if(!hasCard) return 'yellow';
   return 'green';
 }
 

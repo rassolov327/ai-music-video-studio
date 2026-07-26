@@ -20,6 +20,7 @@ function showCharacterCard(cat, idx){
       <div class="char-card-body">
         <p class="char-card-name">${it.name}</p>
         ${it.role ? `<span class="char-card-role">${it.role}</span>` : ''}
+        <div class="char-tag-badge" id="charTagBadge" title="Click to copy">@${it.name}</div>
         ${it.description ? `<p class="char-card-desc">${it.description}</p>` : ''}
         ${cardStatusHtml}
         <div class="char-card-actions">
@@ -34,6 +35,19 @@ function showCharacterCard(cat, idx){
     </div>`;
 
   document.getElementById('cardBack').onclick = ()=> showCharacterGallery(cat);
+  const tagBadge = document.getElementById('charTagBadge');
+  if(tagBadge){
+    tagBadge.onclick = ()=>{
+      const tag = '@' + it.name;
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(tag).then(()=>{
+          const original = tagBadge.textContent;
+          tagBadge.textContent = 'Copied!';
+          setTimeout(()=>{ tagBadge.textContent = original; }, 1200);
+        }).catch(()=>{});
+      }
+    };
+  }
   document.getElementById('cardEdit').onclick = ()=> showCharacterForm(cat, idx);
   document.getElementById('cardBuildBtn').onclick = ()=> showCharacterCardBuilder(cat, idx);
   document.getElementById('cardDelete').onclick = ()=>{
@@ -334,7 +348,10 @@ async function runCreateCard(cat, idx){
   character.card._pending = character.card._pending || {};
   character.card._pending['sheet'] = true;
   renderCardOutputGrid(character);
-  const meta = state.projectMeta || { width:1920, height:1080 };
+  // Deliberately NOT the project's own video dimensions — a vertical (e.g. 9:16) project
+  // would ask the model to cram a wide 2-row/4-column sheet into a vertical frame. The
+  // sheet's own shape is fixed and wide regardless of what format the video itself is.
+  const sheetDims = { width: CARD_SHEET_WIDTH, height: CARD_SHEET_HEIGHT };
 
   try{
     const photos = gatherReferencePhotos(character);
@@ -347,7 +364,7 @@ async function runCreateCard(cat, idx){
     const res = await fetch('/api/generate-image/start', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        prompt, width: meta.width, height: meta.height, model: model.id,
+        prompt, width: sheetDims.width, height: sheetDims.height, model: model.id,
         referenceImageUrl: referenceImageUrls,
         meta: { projectId: currentProjectId, kind: 'character-card', characterId: character.id, characterName: character.name, outputKey: 'sheet' },
       }),
@@ -424,7 +441,7 @@ function wireCardImageModal(){
     const btn = document.getElementById('cardImageRegenBtn');
     btn.disabled = true; btn.textContent = 'Generating…';
     const extra = document.getElementById('cardImageExtraPrompt').value.trim();
-    const meta = state.projectMeta || { width:1920, height:1080 };
+    const sheetDims = { width: CARD_SHEET_WIDTH, height: CARD_SHEET_HEIGHT };
     try{
       const photos = gatherReferencePhotos(character);
       const referenceImageUrls = [];
@@ -436,7 +453,7 @@ function wireCardImageModal(){
       const res = await fetch('/api/generate-image/start', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt, width: meta.width, height: meta.height, model: model.id,
+          prompt, width: sheetDims.width, height: sheetDims.height, model: model.id,
           referenceImageUrl: referenceImageUrls,
           meta: { projectId: currentProjectId, kind: 'character-card', characterId: character.id, characterName: character.name, outputKey },
         }),

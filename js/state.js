@@ -139,6 +139,10 @@ function emptyCardInputSlots(){
 const CARD_OUTPUT_SLOTS = [
   { key:'sheet', label:'Reference Sheet' },
 ];
+// Fixed, wide, independent of the project's own video format — the sheet's 2-row×4-panel
+// layout needs width regardless of whether the video itself is vertical or horizontal.
+const CARD_SHEET_WIDTH = 1600;
+const CARD_SHEET_HEIGHT = 900;
 
 function formatTimecode(seconds){
   const m = Math.floor(seconds/60);

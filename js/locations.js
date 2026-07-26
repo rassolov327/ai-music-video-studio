@@ -298,6 +298,7 @@ function showLocationForm(cat, editIdx){
     (typeof buildAssetContextSummary==='function' ? buildAssetContextSummary() + '\n\n' : '')
     + 'Rewrite this rough location idea into a vivid, specific setting description for an AI image generator — layout, furniture, materials, lighting style. One or two sentences. Reply with only the rewritten description, nothing else.',
     ()=>{});
+  if(typeof wireTagAutocomplete==='function') wireTagAutocomplete('aiPromptInput');
 
   async function renderAiPaidGenSlot(){
     const slot = document.getElementById('aiPaidGenSlot');

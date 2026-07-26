@@ -87,6 +87,7 @@ async function openNewIdeaModal(){
   wireAiAssistButton('newIdeaAssistBtn', 'newIdeaPromptInput',
     'Rewrite this rough idea into a vivid, specific instruction for an AI image editor that will use the earlier image as a reference — describe only what should change (e.g. framing, angle, action). Reply with only the rewritten instruction, nothing else.',
     ()=>{});
+  if(typeof wireTagAutocomplete==='function') wireTagAutocomplete('newIdeaPromptInput');
 }
 
 function closeNewIdeaModal(){

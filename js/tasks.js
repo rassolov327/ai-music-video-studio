@@ -122,7 +122,23 @@ function getSortedEntries(){
 }
 
 function assetHasPhoto(t){
-  if(t.kind==='shot') return false;
+  if(t.kind==='shot'){
+    const scene = state.scenes.find(s=> s.id===t.sceneId);
+    const shot = scene && scene.shots.find(sh=> sh.id===t.shotId);
+    if(!scene || !shot) return false;
+    const sceneHasCardedCharacter = (scene.characters||[]).some(entry=>{
+      const bandCat = state.categories.find(c=> c.key==='band');
+      const character = bandCat && bandCat.items.find(c=> c.id===entry.characterId);
+      return character && typeof characterHasCard==='function' && characterHasCard(character);
+    });
+    if(sceneHasCardedCharacter) return true;
+    if(!shot.description) return false;
+    const mentions = Array.from(new Set((shot.description.match(/@([^\s@]+)/g) || []).map(m=> m.slice(1))));
+    return mentions.some(name=>{
+      const character = typeof findCharacterByTagName==='function' ? findCharacterByTagName(name) : null;
+      return character && typeof characterHasCard==='function' && characterHasCard(character);
+    });
+  }
   const cat = state.categories.find(c=> c.key===t.kind);
   const item = cat && cat.items.find(x=> x.id===t.assetId);
   const field = t.kind==='looks' ? 'previewImage' : 'photo';
@@ -147,10 +163,11 @@ function renderTasksGrid(){
       const model = modelById(t.model);
       const hasPhoto = assetHasPhoto(t);
       const willUseRef = hasPhoto && model && model.supportsReferenceImage;
+      const refSourceLabel = t.kind==='shot' ? 'the scene\'s assigned character (and look)' : 'the uploaded photo';
       const refHint = hasPhoto
         ? (willUseRef
-            ? '<div class="gen-hint" style="margin-top:6px;color:#5fae7a;">Will use the uploaded photo as a reference.</div>'
-            : '<div class="gen-hint" style="margin-top:6px;">Has a reference photo, but this model won\'t use it — pick a model marked (ref) to use it.</div>')
+            ? `<div class="gen-hint" style="margin-top:6px;color:#5fae7a;">Will use ${refSourceLabel} as a reference.</div>`
+            : `<div class="gen-hint" style="margin-top:6px;">Has ${refSourceLabel} available, but this model won't use it — pick a model marked (ref) to use it.</div>`)
         : '';
       const noRefModelAvailable = t.kind==='archive-derive' && modelOptions.filter(m=> m.supportsReferenceImage).length===0;
       return `
@@ -345,6 +362,28 @@ async function sendGenerationTask(draft){
     const shot = scene && scene.shots.find(sh=> sh.id===draft.shotId);
     if(!scene || !shot) throw new Error('This shot no longer exists.');
     prompt = buildShotPrompt(shot, scene);
+
+    const allRefs = [];
+    if(typeof gatherSceneCharacterReferences==='function' && typeof resolveTagsInPrompt==='function'){
+      // Scene-assigned characters (and, when set, their Look) are the reliable, "set once
+      // in the scene" source — every shot in the scene gets these automatically, same as
+      // the text side already worked. Manual @tags in the shot's own description (e.g. a
+      // cameo not in the scene list) fill in anything beyond that, without duplicating a
+      // reference for a character already covered by the scene assignment.
+      const sceneRefs = await gatherSceneCharacterReferences(scene);
+      for(const localUrl of sceneRefs.localUrls){
+        try{
+          const url = await uploadReferencePhoto(localUrl);
+          if(url) allRefs.push(url);
+        } catch(err){
+          console.warn('[tasks] could not upload a scene character/look reference:', err);
+        }
+      }
+      const tagResolved = await resolveTagsInPrompt(prompt, sceneRefs.seenCharacterIds);
+      prompt = tagResolved.cleanText;
+      allRefs.push(...tagResolved.referenceImageUrls);
+    }
+    if(allRefs.length) referenceImageUrl = allRefs.slice(0, 8); // Nano Banana Pro's own reference-image limit
     taskMeta = { projectId: currentProjectId, kind:'shot', sceneId: scene.id, sceneName: scene.name, shotId: shot.id, shotName: shot.name };
   } else if(draft.kind==='archive-derive'){
     const entry = (state.archive||[]).find(a=> a.id===draft.archiveEntryId);

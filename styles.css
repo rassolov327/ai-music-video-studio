@@ -904,3 +904,36 @@
   }
   .card-sheet-tile:hover{border-color:#3a3e48;}
   .card-sheet-tile img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;}
+
+  /* ---- @Name tag autocomplete + validation ---- */
+  .tag-autocomplete-dropdown{
+    position:absolute;z-index:50;left:0;right:0;top:100%;margin-top:2px;
+    background:var(--bg-elevated);border:1px solid var(--line);border-radius:8px;
+    max-height:180px;overflow-y:auto;box-shadow:0 6px 20px rgba(0,0,0,.35);
+  }
+  .tag-autocomplete-item{
+    display:flex;align-items:center;justify-content:space-between;gap:8px;
+    padding:7px 10px;font-size:12px;color:var(--text-1);cursor:pointer;
+  }
+  .tag-autocomplete-item:hover{background:var(--bg-panel-2);}
+  .tag-ok-badge{font-size:9.5px;color:#5fae7a;white-space:nowrap;}
+  .tag-warn-badge{font-size:9.5px;color:var(--warn);white-space:nowrap;}
+  .tag-hint-row{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px;}
+  .tag-chip{
+    display:inline-flex;align-items:center;font-size:10.5px;padding:2px 7px;border-radius:10px;
+    font-family:var(--font-mono);
+  }
+  .tag-chip-ok{background:rgba(95,174,122,.16);color:#5fae7a;}
+  .tag-chip-warn{background:rgba(224,178,60,.16);color:var(--warn);}
+  .tag-chip-broken{background:rgba(217,105,95,.16);color:var(--danger);}
+
+  .tag-autocomplete-empty{
+    padding:10px 12px;font-size:11.5px;color:var(--text-3);line-height:1.4;
+  }
+
+  .char-tag-badge{
+    display:inline-flex;align-items:center;margin:6px 0;padding:4px 10px;border-radius:12px;
+    background:var(--bg-elevated);border:1px solid var(--line);color:var(--accent-text);
+    font-family:var(--font-mono);font-size:12px;cursor:pointer;
+  }
+  .char-tag-badge:hover{border-color:var(--accent);}

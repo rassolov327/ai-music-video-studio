@@ -43,13 +43,11 @@ function runProjectCheck(){
     if(!c.description || !c.role){
       push('Characters', c.name, 'warn', 'Missing role or description — generation prompts will be thinner for this character.');
     }
-    const coreDone = typeof filledCoreAngleCount==='function' ? filledCoreAngleCount(c.angleSlots) >= coreAngleCountTotal() : false;
-    if(!coreDone){
-      push('Characters', c.name, usedHere ? 'error' : 'warn', 'Reference angles incomplete — ' + (usedHere ? 'this character IS used in a scene, so every generated shot risks looking like a different person.' : 'not used in any scene yet, but will need this before it can be used.'));
-    } else if(!c.referenceCard){
-      push('Characters', c.name, usedHere ? 'error' : 'warn', 'AI reference card not generated yet — open the character and click Generate.');
+    const hasCard = !!(c.card && c.card.images && c.card.images.sheet && c.card.images.sheet.url);
+    if(!hasCard){
+      push('Characters', c.name, usedHere ? 'error' : 'warn', 'Character Card not built yet — ' + (usedHere ? 'this character IS used in a scene, so every generated shot risks looking like a different person.' : 'not used in any scene yet, but will need this before it can be used.'));
     } else {
-      push('Characters', c.name, 'ok', 'Reference card ready — will stay consistent across shots.');
+      push('Characters', c.name, 'ok', 'Character Card ready — will stay consistent across shots.');
     }
     if(charNameCounts[c.name] > 1){
       push('Characters', c.name, 'warn', 'Another character shares this exact name — prompts may get confused between them.');

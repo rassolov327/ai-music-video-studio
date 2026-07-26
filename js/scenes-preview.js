@@ -446,6 +446,7 @@ function renderInspectorPanel(){
     (buildShotFixedElementsContext(scene) ? buildShotFixedElementsContext(scene) + '\n\n' : '')
     + 'Rewrite this rough shot idea into a vivid, specific, camera-ready visual description for an AI image generator. One or two sentences, concrete imagery, no camera-move or shot-size talk (that\'s handled separately). Reply with only the rewritten description, nothing else.',
     (result)=>{ shot.description = result; });
+  if(typeof wireTagAutocomplete==='function') wireTagAutocomplete('shotDescInput');
 
   document.getElementById('jumpToSceneBtn').onclick = ()=> setFocus(scene.id, null);
   document.getElementById('shotNameInput').addEventListener('input', (e)=>{
