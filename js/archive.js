@@ -2,9 +2,14 @@
 let archiveOpenEntryId = null; // which archive entry the preview/new-idea modals are currently about
 
 function wireArchivePage(){
-  document.getElementById('archivePreviewClose').onclick = ()=> document.getElementById('archivePreviewModal').classList.add('hidden');
+  const closeArchivePreview = ()=>{
+    document.getElementById('archivePreviewModal').classList.add('hidden');
+    const videoEl = document.getElementById('archivePreviewVideo');
+    if(videoEl) videoEl.pause();
+  };
+  document.getElementById('archivePreviewClose').onclick = closeArchivePreview;
   document.getElementById('archivePreviewModal').addEventListener('click', (e)=>{
-    if(e.target.id==='archivePreviewModal') document.getElementById('archivePreviewModal').classList.add('hidden');
+    if(e.target.id==='archivePreviewModal') closeArchivePreview();
   });
   document.getElementById('archiveNewIdeaBtn').onclick = openNewIdeaModal;
 
@@ -41,11 +46,11 @@ function renderArchiveGrid(){
     return;
   }
   grid.innerHTML = entries.map(entry=>{
-    const showInsert = entry.kind==='shot' || entry.kind==='archive-derive' || entry.kind==='upload' || !entry.kind; // inserting only makes sense for shot-style images
+    const showInsert = !entry.isVideo && (entry.kind==='shot' || entry.kind==='archive-derive' || entry.kind==='upload' || !entry.kind); // inserting only makes sense for shot-style still images
     return `
       <div class="task-tile" data-archive-id="${entry.id}">
         <div class="task-tile-thumb">
-          ${entry.photo ? `<img src="${entry.photo}">` : '<div class="task-tile-spin"></div>'}
+          ${entry.photo ? (entry.isVideo ? `<video src="${entry.photo}" muted loop autoplay playsinline></video>` : `<img src="${entry.photo}">`) : '<div class="task-tile-spin"></div>'}
           ${showInsert ? `<div class="task-tile-insert" title="Insert as a new shot at the playhead"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><polyline points="19 12 12 19 5 12"></polyline></svg></div>` : ''}
         </div>
         <div class="task-tile-body">
@@ -72,7 +77,23 @@ function openArchivePreview(entryId){
   const entry = (state.archive||[]).find(a=> a.id===entryId);
   if(!entry || !entry.photo) return;
   archiveOpenEntryId = entryId;
-  document.getElementById('archivePreviewImg').src = entry.photo;
+  const imgEl = document.getElementById('archivePreviewImg');
+  const videoEl = document.getElementById('archivePreviewVideo');
+  const newIdeaBtn = document.getElementById('archiveNewIdeaBtn');
+  if(entry.isVideo){
+    videoEl.src = entry.photo;
+    videoEl.classList.remove('hidden');
+    imgEl.classList.add('hidden');
+    imgEl.src = '';
+    newIdeaBtn.style.display = 'none'; // built around using an image as a reference, not a video
+  } else {
+    imgEl.src = entry.photo;
+    imgEl.classList.remove('hidden');
+    videoEl.classList.add('hidden');
+    videoEl.pause();
+    videoEl.src = '';
+    newIdeaBtn.style.display = '';
+  }
   document.getElementById('archivePreviewModal').classList.remove('hidden');
 }
 

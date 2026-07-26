@@ -564,18 +564,20 @@ async function archiveGeneration(t){
   const kind = meta.kind || 'shot';
   const sourceLabel = kind==='shot'
     ? ((meta.sceneName || 'Scene') + ' / ' + (meta.shotName || 'Shot'))
-    : kind==='archive-derive'
-      ? 'New idea from archive'
-      : kind==='character-card'
-        ? ('Character card / ' + (meta.characterName || '') + ' — ' + (meta.outputKey || ''))
-        : kind==='locations-card'
-          ? ('Location card / ' + (meta.assetName || ''))
-          : kind==='props-card'
-            ? ('Prop card / ' + (meta.assetName || ''))
-            : ((kind==='looks'?'Look':kind==='locations'?'Location':kind==='props'?'Prop':'Asset') + ' / ' + (meta.assetName || ''));
+    : kind==='movie'
+      ? ((meta.sceneName || 'Scene') + ' / ' + (meta.shotName || 'Shot') + ' (animated)')
+      : kind==='archive-derive'
+        ? 'New idea from archive'
+        : kind==='character-card'
+          ? ('Character card / ' + (meta.characterName || '') + ' — ' + (meta.outputKey || ''))
+          : kind==='locations-card'
+            ? ('Location card / ' + (meta.assetName || ''))
+            : kind==='props-card'
+              ? ('Prop card / ' + (meta.assetName || ''))
+              : ((kind==='looks'?'Look':kind==='locations'?'Location':kind==='props'?'Prop':'Asset') + ' / ' + (meta.assetName || ''));
   const entry = {
     id: 'arc' + (archiveSeq++),
-    kind, sourceLabel,
+    kind, sourceLabel, isVideo: !!t.isVideo,
     model: t.model || '', prompt: t.prompt || '',
     photo: null, createdAt: Date.now(),
   };
