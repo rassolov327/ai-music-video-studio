@@ -454,6 +454,8 @@ function openCardImageModal(character, outputKey){
   document.getElementById('cardImageExtraPrompt').value = '';
   modal.dataset.characterId = character.id;
   modal.dataset.outputKey = outputKey;
+  delete modal.dataset.objCatKey;
+  delete modal.dataset.objItemId;
   modal.classList.remove('hidden');
 }
 function wireCardImageModal(){
@@ -462,6 +464,10 @@ function wireCardImageModal(){
   document.getElementById('cardImageModalClose').onclick = ()=> modal.classList.add('hidden');
   modal.addEventListener('click', (e)=>{ if(e.target===modal) modal.classList.add('hidden'); });
   document.getElementById('cardImageRegenBtn').onclick = async ()=>{
+    if(modal.dataset.objCatKey){
+      if(typeof regenerateObjectCardFromModal==='function') await regenerateObjectCardFromModal(modal);
+      return;
+    }
     const bandCat = state.categories.find(c=>c.key==='band');
     const character = bandCat && bandCat.items.find(c=>c.id===modal.dataset.characterId);
     const outputKey = modal.dataset.outputKey;

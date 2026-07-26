@@ -59,6 +59,13 @@ function showLocationCard(cat, idx){
        <div class="char-card-angles">${it.angles.map(a=>`<div class="char-card-angle"><img src="${a}"></div>`).join('')}</div>`
     : '';
 
+  const hasObjCard = !!(it.card && it.card.images && it.card.images.sheet && it.card.images.sheet.url);
+  const objCardStatusHtml = hasObjCard
+    ? `<div class="char-card-section-title">Location Card</div>
+       <div class="char-card-angles"><div class="char-card-angle" style="width:100%;height:90px;" title="Reference sheet"><img src="${it.card.images.sheet.url}"></div></div>`
+    : `<div class="char-card-section-title">Location Card</div>
+       <div class="gen-hint" style="margin-top:0;">Not built yet — generations of this location rely on this card once it exists.</div>`;
+
   previewEl.innerHTML = `
     <div class="char-card" id="locCard">
       <div class="char-card-photo" id="locCardPhoto">
@@ -68,6 +75,7 @@ function showLocationCard(cat, idx){
         <p class="char-card-name">${it.name}</p>
         ${it.description ? `<p class="char-card-desc">${it.description}</p>` : ''}
         ${anglesHtml}
+        ${objCardStatusHtml}
         <div class="char-card-actions">
           <button class="cf-btn" id="locCardBack">Back to locations</button>
           <div style="display:flex;gap:8px;">
@@ -75,6 +83,7 @@ function showLocationCard(cat, idx){
             <button class="cf-btn" id="locCardDelete" style="color:var(--danger);">Delete</button>
           </div>
         </div>
+        <button class="cf-btn primary" id="locCardBuildBtn" style="width:100%;margin-top:12px;">${hasObjCard ? 'Edit Location Card' : 'Create Location Card'}</button>
         <div class="gen-section" id="locGenSection"></div>
         <div id="locTaskSlot"></div>
       </div>
@@ -85,8 +94,10 @@ function showLocationCard(cat, idx){
 
   document.getElementById('locCardBack').onclick = ()=> showLocationGallery(cat);
   document.getElementById('locCardEdit').onclick = ()=> showLocationForm(cat, idx);
+  document.getElementById('locCardBuildBtn').onclick = ()=> showObjectCardBuilder('locations', cat, idx);
   document.getElementById('locCardDelete').onclick = ()=>{
     if(typeof deleteLocationImages==='function') deleteLocationImages(it);
+    if(typeof deleteObjectCardAssets==='function') deleteObjectCardAssets('locations', it);
     cat.items.splice(idx,1);
     renderAssets();
     showLocationGallery(cat);
@@ -396,6 +407,7 @@ function showLocationForm(cat, editIdx){
     if(typeof persistLocationImages==='function'){
       if(typeof setSaveStatus==='function') setSaveStatus('saving');
       await persistLocationImages(data);
+      if(typeof persistObjectCardInputs==='function') await persistObjectCardInputs('locations', data);
     }
     if(typeof saveProjectSoon==='function') saveProjectSoon();
     return data;

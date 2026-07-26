@@ -59,6 +59,13 @@ function showPropCard(cat, idx){
        <div class="char-card-angles">${it.angles.map(a=>`<div class="char-card-angle"><img src="${a}"></div>`).join('')}</div>`
     : '';
 
+  const hasObjCard = !!(it.card && it.card.images && it.card.images.sheet && it.card.images.sheet.url);
+  const objCardStatusHtml = hasObjCard
+    ? `<div class="char-card-section-title">Prop Card</div>
+       <div class="char-card-angles"><div class="char-card-angle" style="width:100%;height:90px;" title="Reference sheet"><img src="${it.card.images.sheet.url}"></div></div>`
+    : `<div class="char-card-section-title">Prop Card</div>
+       <div class="gen-hint" style="margin-top:0;">Not built yet — generations of this prop rely on this card once it exists.</div>`;
+
   previewEl.innerHTML = `
     <div class="char-card" id="propCard">
       <div class="char-card-photo" id="propCardPhoto">
@@ -68,6 +75,7 @@ function showPropCard(cat, idx){
         <p class="char-card-name">${it.name}</p>
         ${it.description ? `<p class="char-card-desc">${it.description}</p>` : ''}
         ${anglesHtml}
+        ${objCardStatusHtml}
         <div class="char-card-actions">
           <button class="cf-btn" id="propCardBack">Back to props</button>
           <div style="display:flex;gap:8px;">
@@ -75,6 +83,7 @@ function showPropCard(cat, idx){
             <button class="cf-btn" id="propCardDelete" style="color:var(--danger);">Delete</button>
           </div>
         </div>
+        <button class="cf-btn primary" id="propCardBuildBtn" style="width:100%;margin-top:12px;">${hasObjCard ? 'Edit Prop Card' : 'Create Prop Card'}</button>
         <div class="gen-section" id="propGenSection"></div>
         <div id="propTaskSlot"></div>
       </div>
@@ -85,8 +94,10 @@ function showPropCard(cat, idx){
 
   document.getElementById('propCardBack').onclick = ()=> showPropGallery(cat);
   document.getElementById('propCardEdit').onclick = ()=> showPropForm(cat, idx);
+  document.getElementById('propCardBuildBtn').onclick = ()=> showObjectCardBuilder('props', cat, idx);
   document.getElementById('propCardDelete').onclick = ()=>{
     if(typeof deletePropImages==='function') deletePropImages(it);
+    if(typeof deleteObjectCardAssets==='function') deleteObjectCardAssets('props', it);
     cat.items.splice(idx,1);
     renderAssets();
     showPropGallery(cat);
@@ -396,6 +407,7 @@ function showPropForm(cat, editIdx){
     if(typeof persistPropImages==='function'){
       if(typeof setSaveStatus==='function') setSaveStatus('saving');
       await persistPropImages(data);
+      if(typeof persistObjectCardInputs==='function') await persistObjectCardInputs('props', data);
     }
     if(typeof saveProjectSoon==='function') saveProjectSoon();
     return data;

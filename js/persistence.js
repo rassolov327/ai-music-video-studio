@@ -595,6 +595,76 @@ async function restoreCharacterCardOutputImages(character){
     if(url) entry.url = url;
   }
 }
+
+// Object Card (Locations & Props) — same pattern as the Character Card above, shared
+// between both categories since their card shape is identical.
+async function persistObjectCardInputs(catKey, item){
+  if(!item.id || !item.card || !item.card.inputSlots) return;
+  item._assetFiles = item._assetFiles || {};
+  const assetsDir = diskDirHandle ? await getAssetsDirHandle(true) : null;
+  const jobs = [];
+  for(const slotKey of Object.keys(item.card.inputSlots)){
+    const val = item.card.inputSlots[slotKey];
+    const fieldKey = 'cardinput-' + slotKey;
+    if(val && val.indexOf('data:')===0){
+      jobs.push(
+        persistImageAsset(pid() + ':' + catKey + ':' + item.id + ':' + fieldKey, val, assetsDir)
+          .then(fileName=>{ item._assetFiles[fieldKey] = fileName; })
+      );
+    }
+  }
+  await Promise.all(jobs);
+}
+async function restoreObjectCardInputs(catKey, item){
+  if(!item._assetFiles || !item.card || !item.card.inputSlots) return;
+  const assetsDir = diskDirHandle ? await getAssetsDirHandle(false).catch(()=>null) : null;
+  for(const fieldKey of Object.keys(item._assetFiles)){
+    if(fieldKey.indexOf('cardinput-')!==0) continue;
+    const url = await loadImageAsset(pid() + ':' + catKey + ':' + item.id + ':' + fieldKey, item._assetFiles[fieldKey], assetsDir);
+    if(url) item.card.inputSlots[fieldKey.slice(10)] = url;
+  }
+}
+async function applyObjectCardSheetImage(catKey, item, resultUrl){
+  if(!item || !item.id || !resultUrl) return;
+  item.card = item.card || { inputSlots: emptyObjectCardInputSlots(), prompt:'', images:{} };
+  item.card.images = item.card.images || {};
+  try{
+    const assetKey = pid() + ':' + catKey + ':' + item.id + ':cardout:sheet';
+    let fileName, blob;
+    if(resultUrl.indexOf('data:')===0){
+      blob = dataUrlToBlobSync(resultUrl);
+      fileName = await persistBlobAsset(assetKey, blob, extFromDataUrl(resultUrl));
+    } else {
+      const result = await persistRemoteImageAsset(assetKey, resultUrl);
+      fileName = result.fileName; blob = result.blob;
+    }
+    item.card.images.sheet = { url: URL.createObjectURL(blob), assetFile: fileName, ok: true };
+    console.log('[ProjectStore] saved object card sheet locally for "' + item.name + '" (' + catKey + ')');
+  } catch(err){
+    console.warn('[ProjectStore] could not save object card sheet locally, keeping the provider link only (it may expire later):', err);
+    item.card.images.sheet = { url: resultUrl, assetFile: null, ok: false };
+  }
+  if(typeof saveProjectSoon==='function') saveProjectSoon();
+}
+async function restoreObjectCardSheetImage(catKey, item){
+  if(!item.card || !item.card.images || !item.card.images.sheet) return;
+  const entry = item.card.images.sheet;
+  if(!entry.ok) return; // never actually persisted locally (or failed) — leave whatever's there
+  const url = await loadImageAsset(pid() + ':' + catKey + ':' + item.id + ':cardout:sheet', entry.assetFile);
+  if(url) entry.url = url;
+}
+async function deleteObjectCardAssets(catKey, item){
+  if(item.card && item.card.images && item.card.images.sheet){
+    try{ await idbDelete(STORE_ASSETS, pid() + ':' + catKey + ':' + item.id + ':cardout:sheet'); } catch(err){}
+  }
+  if(item._assetFiles){
+    for(const fieldKey of Object.keys(item._assetFiles)){
+      if(fieldKey.indexOf('cardinput-')!==0) continue;
+      try{ await idbDelete(STORE_ASSETS, pid() + ':' + catKey + ':' + item.id + ':' + fieldKey); } catch(err){}
+    }
+  }
+}
+
 async function deleteCharacterImages(character){
   if(character.card && character.card.images){
     for(const key of Object.keys(character.card.images)){
@@ -928,11 +998,19 @@ function serializeProject(){
         if(copy._assetFiles && ('photo' in copy._assetFiles)) copy.photo = null;
         else if(copy.photo && copy.photo.indexOf('data:')===0) copy.photo = null;
         if(copy.angles) copy.angles = copy.angles.map(a => (a && a.indexOf('data:')===0) ? null : a);
+        if(copy.card){
+          if(copy.card.inputSlots) Object.keys(copy.card.inputSlots).forEach(k=>{ copy.card.inputSlots[k] = null; });
+          if(copy.card.images && copy.card.images.sheet && copy.card.images.sheet.ok) copy.card.images.sheet.url = null;
+        }
       }
       if(cat.key==='props'){
         if(copy._assetFiles && ('photo' in copy._assetFiles)) copy.photo = null;
         else if(copy.photo && copy.photo.indexOf('data:')===0) copy.photo = null;
         if(copy.angles) copy.angles = copy.angles.map(a => (a && a.indexOf('data:')===0) ? null : a);
+        if(copy.card){
+          if(copy.card.inputSlots) Object.keys(copy.card.inputSlots).forEach(k=>{ copy.card.inputSlots[k] = null; });
+          if(copy.card.images && copy.card.images.sheet && copy.card.images.sheet.ok) copy.card.images.sheet.url = null;
+        }
       }
       if(cat.key==='looks'){
         if(copy._assetFiles && ('previewImage' in copy._assetFiles)) copy.previewImage = null;
@@ -1020,6 +1098,10 @@ async function applyProjectData(data, verbose){
           logLoadingStep(label, result.missing.length ? 'error' : 'ok');
           if(result.missing.length) logLoadingStep('   missing: ' + result.missing.join(', '), 'error');
         }
+        if(item.card){
+          await restoreObjectCardInputs('locations', item);
+          await restoreObjectCardSheetImage('locations', item);
+        }
       } catch(err){
         hadErrors = true;
         if(verbose) logLoadingStep('Location "' + item.name + '" — error: ' + err.message, 'error');
@@ -1037,6 +1119,10 @@ async function applyProjectData(data, verbose){
           const label = 'Prop "' + item.name + '" — ' + result.found + '/' + result.total + ' image(s) restored';
           logLoadingStep(label, result.missing.length ? 'error' : 'ok');
           if(result.missing.length) logLoadingStep('   missing: ' + result.missing.join(', '), 'error');
+        }
+        if(item.card){
+          await restoreObjectCardInputs('props', item);
+          await restoreObjectCardSheetImage('props', item);
         }
       } catch(err){
         hadErrors = true;

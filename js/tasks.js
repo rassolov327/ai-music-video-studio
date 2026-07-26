@@ -195,8 +195,8 @@ function renderTasksGrid(){
         : t.status==='failed'
           ? `<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="9"></circle><line x1="9" y1="9" x2="15" y2="15"></line><line x1="15" y1="9" x2="9" y2="15"></line></svg>`
           : `<div class="task-tile-spin"></div>`;
-      const line1 = meta.kind==='shot' || !meta.kind ? (meta.sceneName || 'Scene') : meta.kind==='character-card' ? 'Character card' : (meta.kind==='looks'?'Look':meta.kind==='locations'?'Location':meta.kind==='props'?'Prop':'Asset');
-      const line2 = meta.kind==='shot' || !meta.kind ? (meta.shotName || 'Shot') : meta.kind==='character-card' ? ((meta.characterName||'') + ' — ' + (meta.outputKey||'')) : (meta.assetName || '');
+      const line1 = meta.kind==='shot' || !meta.kind ? (meta.sceneName || 'Scene') : meta.kind==='character-card' ? 'Character card' : meta.kind==='locations-card' ? 'Location card' : meta.kind==='props-card' ? 'Prop card' : (meta.kind==='looks'?'Look':meta.kind==='locations'?'Location':meta.kind==='props'?'Prop':'Asset');
+      const line2 = meta.kind==='shot' || !meta.kind ? (meta.shotName || 'Shot') : meta.kind==='character-card' ? ((meta.characterName||'') + ' — ' + (meta.outputKey||'')) : (meta.kind==='locations-card' || meta.kind==='props-card') ? (meta.assetName || '') : (meta.assetName || '');
       const canRegen = t.status==='success' || t.status==='failed';
       return `
         <div class="task-tile" data-task-id="${t.taskId}">
@@ -383,6 +383,20 @@ async function sendGenerationTask(draft){
       prompt = tagResolved.cleanText;
       allRefs.push(...tagResolved.referenceImageUrls);
     }
+    if(typeof gatherSceneLocationPropReferences==='function'){
+      // Same "set once in the scene, every shot inherits it" pattern, now for the
+      // location and any assigned props — uses the full Object Card if one's been built,
+      // otherwise falls back to whatever simple photo the location/prop already has.
+      const objRefs = await gatherSceneLocationPropReferences(scene);
+      for(const localUrl of objRefs){
+        try{
+          const url = await uploadReferencePhoto(localUrl);
+          if(url) allRefs.push(url);
+        } catch(err){
+          console.warn('[tasks] could not upload a scene location/prop reference:', err);
+        }
+      }
+    }
     if(allRefs.length) referenceImageUrl = allRefs.slice(0, 8); // Nano Banana Pro's own reference-image limit
     taskMeta = { projectId: currentProjectId, kind:'shot', sceneId: scene.id, sceneName: scene.name, shotId: shot.id, shotName: shot.name };
   } else if(draft.kind==='archive-derive'){
@@ -473,6 +487,16 @@ async function applyFinishedTasks(list){
       if(typeof refreshCardBuilderIfOpen==='function') refreshCardBuilderIfOpen(meta.characterId);
       continue;
     }
+    if(meta.kind==='locations-card' || meta.kind==='props-card'){
+      const objCatKey = meta.kind==='locations-card' ? 'locations' : 'props';
+      const cat = state.categories.find(c=> c.key===objCatKey);
+      const item = cat && cat.items.find(x=> x.id===meta.assetId);
+      if(item){
+        if(typeof applyObjectCardSheetImage==='function') await applyObjectCardSheetImage(objCatKey, item, t.imageUrl);
+      }
+      if(typeof refreshObjectCardBuilderIfOpen==='function') refreshObjectCardBuilderIfOpen(objCatKey, meta.assetId);
+      continue;
+    }
     if(!meta.kind || meta.kind==='shot'){
       const scene = state.scenes.find(s=> s.id===meta.sceneId);
       const shot = scene && scene.shots.find(sh=> sh.id===meta.shotId);
@@ -512,7 +536,11 @@ async function archiveGeneration(t){
       ? 'New idea from archive'
       : kind==='character-card'
         ? ('Character card / ' + (meta.characterName || '') + ' — ' + (meta.outputKey || ''))
-        : ((kind==='looks'?'Look':kind==='locations'?'Location':kind==='props'?'Prop':'Asset') + ' / ' + (meta.assetName || ''));
+        : kind==='locations-card'
+          ? ('Location card / ' + (meta.assetName || ''))
+          : kind==='props-card'
+            ? ('Prop card / ' + (meta.assetName || ''))
+            : ((kind==='looks'?'Look':kind==='locations'?'Location':kind==='props'?'Prop':'Asset') + ' / ' + (meta.assetName || ''));
   const entry = {
     id: 'arc' + (archiveSeq++),
     kind, sourceLabel,

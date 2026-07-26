@@ -144,6 +144,19 @@ const CARD_OUTPUT_SLOTS = [
 const CARD_SHEET_WIDTH = 1600;
 const CARD_SHEET_HEIGHT = 900;
 
+// ---------- Object Card (Locations & Props — same idea as Character Card) ----------
+const OBJECT_CARD_INPUT_SLOTS = [
+  { key:'front', label:'Front', hint:'Straight-on view' },
+  { key:'left',  label:'Left',  hint:'Turned/viewed from the left' },
+  { key:'right', label:'Right', hint:'Turned/viewed from the right' },
+  { key:'back',  label:'Back',  hint:'From directly behind' },
+];
+function emptyObjectCardInputSlots(){
+  const obj = {};
+  OBJECT_CARD_INPUT_SLOTS.forEach(s=> obj[s.key]=null);
+  return obj;
+}
+
 function formatTimecode(seconds){
   const m = Math.floor(seconds/60);
   const s = Math.floor(seconds%60);
