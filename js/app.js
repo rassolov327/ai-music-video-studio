@@ -13,6 +13,7 @@ function goHome(){
   wireFolderButton();
   wirePageTabs();
   wireArchivePage();
+  wireCardImageModal();
   wireCreditsIndicator();
   loadModelList();
   startBackgroundTaskWatcher();

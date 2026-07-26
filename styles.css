@@ -871,3 +871,27 @@
     animation:taskspin .7s linear infinite;flex:0 0 auto;
   }
   .credits-spinner.hidden{display:none;}
+
+  /* ---- Character Card builder ---- */
+  .card-output-grid{
+    display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px;
+  }
+  .card-output-tile{
+    position:relative;aspect-ratio:3/4;border-radius:8px;overflow:hidden;
+    background:var(--bg-panel-2);border:1px solid var(--line);cursor:pointer;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .card-output-tile:hover{border-color:#3a3e48;}
+  .card-output-tile img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
+  .card-output-empty{font-size:10px;color:var(--text-3);text-align:center;padding:0 6px;}
+  .card-output-label{
+    position:absolute;bottom:0;left:0;right:0;padding:3px 5px;font-size:9px;color:#fff;
+    background:linear-gradient(transparent, rgba(0,0,0,.75));text-align:center;
+  }
+  .card-image-box{
+    position:absolute;bottom:24px;left:50%;transform:translateX(-50%);width:420px;max-width:90vw;
+  }
+  .card-image-box input[type="text"]{
+    width:100%;background:var(--bg-elevated);border:1px solid var(--line);color:var(--text-1);
+    border-radius:8px;padding:8px 10px;font-size:12px;
+  }

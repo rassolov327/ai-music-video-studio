@@ -178,8 +178,8 @@ function renderTasksGrid(){
         : t.status==='failed'
           ? `<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="9"></circle><line x1="9" y1="9" x2="15" y2="15"></line><line x1="15" y1="9" x2="9" y2="15"></line></svg>`
           : `<div class="task-tile-spin"></div>`;
-      const line1 = meta.kind==='shot' || !meta.kind ? (meta.sceneName || 'Scene') : (meta.kind==='looks'?'Look':meta.kind==='locations'?'Location':meta.kind==='props'?'Prop':'Asset');
-      const line2 = meta.kind==='shot' || !meta.kind ? (meta.shotName || 'Shot') : (meta.assetName || '');
+      const line1 = meta.kind==='shot' || !meta.kind ? (meta.sceneName || 'Scene') : meta.kind==='character-card' ? 'Character card' : (meta.kind==='looks'?'Look':meta.kind==='locations'?'Location':meta.kind==='props'?'Prop':'Asset');
+      const line2 = meta.kind==='shot' || !meta.kind ? (meta.shotName || 'Shot') : meta.kind==='character-card' ? ((meta.characterName||'') + ' — ' + (meta.outputKey||'')) : (meta.assetName || '');
       const canRegen = t.status==='success' || t.status==='failed';
       return `
         <div class="task-tile" data-task-id="${t.taskId}">
@@ -425,6 +425,15 @@ async function applyFinishedTasks(list){
     if(meta.kind==='archive-derive'){
       continue; // no live target — lands in the Archive only, applied to a shot manually via the down-arrow
     }
+    if(meta.kind==='character-card'){
+      const bandCat = state.categories.find(c=> c.key==='band');
+      const character = bandCat && bandCat.items.find(c=> c.id===meta.characterId);
+      if(character && meta.outputKey){
+        if(typeof applyCharacterCardImage==='function') await applyCharacterCardImage(character, meta.outputKey, t.imageUrl);
+      }
+      if(typeof refreshCardBuilderIfOpen==='function') refreshCardBuilderIfOpen(meta.characterId);
+      continue;
+    }
     if(!meta.kind || meta.kind==='shot'){
       const scene = state.scenes.find(s=> s.id===meta.sceneId);
       const shot = scene && scene.shots.find(sh=> sh.id===meta.shotId);
@@ -462,7 +471,9 @@ async function archiveGeneration(t){
     ? ((meta.sceneName || 'Scene') + ' / ' + (meta.shotName || 'Shot'))
     : kind==='archive-derive'
       ? 'New idea from archive'
-      : ((kind==='looks'?'Look':kind==='locations'?'Location':kind==='props'?'Prop':'Asset') + ' / ' + (meta.assetName || ''));
+      : kind==='character-card'
+        ? ('Character card / ' + (meta.characterName || '') + ' — ' + (meta.outputKey || ''))
+        : ((kind==='looks'?'Look':kind==='locations'?'Location':kind==='props'?'Prop':'Asset') + ' / ' + (meta.assetName || ''));
   const entry = {
     id: 'arc' + (archiveSeq++),
     kind, sourceLabel,

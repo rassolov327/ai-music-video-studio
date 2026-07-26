@@ -491,6 +491,13 @@ async function persistCharacterImages(character){
   character._assetFiles = character._assetFiles || {};
   const assetsDir = diskDirHandle ? await getAssetsDirHandle(true) : null;
   const jobs = [];
+  if(character.photo && character.photo.indexOf('data:')===0){
+    jobs.push(
+      persistImageAsset(pid() + ':band:' + character.id + ':photo', character.photo, assetsDir)
+        .then(fileName=>{ character._assetFiles['photo'] = fileName; })
+    );
+  }
+  // legacy angle-slot uploads — old-format characters only, kept working, not used by new ones
   if(character.angleSlots){
     for(const slotKey of Object.keys(character.angleSlots)){
       const val = character.angleSlots[slotKey];
@@ -509,12 +516,27 @@ async function persistCharacterImages(character){
         .then(fileName=>{ character._assetFiles['turnaround'] = fileName; })
     );
   }
+  // Character Card reference photos (the new card-builder's input slots)
+  if(character.card && character.card.inputSlots){
+    for(const slotKey of Object.keys(character.card.inputSlots)){
+      const val = character.card.inputSlots[slotKey];
+      const fieldKey = 'cardinput-' + slotKey;
+      if(val && val.indexOf('data:')===0){
+        jobs.push(
+          persistImageAsset(pid() + ':band:' + character.id + ':' + fieldKey, val, assetsDir)
+            .then(fileName=>{ character._assetFiles[fieldKey] = fileName; })
+        );
+      }
+    }
+  }
   await Promise.all(jobs);
   console.log('[ProjectStore] persisted ' + jobs.length + ' image(s) for character "' + character.name + '"', character._assetFiles);
 }
 async function restoreCharacterImages(character){
   if(!character._assetFiles) return { found:0, total:0, missing:[] };
   if(!character.angleSlots) character.angleSlots = typeof emptyAngleSlots==='function' ? emptyAngleSlots() : {};
+  if(!character.card) character.card = { inputSlots: (typeof emptyCardInputSlots==='function' ? emptyCardInputSlots() : {}), prompt:'', images:{} };
+  if(!character.card.inputSlots) character.card.inputSlots = typeof emptyCardInputSlots==='function' ? emptyCardInputSlots() : {};
   const assetsDir = diskDirHandle ? await getAssetsDirHandle(false).catch(()=>null) : null;
   const missing = [];
   let found = 0;
@@ -523,16 +545,63 @@ async function restoreCharacterImages(character){
     const fileName = character._assetFiles[fieldKey];
     const assetKey = pid() + ':band:' + character.id + ':' + fieldKey;
     const url = await loadImageAsset(assetKey, fileName, assetsDir);
-    if(fieldKey === 'turnaround') character.turnaroundSheet = url;
+    if(fieldKey === 'photo') character.photo = url;
+    else if(fieldKey === 'turnaround') character.turnaroundSheet = url;
+    else if(fieldKey.indexOf('cardinput-')===0) character.card.inputSlots[fieldKey.slice(10)] = url;
     else if(fieldKey.indexOf('angle-')===0) character.angleSlots[fieldKey.slice(6)] = url;
     if(url) found++;
     else missing.push(fieldKey + ' (expected "' + fileName + '")');
   });
   await Promise.all(jobs);
-  character.photo = character.angleSlots.front || null;
+  // Backward-compat only: characters saved before "photo" was tracked on its own always had
+  // it reconstructed from angleSlots.front — keep that fallback exactly for those old records.
+  if(!('photo' in character._assetFiles) && character.angleSlots && character.angleSlots.front){
+    character.photo = character.angleSlots.front;
+  }
   return { found, total: fieldKeys.length, missing };
 }
+// The 8 generated Character Card output images — separate from the reference photos above
+// because these arrive asynchronously (through the generation task pipeline), not at form-save time.
+async function applyCharacterCardImage(character, outputKey, resultUrl){
+  if(!character || !character.id || !outputKey || !resultUrl) return;
+  character.card = character.card || { inputSlots: (typeof emptyCardInputSlots==='function' ? emptyCardInputSlots() : {}), prompt:'', images:{}, createdAt: Date.now() };
+  character.card.images = character.card.images || {};
+  try{
+    const assetKey = pid() + ':band:' + character.id + ':cardout:' + outputKey;
+    let fileName, blob;
+    if(resultUrl.indexOf('data:')===0){
+      blob = dataUrlToBlobSync(resultUrl);
+      fileName = await persistBlobAsset(assetKey, blob, extFromDataUrl(resultUrl));
+    } else {
+      const result = await persistRemoteImageAsset(assetKey, resultUrl);
+      fileName = result.fileName;
+      blob = result.blob;
+    }
+    character.card.images[outputKey] = { url: URL.createObjectURL(blob), assetFile: fileName, ok: true };
+    console.log('[ProjectStore] saved character card image "' + outputKey + '" locally for "' + character.name + '"');
+  } catch(err){
+    console.warn('[ProjectStore] could not save character card image locally, keeping the provider link only (it may expire later):', err);
+    character.card.images[outputKey] = { url: resultUrl, assetFile: null, ok: false };
+  }
+  if(typeof saveProjectSoon==='function') saveProjectSoon();
+}
+async function restoreCharacterCardOutputImages(character){
+  if(!character.card || !character.card.images) return;
+  for(const key of Object.keys(character.card.images)){
+    const entry = character.card.images[key];
+    if(!entry || !entry.ok) continue;
+    const assetKey = pid() + ':band:' + character.id + ':cardout:' + key;
+    const url = await loadImageAsset(assetKey, entry.assetFile);
+    if(url) entry.url = url;
+  }
+}
 async function deleteCharacterImages(character){
+  if(character.card && character.card.images){
+    for(const key of Object.keys(character.card.images)){
+      const assetKey = pid() + ':band:' + character.id + ':cardout:' + key;
+      try{ await idbDelete(STORE_ASSETS, assetKey); } catch(err){}
+    }
+  }
   if(!character._assetFiles) return;
   for(const fieldKey of Object.keys(character._assetFiles)){
     const assetKey = pid() + ':band:' + character.id + ':' + fieldKey;
@@ -847,7 +916,13 @@ function serializeProject(){
       if(cat.key==='band'){
         if(copy.angleSlots) Object.keys(copy.angleSlots).forEach(k=>{ copy.angleSlots[k] = null; });
         copy.turnaroundSheet = null;
-        copy.photo = null; // reconstructed from angleSlots.front on restore
+        copy.photo = null; // reconstructed from _assetFiles.photo (or, for old records, angleSlots.front) on restore
+        if(copy.card){
+          if(copy.card.inputSlots) Object.keys(copy.card.inputSlots).forEach(k=>{ copy.card.inputSlots[k] = null; });
+          if(copy.card.images){
+            Object.keys(copy.card.images).forEach(k=>{ if(copy.card.images[k] && copy.card.images[k].ok) copy.card.images[k].url = null; });
+          }
+        }
       }
       if(cat.key==='locations'){
         if(copy._assetFiles && ('photo' in copy._assetFiles)) copy.photo = null;
@@ -926,6 +1001,7 @@ async function applyProjectData(data, verbose){
           logLoadingStep(label, result.missing.length ? 'error' : 'ok');
           if(result.missing.length) logLoadingStep('   missing: ' + result.missing.join(', '), 'error');
         }
+        await restoreCharacterCardOutputImages(item);
       } catch(err){
         hadErrors = true;
         if(verbose) logLoadingStep('Character "' + item.name + '" — error: ' + err.message, 'error');

@@ -117,6 +117,37 @@ function coreAngleCountTotal(){
   return CHAR_ANGLE_SLOTS.filter(s=>s.required).length;
 }
 
+// ---------- Character Card (the real, generation-driving reference) ----------
+// Source photos for building the card — deliberately ALL optional (even one photo is
+// enough to attempt a full card from; more just makes it more reliable).
+const CARD_INPUT_SLOTS = [
+  { key:'front',            label:'Front',        hint:'Neutral face, straight at camera' },
+  { key:'threeQuarterLeft', label:'3/4 Left',      hint:'Head turned ~45° left' },
+  { key:'threeQuarterRight',label:'3/4 Right',     hint:'Head turned ~45° right' },
+  { key:'profileLeft',      label:'Profile Left',  hint:'Full side view, facing left' },
+  { key:'profileRight',     label:'Profile Right', hint:'Full side view, facing right' },
+  { key:'back',             label:'Back',          hint:'Back of head/body' },
+];
+function emptyCardInputSlots(){
+  const obj = {};
+  CARD_INPUT_SLOTS.forEach(s=> obj[s.key]=null);
+  return obj;
+}
+// The generated output set — not an exhaustive angle×size matrix (18 images), but the
+// research-backed practical set: full coverage (all 3 framings) on the angle actually used
+// most often (front), and one versatile medium framing on every other angle so nothing is
+// ever generated from scratch without SOME reference.
+const CARD_OUTPUT_SLOTS = [
+  { key:'front-wide',           label:'Front — Wide',            angle:'front',           size:'wide' },
+  { key:'front-medium',         label:'Front — Medium',          angle:'front',           size:'medium' },
+  { key:'front-closeup',        label:'Front — Close-up',        angle:'front',           size:'closeup' },
+  { key:'threeQuarterLeft-medium',  label:'3/4 Left — Medium',   angle:'threeQuarterLeft',size:'medium' },
+  { key:'threeQuarterRight-medium', label:'3/4 Right — Medium',  angle:'threeQuarterRight',size:'medium' },
+  { key:'profileLeft-medium',   label:'Profile Left — Medium',   angle:'profileLeft',     size:'medium' },
+  { key:'profileRight-medium',  label:'Profile Right — Medium',  angle:'profileRight',    size:'medium' },
+  { key:'back-medium',          label:'Back — Medium',           angle:'back',            size:'medium' },
+];
+
 function formatTimecode(seconds){
   const m = Math.floor(seconds/60);
   const s = Math.floor(seconds%60);
