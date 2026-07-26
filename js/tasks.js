@@ -554,6 +554,24 @@ async function archiveGeneration(t){
   if(typeof saveProjectSoon==='function') saveProjectSoon();
 }
 
+// A photo added straight from disk, not generated — same archive entry shape as a
+// generation result (so it works everywhere a generated entry does: fullscreen view, "New
+// idea", insert-as-shot), just with no model/prompt since nothing was actually generated.
+async function archiveUploadedImage(dataUrl, label){
+  state.archive = state.archive || [];
+  const entry = {
+    id: 'arc' + (archiveSeq++),
+    kind: 'upload', sourceLabel: 'Uploaded — ' + (label || 'from disk'),
+    model: '', prompt: '',
+    photo: null, createdAt: Date.now(),
+  };
+  state.archive.push(entry);
+  if(typeof persistGeneratedAssetImage==='function') await persistGeneratedAssetImage(entry, 'archive', 'photo', dataUrl);
+  else entry.photo = dataUrl;
+  if(typeof saveProjectSoon==='function') saveProjectSoon();
+  return entry;
+}
+
 // Adds a Look/Location/Prop to the queue — called from each asset form's "Add to Tasks"
 // button. Mirrors queueShotGeneration in scenes-preview.js.
 function queueAssetGeneration(catKey, item){

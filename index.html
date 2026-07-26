@@ -169,7 +169,10 @@
   <div class="tasks-page hidden" id="archivePage">
     <div class="tasks-header">
       <div class="tasks-title">Archive</div>
-      <div class="gen-hint" style="margin:0;">Every successful generation ever made in this project — kept even after you remove it elsewhere.</div>
+      <div class="tasks-actions">
+        <button class="cf-btn primary" id="archiveUploadBtn">Add from disk</button>
+        <input type="file" id="archiveUploadInput" accept="image/*,.heic,.heif,.tiff,.tif,.bmp,.svg,.avif,.webp" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;">
+      </div>
     </div>
     <div class="tasks-grid" id="archiveGrid">
       <div class="tasks-empty">Nothing generated yet. Successful generations land here permanently, for reuse later.</div>

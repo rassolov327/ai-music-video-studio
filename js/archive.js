@@ -14,6 +14,22 @@ function wireArchivePage(){
     if(e.target.id==='newIdeaModal') closeNewIdeaModal();
   });
   document.getElementById('newIdeaSendBtn').onclick = sendNewIdea;
+
+  document.getElementById('archiveUploadBtn').onclick = ()=> document.getElementById('archiveUploadInput').click();
+  document.getElementById('archiveUploadInput').onchange = async ()=>{
+    const fileInput = document.getElementById('archiveUploadInput');
+    const file = fileInput.files[0];
+    if(!file) return;
+    try{
+      const dataUrl = await loadImageAsDataURL(file);
+      await archiveUploadedImage(dataUrl, file.name);
+      renderArchiveGrid();
+      renderAssets();
+    } catch(err){
+      alert('Could not add that file: ' + err.message);
+    }
+    fileInput.value = '';
+  };
 }
 
 function renderArchiveGrid(){
@@ -25,7 +41,7 @@ function renderArchiveGrid(){
     return;
   }
   grid.innerHTML = entries.map(entry=>{
-    const showInsert = entry.kind==='shot' || entry.kind==='archive-derive' || !entry.kind; // inserting only makes sense for shot-style images
+    const showInsert = entry.kind==='shot' || entry.kind==='archive-derive' || entry.kind==='upload' || !entry.kind; // inserting only makes sense for shot-style images
     return `
       <div class="task-tile" data-archive-id="${entry.id}">
         <div class="task-tile-thumb">
