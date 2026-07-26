@@ -21,6 +21,10 @@ function startPlayback(){
   if(isPlaying) return;
   isPlaying = true;
   updateTransportButtons();
+  // Wherever the playhead already sits (mid-shot or at a splice), make sure the preview is
+  // actually re-rendered now that isPlaying is true — otherwise a video shot that was already
+  // being shown (paused, from scrubbing there) would just sit there instead of starting.
+  if(typeof refreshMainPreview==='function') refreshMainPreview();
   const track = getActiveTrack();
   if(track && track.audioUrl){
     if(!audioEl){

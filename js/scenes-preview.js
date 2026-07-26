@@ -158,7 +158,7 @@ function refreshMainPreview(){
   if(shot && shot.videoUrl){
     previewEl.innerHTML = `
       <div class="timeline-frame" style="border-color:transparent;">
-        <video src="${shot.videoUrl}" ${typeof isPlaying!=='undefined' && isPlaying ? 'autoplay muted playsinline' : 'muted controls playsinline'}></video>
+        <video src="${shot.videoUrl}" preload="auto" onloadedmetadata="if(this.paused) this.currentTime=0.01" ${typeof isPlaying!=='undefined' && isPlaying ? 'autoplay muted playsinline' : 'muted controls playsinline'}></video>
         <span class="plabel" style="position:relative;z-index:1;color:#fff;background:rgba(0,0,0,.5);padding:3px 9px;border-radius:5px;align-self:flex-end;margin:10px;">${shot.name}</span>
       </div>`;
   } else if(shot && shot.previewImage){
