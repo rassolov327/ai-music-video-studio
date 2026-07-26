@@ -155,7 +155,13 @@ function refreshMainPreview(){
 
   previewBarEl.textContent = shot ? `${scene.name} — ${shot.name}` : scene.name;
 
-  if(shot && shot.previewImage){
+  if(shot && shot.videoUrl){
+    previewEl.innerHTML = `
+      <div class="timeline-frame" style="border-color:transparent;">
+        <video src="${shot.videoUrl}" ${typeof isPlaying!=='undefined' && isPlaying ? 'autoplay muted playsinline' : 'autoplay loop muted controls playsinline'}></video>
+        <span class="plabel" style="position:relative;z-index:1;color:#fff;background:rgba(0,0,0,.5);padding:3px 9px;border-radius:5px;align-self:flex-end;margin:10px;">${shot.name}</span>
+      </div>`;
+  } else if(shot && shot.previewImage){
     previewEl.innerHTML = `
       <div class="timeline-frame" style="border-color:transparent;">
         <img src="${shot.previewImage}">

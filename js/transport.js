@@ -96,6 +96,8 @@ function runPlayLoop(){
 function pausePlayback(){
   if(playRafId){ cancelAnimationFrame(playRafId); playRafId = null; }
   if(audioEl) audioEl.pause();
+  const previewVideo = previewEl && previewEl.querySelector('video');
+  if(previewVideo) previewVideo.pause();
   isPlaying = false;
   updateTransportButtons();
   updateVuMeter(true);

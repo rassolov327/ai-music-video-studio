@@ -16,6 +16,8 @@ function goHome(){
   wireCardImageModal();
   wireCreditsIndicator();
   loadModelList();
+  wireMoviePage();
+  loadVideoModelList();
   startBackgroundTaskWatcher();
   const restored = await initProjectStore();
   if(restored){

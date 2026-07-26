@@ -423,8 +423,8 @@ function extFromDataUrl(dataUrl){
   return '.' + (map[m[1]] || m[1]);
 }
 function extFromMimeType(mime){
-  const map = { 'image/png':'.png', 'image/jpeg':'.jpg', 'image/webp':'.webp', 'image/gif':'.gif' };
-  return (mime && map[mime]) || '.png';
+  const map = { 'image/png':'.png', 'image/jpeg':'.jpg', 'image/webp':'.webp', 'image/gif':'.gif', 'video/mp4':'.mp4', 'video/webm':'.webm', 'video/quicktime':'.mov' };
+  return (mime && map[mime]) || (mime && mime.indexOf('video/')===0 ? '.mp4' : '.png');
 }
 // Shared by both persistImageAsset (local uploads, already a data: URL) and
 // persistRemoteImageAsset (downloaded generations) — writes a Blob to disk or IndexedDB.
@@ -852,7 +852,34 @@ async function restoreShotPreviewImage(shot, assetsDirHandle){
   if(url){ shot.previewImage = url; return true; }
   return false;
 }
+// A shot's animated video (from MOVIE) — same persistence pattern as the still preview
+// above, just a separate field so the still frame isn't lost even after the shot is animated.
+async function persistShotVideo(shot, resultUrl){
+  if(!shot || !shot.id || !resultUrl) return;
+  try{
+    const assetKey = pid() + ':shots:' + shot.id + ':video';
+    const result = await persistRemoteImageAsset(assetKey, resultUrl);
+    shot.videoUrl = URL.createObjectURL(result.blob);
+    shot._assetFiles = shot._assetFiles || {};
+    shot._assetFiles.video = result.fileName;
+    console.log('[ProjectStore] saved shot video locally for "' + shot.name + '"');
+  } catch(err){
+    console.warn('[ProjectStore] could not save shot video locally, keeping the provider link only (it may expire later):', err);
+    shot.videoUrl = resultUrl;
+  }
+  if(typeof saveProjectSoon==='function') saveProjectSoon();
+}
+async function restoreShotVideo(shot, assetsDirHandle){
+  if(!shot._assetFiles || !('video' in shot._assetFiles)) return true; // not animated, nothing to restore
+  const assetKey = pid() + ':shots:' + shot.id + ':video';
+  const url = await loadImageAsset(assetKey, shot._assetFiles.video, assetsDirHandle);
+  if(url){ shot.videoUrl = url; return true; }
+  return false;
+}
 async function deleteShotPreviewImage(shot){
+  if(shot._assetFiles && ('video' in shot._assetFiles)){
+    try{ await idbDelete(STORE_ASSETS, pid() + ':shots:' + shot.id + ':video'); } catch(err){}
+  }
   if(!shot._assetFiles || !('preview' in shot._assetFiles)) return;
   const assetKey = pid() + ':shots:' + shot.id;
   try{ await idbDelete(STORE_ASSETS, assetKey); } catch(err){}
@@ -1023,6 +1050,7 @@ function serializeProject(){
     scene.shots = (scene.shots||[]).map((shot)=>{
       const liveShot = liveScene && liveScene.shots.find(sh=> sh.id===shot.id);
       if(liveShot && liveShot._assetFiles && ('preview' in liveShot._assetFiles)) shot.previewImage = null;
+      if(liveShot && liveShot._assetFiles && ('video' in liveShot._assetFiles)) shot.videoUrl = null;
       return shot;
     });
     return scene;
@@ -1157,7 +1185,7 @@ async function applyProjectData(data, verbose){
     logLoadingStep('Restored ' + archiveRestored + '/' + state.archive.length + ' archived generation(s)', archiveRestored===state.archive.length ? 'ok' : 'error');
   }
 
-  let shotPreviewCount = 0, shotPreviewRestored = 0;
+  let shotPreviewCount = 0, shotPreviewRestored = 0, shotVideoCount = 0, shotVideoRestored = 0;
   for(const scene of state.scenes){
     for(const shot of (scene.shots||[])){
       if(shot._assetFiles && ('preview' in shot._assetFiles)){
@@ -1167,10 +1195,20 @@ async function applyProjectData(data, verbose){
           if(ok) shotPreviewRestored++; else hadErrors = true;
         } catch(err){ hadErrors = true; }
       }
+      if(shot._assetFiles && ('video' in shot._assetFiles)){
+        shotVideoCount++;
+        try{
+          const ok = await restoreShotVideo(shot);
+          if(ok) shotVideoRestored++; else hadErrors = true;
+        } catch(err){ hadErrors = true; }
+      }
     }
   }
   if(shotPreviewCount && verbose){
     logLoadingStep('Restored ' + shotPreviewRestored + '/' + shotPreviewCount + ' saved shot preview(s)', shotPreviewRestored===shotPreviewCount ? 'ok' : 'error');
+  }
+  if(shotVideoCount && verbose){
+    logLoadingStep('Restored ' + shotVideoRestored + '/' + shotVideoCount + ' animated shot video(s)', shotVideoRestored===shotVideoCount ? 'ok' : 'error');
   }
 
   focus = data.focus || { sceneId:null, shotId:null };

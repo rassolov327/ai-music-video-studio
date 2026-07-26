@@ -15,8 +15,13 @@ function wirePageTabs(){
     tab.onclick = ()=> showPage(tab.dataset.page);
   });
   const modal = document.getElementById('taskPreviewModal');
-  document.getElementById('taskPreviewClose').onclick = ()=> modal.classList.add('hidden');
-  modal.onclick = (e)=>{ if(e.target===modal) modal.classList.add('hidden'); };
+  const closePreviewModal = ()=>{
+    modal.classList.add('hidden');
+    const videoEl = document.getElementById('taskPreviewVideo');
+    if(videoEl) videoEl.pause();
+  };
+  document.getElementById('taskPreviewClose').onclick = closePreviewModal;
+  modal.onclick = (e)=>{ if(e.target===modal) closePreviewModal(); };
 
   document.getElementById('tasksGenerateSelectedBtn').onclick = generateSelectedDraftTasks;
   document.getElementById('tasksSortSelect').onchange = (e)=>{
@@ -30,7 +35,9 @@ function showPage(page){
   document.getElementById('workPage').classList.toggle('hidden', page!=='work');
   document.getElementById('tasksPage').classList.toggle('hidden', page!=='tasks');
   document.getElementById('archivePage').classList.toggle('hidden', page!=='archive');
+  document.getElementById('moviePage').classList.toggle('hidden', page!=='movie');
   if(page==='archive') renderArchiveGrid();
+  if(page==='movie' && typeof renderMovieGrid==='function') renderMovieGrid();
   if(page==='tasks'){
     refreshTasks();
     if(tasksRefreshTimer) clearInterval(tasksRefreshTimer);
@@ -191,12 +198,12 @@ function renderTasksGrid(){
       const t = entry.data;
       const meta = t.meta || {};
       const thumb = t.status==='success' && t.imageUrl
-        ? `<img src="${t.imageUrl}">`
+        ? (t.isVideo ? `<video src="${t.imageUrl}" muted loop autoplay playsinline></video>` : `<img src="${t.imageUrl}">`)
         : t.status==='failed'
           ? `<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="9"></circle><line x1="9" y1="9" x2="15" y2="15"></line><line x1="15" y1="9" x2="9" y2="15"></line></svg>`
           : `<div class="task-tile-spin"></div>`;
-      const line1 = meta.kind==='shot' || !meta.kind ? (meta.sceneName || 'Scene') : meta.kind==='character-card' ? 'Character card' : meta.kind==='locations-card' ? 'Location card' : meta.kind==='props-card' ? 'Prop card' : (meta.kind==='looks'?'Look':meta.kind==='locations'?'Location':meta.kind==='props'?'Prop':'Asset');
-      const line2 = meta.kind==='shot' || !meta.kind ? (meta.shotName || 'Shot') : meta.kind==='character-card' ? ((meta.characterName||'') + ' — ' + (meta.outputKey||'')) : (meta.kind==='locations-card' || meta.kind==='props-card') ? (meta.assetName || '') : (meta.assetName || '');
+      const line1 = meta.kind==='movie' ? (meta.sceneName || 'Scene') : meta.kind==='shot' || !meta.kind ? (meta.sceneName || 'Scene') : meta.kind==='character-card' ? 'Character card' : meta.kind==='locations-card' ? 'Location card' : meta.kind==='props-card' ? 'Prop card' : (meta.kind==='looks'?'Look':meta.kind==='locations'?'Location':meta.kind==='props'?'Prop':'Asset');
+      const line2 = meta.kind==='movie' ? ((meta.shotName || 'Shot') + ' (animate)') : meta.kind==='shot' || !meta.kind ? (meta.shotName || 'Shot') : meta.kind==='character-card' ? ((meta.characterName||'') + ' — ' + (meta.outputKey||'')) : (meta.kind==='locations-card' || meta.kind==='props-card') ? (meta.assetName || '') : (meta.assetName || '');
       const canRegen = t.status==='success' || t.status==='failed';
       return `
         <div class="task-tile" data-task-id="${t.taskId}">
@@ -272,7 +279,20 @@ function wireLiveTiles(){
     tile.onclick = ()=>{
       const t = liveTasks.find(x=> x.taskId===taskId);
       if(t && t.status==='success' && t.imageUrl){
-        document.getElementById('taskPreviewImg').src = t.imageUrl;
+        const imgEl = document.getElementById('taskPreviewImg');
+        const videoEl = document.getElementById('taskPreviewVideo');
+        if(t.isVideo){
+          videoEl.src = t.imageUrl;
+          videoEl.classList.remove('hidden');
+          imgEl.classList.add('hidden');
+          imgEl.src = '';
+        } else {
+          imgEl.src = t.imageUrl;
+          imgEl.classList.remove('hidden');
+          videoEl.classList.add('hidden');
+          videoEl.pause();
+          videoEl.src = '';
+        }
         document.getElementById('taskPreviewModal').classList.remove('hidden');
       }
     };
@@ -495,6 +515,18 @@ async function applyFinishedTasks(list){
         if(typeof applyObjectCardSheetImage==='function') await applyObjectCardSheetImage(objCatKey, item, t.imageUrl);
       }
       if(typeof refreshObjectCardBuilderIfOpen==='function') refreshObjectCardBuilderIfOpen(objCatKey, meta.assetId);
+      continue;
+    }
+    if(meta.kind==='movie'){
+      const scene = state.scenes.find(s=> s.id===meta.sceneId);
+      const shot = scene && scene.shots.find(sh=> sh.id===meta.shotId);
+      if(shot){
+        if(typeof persistShotVideo==='function') await persistShotVideo(shot, t.imageUrl);
+        else shot.videoUrl = t.imageUrl;
+        if(focus.sceneId===meta.sceneId && focus.shotId===meta.shotId) touchedCurrentView = true;
+      }
+      if(typeof renderMovieGrid==='function' && !document.getElementById('moviePage').classList.contains('hidden')) renderMovieGrid();
+      renderTimelineScenes();
       continue;
     }
     if(!meta.kind || meta.kind==='shot'){

@@ -159,6 +159,19 @@ app.get('/api/models', (req, res) => {
   res.json({ models: MODELS.map(m => ({ id: m.id, label: m.label, costUsd: m.costUsd, supportsReferenceImage: !!m.supportsReferenceImage })) });
 });
 
+// ---- video models (image-to-video, for animating an already-generated shot) ----
+// All three are the same Kling v2.1 family, verified against docs.kie.ai's own request
+// examples — same input shape (prompt, image_url, duration, negative_prompt, cfg_scale)
+// across all three tiers, just different quality/price points.
+const VIDEO_MODELS = [
+  { id: 'kling/v2-1-standard', label: 'Kling 2.1 Standard', costUsd: 0.125, blurb: '720p — fastest and cheapest, solid everyday motion' },
+  { id: 'kling/v2-1-pro', label: 'Kling 2.1 Pro', costUsd: 0.25, blurb: '1080p — smoother, more realistic motion' },
+  { id: 'kling/v2-1-master-image-to-video', label: 'Kling 2.1 Master', costUsd: 0.80, blurb: '1080p — best quality, realistic physics and camera work, priciest' },
+];
+app.get('/api/video-models', (req, res) => {
+  res.json({ models: VIDEO_MODELS.map(m => ({ id: m.id, label: m.label, costUsd: m.costUsd, blurb: m.blurb })) });
+});
+
 // ---- KIE.ai credit balance (for the small indicator in the corner of the UI) ----
 const KIE_CREDIT_USD = 0.005; // KIE's own published rate — see docs.kie.ai
 app.get('/api/kie-credits', async (req, res) => {
@@ -291,6 +304,65 @@ app.post('/api/generate-image/start', async (req, res) => {
     return res.json({ taskId });
   } catch (err) {
     console.error('[server] /api/generate-image/start failed:', err);
+    return res.status(500).json({ error: 'server_error', message: String(err && err.message || err) });
+  }
+});
+
+// ---- video generation (image-to-video, animates an already-generated shot) ----
+// Reuses the exact same task store, webhook, and status-check machinery as image
+// generation above — applyTaskResult just extracts whatever URL comes back, regardless of
+// whether it's an image or a video, so nothing there needed to change.
+function buildVideoInputFor(imageUrl, prompt, duration) {
+  return {
+    prompt,
+    image_url: imageUrl,
+    duration: String(duration || 5),
+    negative_prompt: 'blurry, distorted, low quality, extra limbs, morphing, flickering',
+    cfg_scale: 0.5,
+  };
+}
+app.post('/api/generate-video/start', async (req, res) => {
+  if (!KIE_API_KEY) {
+    return res.status(503).json({ error: 'not_configured', message: 'KIE_API_KEY is not set on the server yet.' });
+  }
+  const { prompt, imageUrl, duration, model, meta } = req.body || {};
+  if (!prompt || typeof prompt !== 'string') {
+    return res.status(400).json({ error: 'bad_request', message: 'prompt is required.' });
+  }
+  if (!imageUrl) {
+    return res.status(400).json({ error: 'bad_request', message: 'imageUrl is required — video generation animates an already-generated shot image.' });
+  }
+  const modelId = (VIDEO_MODELS.find(m => m.id === model) || VIDEO_MODELS[0]).id;
+  const input = buildVideoInputFor(imageUrl, prompt, duration);
+  const callBackUrl = PUBLIC_URL ? PUBLIC_URL + '/api/webhook/kie' : undefined;
+
+  try {
+    const body = { model: modelId, input };
+    if (callBackUrl) body.callBackUrl = callBackUrl;
+    const createRes = await fetch(`${KIE_BASE}/api/v1/jobs/createTask`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${KIE_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const createData = await createRes.json().catch(() => null);
+    console.log('[server] create video task (' + modelId + '):', JSON.stringify(createData));
+    const taskId = createData && createData.data && createData.data.taskId;
+    if (!createRes.ok || !taskId) {
+      return res.status(502).json({
+        error: 'provider_error',
+        message: (createData && createData.msg) || ('KIE.ai rejected the request (HTTP ' + createRes.status + ').'),
+      });
+    }
+    tasks.set(taskId, {
+      status: 'pending', imageUrl: null, message: null, model: modelId, prompt, isVideo: true,
+      meta: meta || {}, createdAt: Date.now(), updatedAt: Date.now(),
+    });
+    if (!callBackUrl) {
+      console.warn('[server] no PUBLIC_URL known — this task will rely entirely on the polling fallback.');
+    }
+    return res.json({ taskId });
+  } catch (err) {
+    console.error('[server] /api/generate-video/start failed:', err);
     return res.status(500).json({ error: 'server_error', message: String(err && err.message || err) });
   }
 });
