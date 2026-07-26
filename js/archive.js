@@ -37,6 +37,11 @@ function wireArchivePage(){
   };
 }
 
+function videoModelResolution(modelId){
+  if(!modelId) return null;
+  return modelId.indexOf('standard')>=0 ? '720p (1280×720)' : '1080p (1920×1080)';
+}
+
 function renderArchiveGrid(){
   const grid = document.getElementById('archiveGrid');
   if(!grid) return;
@@ -52,6 +57,8 @@ function renderArchiveGrid(){
         <div class="task-tile-thumb">
           ${entry.photo ? (entry.isVideo ? `<video src="${entry.photo}" muted loop autoplay playsinline></video>` : `<img src="${entry.photo}">`) : '<div class="task-tile-spin"></div>'}
           ${showInsert ? `<div class="task-tile-insert" title="Insert as a new shot at the playhead"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><polyline points="19 12 12 19 5 12"></polyline></svg></div>` : ''}
+          ${entry.isVideo ? `<div class="archive-info-icon" title="Video info"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="11"></line><circle cx="12" cy="8" r="0.6" fill="currentColor" stroke="none"></circle></svg></div>` : ''}
+          <div class="task-tile-trash" title="Remove from archive"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></div>
         </div>
         <div class="task-tile-body">
           <div class="task-tile-scene">${entry.sourceLabel || ''}</div>
@@ -62,6 +69,35 @@ function renderArchiveGrid(){
 
   grid.querySelectorAll('.task-tile').forEach(tile=>{
     const id = tile.dataset.archiveId;
+    const entry = entries.find(e=> e.id===id);
+    const trashBtn = tile.querySelector('.task-tile-trash');
+    if(trashBtn){
+      trashBtn.onclick = (e)=>{
+        e.stopPropagation();
+        deleteArchiveEntry(id);
+      };
+    }
+    const infoIcon = tile.querySelector('.archive-info-icon');
+    if(infoIcon && entry){
+      infoIcon.onclick = (e)=>{
+        e.stopPropagation();
+        const existing = tile.querySelector('.archive-meta-popover');
+        if(existing){ existing.remove(); return; }
+        document.querySelectorAll('.archive-meta-popover').forEach(p=> p.remove());
+        const pop = document.createElement('div');
+        pop.className = 'archive-meta-popover';
+        pop.innerHTML = `
+          <div class="row"><span class="k">Model</span><span>${entry.model || '—'}</span></div>
+          <div class="row"><span class="k">Resolution</span><span>${videoModelResolution(entry.model) || '—'}</span></div>
+          <div class="row"><span class="k">Frame rate</span><span>30 fps</span></div>
+          <div class="row"><span class="k">Duration</span><span>${entry.duration ? entry.duration + 's' : '—'}</span></div>`;
+        tile.querySelector('.task-tile-thumb').appendChild(pop);
+        const closeOnOutside = (ev)=>{
+          if(!pop.contains(ev.target) && ev.target!==infoIcon){ pop.remove(); document.removeEventListener('click', closeOnOutside); }
+        };
+        setTimeout(()=> document.addEventListener('click', closeOnOutside), 0);
+      };
+    }
     const insertBtn = tile.querySelector('.task-tile-insert');
     if(insertBtn){
       insertBtn.onclick = (e)=>{
@@ -71,6 +107,15 @@ function renderArchiveGrid(){
     }
     tile.onclick = ()=> openArchivePreview(id);
   });
+}
+
+async function deleteArchiveEntry(entryId){
+  const entry = (state.archive||[]).find(e=> e.id===entryId);
+  if(!entry) return;
+  if(typeof deleteGeneratedAssetImage==='function') await deleteGeneratedAssetImage(entry, 'archive', 'photo');
+  state.archive = (state.archive||[]).filter(e=> e.id!==entryId);
+  renderArchiveGrid();
+  if(typeof saveProjectSoon==='function') saveProjectSoon();
 }
 
 function openArchivePreview(entryId){

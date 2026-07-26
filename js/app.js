@@ -8,6 +8,7 @@ function goHome(){
   wireNewProjectScreen();
   wireFileMenu();
   wireProjectMenu();
+  wireProjectSettingsModal();
   wireToolsMenu();
   wireCheckReport();
   wireFolderButton();

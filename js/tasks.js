@@ -560,6 +560,11 @@ async function applyFinishedTasks(list){
 // was made for is deleted, or the task itself is removed from the Tasks list. Nothing ever
 // removes an entry once it's archived.
 async function archiveGeneration(t){
+  state.archive = state.archive || [];
+  // The runtime "already handled" Set resets on every page reload, but a task can still be
+  // in flight (video generation especially can take minutes) across one — so the real guard
+  // has to be persistent: has this exact provider task already produced an archive entry?
+  if(state.archive.some(e=> e.sourceTaskId===t.taskId)) return;
   const meta = t.meta || {};
   const kind = meta.kind || 'shot';
   const sourceLabel = kind==='shot'
@@ -576,8 +581,8 @@ async function archiveGeneration(t){
               ? ('Prop card / ' + (meta.assetName || ''))
               : ((kind==='looks'?'Look':kind==='locations'?'Location':kind==='props'?'Prop':'Asset') + ' / ' + (meta.assetName || ''));
   const entry = {
-    id: 'arc' + (archiveSeq++),
-    kind, sourceLabel, isVideo: !!t.isVideo,
+    id: 'arc' + (archiveSeq++), sourceTaskId: t.taskId,
+    kind, sourceLabel, isVideo: !!t.isVideo, duration: t.duration || null,
     model: t.model || '', prompt: t.prompt || '',
     photo: null, createdAt: Date.now(),
   };

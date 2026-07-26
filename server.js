@@ -354,7 +354,7 @@ app.post('/api/generate-video/start', async (req, res) => {
       });
     }
     tasks.set(taskId, {
-      status: 'pending', imageUrl: null, message: null, model: modelId, prompt, isVideo: true,
+      status: 'pending', imageUrl: null, message: null, model: modelId, prompt, isVideo: true, duration: duration || 5,
       meta: meta || {}, createdAt: Date.now(), updatedAt: Date.now(),
     });
     if (!callBackUrl) {

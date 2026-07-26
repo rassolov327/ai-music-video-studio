@@ -949,3 +949,19 @@
   }
   .task-tile-thumb video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
   .movie-tile-model-select{width:100%;}
+
+  /* ---- Archive: info icon (video metadata) + always-visible delete ---- */
+  .archive-info-icon{
+    position:absolute;top:6px;right:6px;width:20px;height:20px;border-radius:50%;
+    background:rgba(0,0,0,.55);color:#fff;display:flex;align-items:center;justify-content:center;
+    cursor:pointer;z-index:3;opacity:0;transition:opacity .12s;
+  }
+  .task-tile-thumb:hover .archive-info-icon{opacity:1;}
+  .archive-meta-popover{
+    position:absolute;top:30px;right:6px;z-index:10;min-width:150px;
+    background:var(--bg-elevated);border:1px solid var(--line);border-radius:8px;
+    padding:8px 10px;font-size:11px;color:var(--text-1);line-height:1.6;
+    box-shadow:0 6px 20px rgba(0,0,0,.4);
+  }
+  .archive-meta-popover .row{display:flex;justify-content:space-between;gap:10px;}
+  .archive-meta-popover .k{color:var(--text-3);}

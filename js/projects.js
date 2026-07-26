@@ -137,6 +137,81 @@ function renderNpFps(){
   });
 }
 
+// ---------- Project Settings modal (change format/fps on an existing project) ----------
+let psState = { orientation:'horizontal', width:1920, height:1080, fps:25 };
+
+function showProjectSettingsModal(){
+  psState = {
+    orientation: state.projectMeta.format || 'horizontal',
+    width: state.projectMeta.width,
+    height: state.projectMeta.height,
+    fps: state.projectMeta.fps,
+  };
+  renderPsOrientation();
+  renderPsResolutions();
+  renderPsFps();
+  document.getElementById('projectSettingsModal').classList.remove('hidden');
+}
+function renderPsOrientation(){
+  document.querySelectorAll('#psOrientationRow .np-orient-tile').forEach(t=>{
+    t.classList.toggle('active', t.dataset.orient===psState.orientation);
+  });
+}
+function renderPsResolutions(){
+  const row = document.getElementById('psResolutionRow');
+  const options = RESOLUTION_OPTIONS[psState.orientation];
+  if(!options.find(o=> o.width===psState.width && o.height===psState.height)){
+    const mid = options[1];
+    psState.width = mid.width; psState.height = mid.height;
+  }
+  row.innerHTML = options.map(o=> `
+    <div class="np-chip${o.width===psState.width && o.height===psState.height ? ' active' : ''}" data-w="${o.width}" data-h="${o.height}">${o.label}</div>
+  `).join('');
+  row.querySelectorAll('.np-chip').forEach(chip=>{
+    chip.onclick = ()=>{
+      psState.width = parseInt(chip.dataset.w, 10);
+      psState.height = parseInt(chip.dataset.h, 10);
+      renderPsResolutions();
+    };
+  });
+}
+function renderPsFps(){
+  const row = document.getElementById('psFpsRow');
+  row.innerHTML = FPS_OPTIONS.map(f=> `
+    <div class="np-chip${f===psState.fps ? ' active' : ''}" data-fps="${f}">${f} fps</div>
+  `).join('');
+  row.querySelectorAll('.np-chip').forEach(chip=>{
+    chip.onclick = ()=>{
+      psState.fps = parseInt(chip.dataset.fps, 10);
+      renderPsFps();
+    };
+  });
+}
+function wireProjectSettingsModal(){
+  const modal = document.getElementById('projectSettingsModal');
+  const close = ()=> modal.classList.add('hidden');
+  document.getElementById('psCloseBtn').onclick = close;
+  document.getElementById('psCancelBtn').onclick = close;
+  modal.addEventListener('click', (e)=>{ if(e.target===modal) close(); });
+  document.querySelectorAll('#psOrientationRow .np-orient-tile').forEach(tile=>{
+    tile.onclick = ()=>{
+      psState.orientation = tile.dataset.orient;
+      renderPsOrientation();
+      renderPsResolutions();
+    };
+  });
+  document.getElementById('psSaveBtn').onclick = ()=>{
+    state.projectMeta.format = psState.orientation;
+    state.projectMeta.width = psState.width;
+    state.projectMeta.height = psState.height;
+    state.projectMeta.fps = psState.fps;
+    PROJECT_FPS = psState.fps;
+    if(typeof applyProjectFrame==='function') applyProjectFrame();
+    if(typeof saveProjectSoon==='function') saveProjectSoon();
+    close();
+  };
+}
+
 function wireNewProjectScreen(){
   document.querySelectorAll('.np-orient-tile').forEach(tile=>{
     tile.onclick = ()=>{
@@ -225,6 +300,8 @@ function wireProjectMenu(){
         await renameProject(currentProjectId, name);
         updateProjTitleDisplay();
       }
+    } else if(action==='settings'){
+      showProjectSettingsModal();
     }
   });
 }
