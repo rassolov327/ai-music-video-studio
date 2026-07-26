@@ -184,6 +184,7 @@ app.post('/api/assist/analyze-script', async (req, res) => {
     knownNames.length ? ('These characters already exist in the project — reuse their exact names if the script refers to them: ' + knownNames.join(', ') + '.') : '',
     songDurationSec ? ('There is a song on the timeline, ' + songDurationSec + ' seconds long — keep the total number of shots reasonable for that length, but do not force scenes to align to any particular song structure.') : '',
     'Only include a "looks" entry for a character if the script actually describes specific clothing/outfit — do not invent one. Every character/location/prop/look needs a short name and a short visual description suitable as an image-generation prompt.',
+    'Write every name and description in the SAME language as the script text itself (e.g. a Russian script gets Russian names/descriptions, an English script gets English ones) — never translate, always match the script\'s own language.',
     'Respond with ONLY the JSON breakdown, nothing else.',
   ].filter(Boolean).join('\n');
 

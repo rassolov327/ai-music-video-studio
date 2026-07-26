@@ -141,12 +141,16 @@ function renderScriptTree(){
     tree.innerHTML = `<div class="gen-hint" style="padding:14px;">Paste a script on the left and click Analyze — the proposed breakdown will show up here.</div>`;
     return;
   }
+  const trashSvg = `<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg>`;
   function renderFlatCat(title, list, type){
     if(!list.length) return '';
     return `<div class="script-cat-title">${title}</div>` + list.map(it=> `
       <div class="script-tree-item${scriptSelectedItem && scriptSelectedItem.type===type && scriptSelectedItem.id===it.id ? ' active':''}" data-type="${type}" data-id="${it.id}">
         <span>${it.name}</span>
-        ${it.staleFromAnalysis ? '<span class="dirty-dot" title="Your edit differs from the latest analysis"></span>' : ''}
+        <span style="display:flex;align-items:center;gap:5px;">
+          ${it.staleFromAnalysis ? '<span class="dirty-dot" title="Your edit differs from the latest analysis"></span>' : ''}
+          <span class="script-tree-delete" data-del-type="${type}" data-del-id="${it.id}" title="Remove from proposal">${trashSvg}</span>
+        </span>
       </div>`).join('');
   }
   let html = '';
@@ -161,12 +165,18 @@ function renderScriptTree(){
       const shotsHtml = scene.shots.map((shot, idx)=> `
         <div class="script-tree-item${scriptSelectedItem && scriptSelectedItem.type==='shot' && scriptSelectedItem.id===shot.id ? ' active':''}" data-type="shot" data-id="${shot.id}" data-scene-id="${scene.id}">
           <span>Shot ${idx+1}</span>
-          ${shot.staleFromAnalysis ? '<span class="dirty-dot"></span>' : ''}
+          <span style="display:flex;align-items:center;gap:5px;">
+            ${shot.staleFromAnalysis ? '<span class="dirty-dot"></span>' : ''}
+            <span class="script-tree-delete" data-del-type="shot" data-del-id="${shot.id}" data-del-scene-id="${scene.id}" title="Remove this shot">${trashSvg}</span>
+          </span>
         </div>`).join('');
       return `
         <div class="script-tree-item${isSceneSelected?' active':''}" data-type="scene" data-id="${scene.id}">
           <span>${scene.name}</span>
-          ${scene.staleFromAnalysis ? '<span class="dirty-dot" title="Your edit differs from the latest analysis"></span>' : ''}
+          <span style="display:flex;align-items:center;gap:5px;">
+            ${scene.staleFromAnalysis ? '<span class="dirty-dot" title="Your edit differs from the latest analysis"></span>' : ''}
+            <span class="script-tree-delete" data-del-type="scene" data-del-id="${scene.id}" title="Remove this scene and its shots">${trashSvg}</span>
+          </span>
         </div>
         <div class="script-tree-shots">${shotsHtml}</div>`;
     }).join('');
@@ -174,8 +184,41 @@ function renderScriptTree(){
   tree.innerHTML = html;
 
   tree.querySelectorAll('.script-tree-item').forEach(el=>{
-    el.onclick = ()=> selectScriptItem(el.dataset.type, el.dataset.id, el.dataset.sceneId);
+    el.onclick = (e)=>{
+      if(e.target.closest('.script-tree-delete')) return;
+      selectScriptItem(el.dataset.type, el.dataset.id, el.dataset.sceneId);
+    };
   });
+  tree.querySelectorAll('.script-tree-delete').forEach(el=>{
+    el.onclick = (e)=>{
+      e.stopPropagation();
+      deleteScriptProposalItem(el.dataset.delType, el.dataset.delId, el.dataset.delSceneId);
+    };
+  });
+}
+
+// Removes an item straight from the draft proposal — this only ever touches the in-progress
+// review, never the real project (nothing is exported yet).
+function deleteScriptProposalItem(type, id, sceneId){
+  const p = state.script.proposal;
+  if(!p) return;
+  const listByType = { character:'characters', location:'locations', prop:'props', look:'looks' };
+  if(listByType[type]){
+    p[listByType[type]] = p[listByType[type]].filter(it=> it.id!==id);
+  } else if(type==='scene'){
+    p.scenes = p.scenes.filter(s=> s.id!==id);
+  } else if(type==='shot'){
+    const scene = p.scenes.find(s=> s.id===sceneId) || p.scenes.find(s=> s.shots.some(sh=> sh.id===id));
+    if(scene) scene.shots = scene.shots.filter(sh=> sh.id!==id);
+  }
+  if(scriptSelectedItem && scriptSelectedItem.type===type && scriptSelectedItem.id===id){
+    scriptSelectedItem = null;
+    renderScriptInspector(null, null);
+    highlightNameInScriptText(null);
+  }
+  renderScriptTree();
+  updateScriptStatusHint();
+  if(typeof saveProjectSoon==='function') saveProjectSoon();
 }
 
 function findScriptItem(type, id, sceneId){

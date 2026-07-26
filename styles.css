@@ -1038,3 +1038,9 @@
   .script-cat-title{
     padding:8px 10px 4px;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-3);
   }
+
+  .script-tree-delete{
+    display:flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:4px;
+    color:var(--text-3);opacity:.6;flex:0 0 auto;
+  }
+  .script-tree-delete:hover{background:rgba(217,105,95,.18);color:var(--danger);opacity:1;}
