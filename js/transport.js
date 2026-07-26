@@ -21,10 +21,18 @@ function startPlayback(){
   if(isPlaying) return;
   isPlaying = true;
   updateTransportButtons();
-  // Wherever the playhead already sits (mid-shot or at a splice), make sure the preview is
-  // actually re-rendered now that isPlaying is true — otherwise a video shot that was already
-  // being shown (paused, from scrubbing there) would just sit there instead of starting.
-  if(typeof refreshMainPreview==='function') refreshMainPreview();
+  // If a video for the current shot is already sitting in the preview (paused — either from
+  // an earlier pause, or from just clicking the shot), resume it exactly where it is. A full
+  // refresh here would tear down and recreate the <video> element, restarting it from 0 —
+  // that was the bug: pausing mid-clip and pressing play again jumped back to the start.
+  // Only fall back to a full refresh when nothing (or no video) is currently shown, e.g. the
+  // very first play, or the focused shot doesn't have a video ready yet.
+  const existingVideo = previewEl.querySelector('video');
+  if(existingVideo){
+    existingVideo.play().catch(()=>{});
+  } else if(typeof refreshMainPreview==='function'){
+    refreshMainPreview();
+  }
   const track = getActiveTrack();
   if(track && track.audioUrl){
     if(!audioEl){
