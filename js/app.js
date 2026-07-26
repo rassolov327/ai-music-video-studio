@@ -19,6 +19,7 @@ function goHome(){
   loadModelList();
   wireMoviePage();
   loadVideoModelList();
+  wireGeminiChat();
   startBackgroundTaskWatcher();
   const restored = await initProjectStore();
   if(restored){

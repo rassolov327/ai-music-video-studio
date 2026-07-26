@@ -275,6 +275,24 @@
   <span class="credits-spinner hidden" id="creditsSpinner"></span>
 </div>
 
+<div class="gemini-assist-btn" id="geminiAssistBtn" title="Ask Gemini">
+  <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M12 2l1.8 6.2L20 10l-6.2 1.8L12 18l-1.8-6.2L4 10l6.2-1.8z"></path></svg>
+</div>
+
+<div class="gemini-chat-modal hidden" id="geminiChatModal">
+  <div class="gemini-chat-header">
+    <span>Gemini</span>
+    <div class="gemini-chat-close" id="geminiChatClose"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
+  </div>
+  <div class="gemini-chat-messages" id="geminiChatMessages">
+    <div class="gemini-chat-empty">Ask anything — e.g. tips for writing this shot's prompt.</div>
+  </div>
+  <div class="gemini-chat-input-row">
+    <textarea id="geminiChatInput" placeholder="Message Gemini…" rows="1"></textarea>
+    <button class="cf-btn primary" id="geminiChatSendBtn">Send</button>
+  </div>
+</div>
+
 
 <script src="js/state.js"></script>
 <script src="js/timeline.js"></script>
@@ -298,6 +316,7 @@
 <script src="js/credits.js"></script>
 <script src="js/tags.js"></script>
 <script src="js/movie.js"></script>
+<script src="js/gemini-chat.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

@@ -114,16 +114,23 @@ app.post('/api/assist/text', async (req, res) => {
   if (!GEMINI_API_KEY) {
     return res.status(503).json({ error: 'not_configured', message: 'GEMINI_API_KEY is not set on the server yet.' });
   }
-  const { instruction, input } = req.body || {};
-  if (!instruction || typeof instruction !== 'string') {
+  const { instruction, input, history } = req.body || {};
+  const hasHistory = Array.isArray(history) && history.length > 0;
+  if (!hasHistory && (!instruction || typeof instruction !== 'string')) {
     return res.status(400).json({ error: 'bad_request', message: 'instruction is required.' });
   }
-  const promptText = input ? (instruction + '\n\n---\n\n' + input) : instruction;
+  // First turn: instruction (system framing) + input combine into one message. Follow-up
+  // turns (history present): the framing was already established, so just send the raw
+  // input as the newest turn, appended after the prior exchanges.
+  const promptText = instruction ? (input ? (instruction + '\n\n---\n\n' + input) : instruction) : (input || '');
+  const contents = hasHistory
+    ? [...history.map(m => ({ role: m.role, parts: [{ text: m.text }] })), { role: 'user', parts: [{ text: promptText }] }]
+    : [{ role: 'user', parts: [{ text: promptText }] }];
   try {
     const geminiRes = await fetch(`${GEMINI_BASE}/models/${GEMINI_MODEL}:generateContent`, {
       method: 'POST',
       headers: { 'x-goog-api-key': GEMINI_API_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: promptText }] }] }),
+      body: JSON.stringify({ contents }),
     });
     const data = await geminiRes.json().catch(() => null);
     if (!geminiRes.ok) {
