@@ -51,7 +51,7 @@ function renderArchiveGrid(){
     return;
   }
   grid.innerHTML = entries.map(entry=>{
-    const showInsert = !entry.isVideo && (entry.kind==='shot' || entry.kind==='archive-derive' || entry.kind==='upload' || !entry.kind); // inserting only makes sense for shot-style still images
+    const showInsert = entry.kind==='shot' || entry.kind==='movie' || entry.kind==='archive-derive' || entry.kind==='upload' || !entry.kind; // inserting only makes sense for shot-style content (still or animated)
     return `
       <div class="task-tile" data-archive-id="${entry.id}">
         <div class="task-tile-thumb">
@@ -200,6 +200,31 @@ async function sendNewIdea(){
 
 // Drops an archived image straight onto the timeline as a brand-new shot, inserted right
 // where the playhead currently sits in its scene.
+// Grabs an early frame from a video as a data: URL, purely for the timeline thumbnail — a
+// normally-animated shot always has both a still (from its original generation) and a video
+// (from MOVIE), so a shot inserted straight from an archived video should look the same,
+// not show up blank on the timeline.
+function extractVideoFrameAsDataUrl(videoSrc){
+  return new Promise((resolve, reject)=>{
+    const video = document.createElement('video');
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = 'auto';
+    video.src = videoSrc;
+    const onReady = ()=>{
+      try{
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth || 640;
+        canvas.height = video.videoHeight || 360;
+        canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', 0.85));
+      } catch(err){ reject(err); }
+    };
+    video.addEventListener('loadeddata', onReady, { once:true });
+    video.addEventListener('error', ()=> reject(new Error('Could not load the video to grab a thumbnail.')), { once:true });
+  });
+}
+
 async function insertArchiveEntryAtPlayhead(entryId){
   const entry = (state.archive||[]).find(a=> a.id===entryId);
   if(!entry || !entry.photo) return;
@@ -215,10 +240,23 @@ async function insertArchiveEntryAtPlayhead(entryId){
   showPage('work');
   addShotAt(scene.id, insertIdx);
   const newShot = scene.shots.find(sh=> sh.id===focus.shotId);
-  if(newShot){
+  if(!newShot) return;
+
+  if(entry.isVideo){
+    // Same rule MOVIE already enforces: a clip's slot on the timeline can never exceed the
+    // clip's own length.
+    newShot.duration = typeof MOVIE_CLIP_DURATION_SEC!=='undefined' ? MOVIE_CLIP_DURATION_SEC : 5;
+    try{
+      const frameDataUrl = await extractVideoFrameAsDataUrl(entry.photo);
+      await persistShotPreviewImage(newShot, frameDataUrl);
+    } catch(err){
+      console.warn('[archive] could not grab a thumbnail frame from the video, inserting without one:', err);
+    }
+    await persistShotVideo(newShot, entry.photo);
+  } else {
     await persistShotPreviewImage(newShot, entry.photo);
-    renderTimelineScenes();
-    refreshMainPreview();
-    if(typeof saveProjectSoon==='function') saveProjectSoon();
   }
+  renderTimelineScenes();
+  refreshMainPreview();
+  if(typeof saveProjectSoon==='function') saveProjectSoon();
 }

@@ -50,7 +50,7 @@ app.use((req, res, next) => {
       "style-src 'self' https: 'unsafe-inline'",
       "font-src 'self' https: data:",
       "img-src 'self' data: blob: https: *",
-      "media-src 'self' blob: https: *",
+      "media-src 'self' data: blob: https: *",
       "connect-src 'self' https: blob:",
     ].join('; ')
   );
