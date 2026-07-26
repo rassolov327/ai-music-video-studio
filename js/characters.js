@@ -196,8 +196,14 @@ function buildCardSheetPrompt(character, basePrompt, extra){
   return [
     basePrompt || character.description || '',
     'character reference turnaround sheet, two rows of four panels each, the exact same person with identical face, hair, build, and outfit in every panel',
-    'top row left to right: full-body front view, full-body three-quarter view turned left, full-body three-quarter view turned right, full-body back view',
-    'bottom row left to right: close-up portrait front view, close-up three-quarter view turned left, close-up three-quarter view turned right, close-up back-of-head view — each directly below its matching angle above',
+    'top row, panel 1 (full body): facing straight at the camera, front view',
+    'top row, panel 2 (full body): body and face turned so the person is looking toward the LEFT edge of the frame — their right cheek and right ear are hidden from view',
+    'top row, panel 3 (full body): the mirror opposite of panel 2 — body and face turned so the person is looking toward the RIGHT edge of the frame instead — their left cheek and left ear are hidden from view. Panels 2 and 3 must face opposite directions from each other, not the same direction',
+    'top row, panel 4 (full body): viewed from directly behind, back of the head and body, face not visible',
+    'bottom row, panel 1 (close-up portrait): facing straight at the camera, matching panel 1 above',
+    'bottom row, panel 2 (close-up portrait): looking toward the LEFT edge of the frame, matching the turn direction of panel 2 above',
+    'bottom row, panel 3 (close-up portrait): the mirror opposite of bottom panel 2 — looking toward the RIGHT edge of the frame instead, matching the turn direction of panel 3 above. Bottom panels 2 and 3 must face opposite directions from each other, not the same direction',
+    'bottom row, panel 4 (close-up): back of the head only, matching panel 4 above',
     extra,
     'plain neutral background, even studio lighting, photoreal, highly detailed, no text, no labels, no panel borders',
   ].filter(Boolean).join(', ');
@@ -236,6 +242,8 @@ function showCharacterCardBuilder(cat, idx){
 
       <button class="cf-btn primary" id="cardCreateBtn" style="width:100%;">${(it.card.images['sheet'] && it.card.images['sheet'].url) ? 'Regenerate Character Card' : 'Create Character Card'}</button>
       <div class="gen-hint" id="cardModelHint" style="margin-top:6px;"></div>
+      <button class="cf-btn" id="cardUploadBtn" style="width:100%;margin-top:8px;">Upload an existing card image instead</button>
+      <input type="file" id="cardUploadInput" accept="image/*,.heic,.heif,.tiff,.tif,.bmp,.svg,.avif,.webp" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;">
 
       <div class="char-card-section-title" style="margin-top:16px;">Card images</div>
       <div class="card-output-grid" id="cardOutputGrid"></div>
@@ -269,6 +277,28 @@ function showCharacterCardBuilder(cat, idx){
   });
 
   document.getElementById('cardCreateBtn').onclick = ()=> runCreateCard(cat, idx);
+  document.getElementById('cardUploadBtn').onclick = ()=> document.getElementById('cardUploadInput').click();
+  document.getElementById('cardUploadInput').onchange = async ()=>{
+    const fileInput = document.getElementById('cardUploadInput');
+    const file = fileInput.files[0];
+    if(!file) return;
+    try{
+      const dataUrl = await loadImageAsDataURL(file);
+      if(typeof applyCharacterCardImage==='function'){
+        await applyCharacterCardImage(it, 'sheet', dataUrl);
+      } else {
+        it.card.images['sheet'] = { url: dataUrl, ok: false };
+      }
+      renderCardOutputGrid(it);
+      renderAssets();
+      const createBtn = document.getElementById('cardCreateBtn');
+      if(createBtn) createBtn.textContent = 'Regenerate Character Card';
+      if(typeof saveProjectSoon==='function') saveProjectSoon();
+    } catch(err){
+      alert('Could not use that file: ' + err.message);
+    }
+    fileInput.value = '';
+  };
 
   document.getElementById('cardBuilderBack').onclick = ()=>{
     cardBuilderOpenCharacterId = null;

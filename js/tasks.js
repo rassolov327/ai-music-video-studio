@@ -540,3 +540,49 @@ function queueAssetGeneration(catKey, item){
   if(typeof saveProjectSoon==='function') saveProjectSoon();
   refreshTasks();
 }
+
+// Generates a Look/Location/Prop image right on the current screen — same idea as the
+// Character Card builder: no draft queue detour, progress shown inline, but it still goes
+// through the normal /api/generate-image/start pipeline, so it also shows up live in TASKS
+// and gets persisted+archived by the same background watcher as everything else.
+async function runInlineAssetGeneration(catKey, item, containerEl){
+  const field = catKey==='looks' ? 'previewImage' : 'photo';
+  const hasPhoto = !!item[field];
+  let model = null;
+  if(hasPhoto && typeof pickReferenceCapableModel==='function') model = pickReferenceCapableModel();
+  if(!model) model = modelOptions[0] || null;
+  if(!model){ containerEl.innerHTML = `<div class="gen-hint" style="color:var(--danger);">No connected model available for generation yet.</div>`; return; }
+
+  containerEl.innerHTML = `<button class="gen-btn" disabled><span class="gen-spin"></span>Generating…</button>`;
+  const meta = state.projectMeta || { width:1920, height:1080 };
+  try{
+    let referenceImageUrl;
+    if(hasPhoto && model.supportsReferenceImage){
+      referenceImageUrl = await uploadReferencePhoto(item[field]);
+    }
+    const prompt = buildAssetGenPrompt(catKey, item);
+    const res = await fetch('/api/generate-image/start', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt, width: meta.width, height: meta.height, model: model.id, referenceImageUrl,
+        meta: { projectId: currentProjectId, kind: catKey, assetId: item.id, assetName: item.name },
+      }),
+    });
+    const data = await res.json().catch(()=> null);
+    if(!res.ok || !data || !data.taskId) throw new Error((data && data.message) || 'Could not start generation.');
+    const imageUrl = await pollCardSlot(data.taskId);
+    // Shown immediately for a responsive feel — the shared background watcher persists it
+    // locally and archives it within a few seconds regardless, same as every other
+    // generation in this app.
+    item[field] = imageUrl;
+    if(catKey==='looks') item.approved = false;
+    containerEl.innerHTML = `<div class="gen-hint" style="color:#5fae7a;">Generated — also tracked in the TASKS tab.</div>`;
+    if(typeof renderAssets==='function') renderAssets();
+    if(typeof saveProjectSoon==='function') saveProjectSoon();
+  } catch(err){
+    containerEl.innerHTML = `<div class="gen-hint" style="color:var(--danger);">Could not generate: ${err.message}</div>
+      <button class="cf-btn" id="inlineGenRetryBtn" style="width:100%;margin-top:8px;">Try again</button>`;
+    const retryBtn = document.getElementById('inlineGenRetryBtn');
+    if(retryBtn) retryBtn.onclick = ()=> runInlineAssetGeneration(catKey, item, containerEl);
+  }
+}

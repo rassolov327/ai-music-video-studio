@@ -110,11 +110,8 @@ async function renderLookTaskSlot(look){
   const freshSlot = document.getElementById('lookTaskSlot');
   if(!freshSlot) return;
   if(!available) return;
-  freshSlot.innerHTML = `<button class="cf-btn" id="lookAddToTasksBtn" style="width:100%;margin-top:8px;">Add to Tasks (real AI)</button>`;
-  document.getElementById('lookAddToTasksBtn').onclick = ()=>{
-    queueAssetGeneration('looks', look);
-    freshSlot.innerHTML = `<div class="gen-hint" style="margin-top:8px;color:#5fae7a;">Added to the TASKS queue.</div>`;
-  };
+  freshSlot.innerHTML = `<button class="cf-btn primary" id="lookAddToTasksBtn" style="width:100%;margin-top:8px;">Generate (real AI)</button>`;
+  document.getElementById('lookAddToTasksBtn').onclick = ()=> runInlineAssetGeneration('looks', look, freshSlot);
 }
 
 function showLookForm(cat, editIdx){
