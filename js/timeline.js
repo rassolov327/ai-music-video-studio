@@ -448,6 +448,20 @@ function syncFocusToPlayhead(){
 // Every shot boundary in the project, in absolute timeline px, in playback order —
 // scene by scene, shot by shot — regardless of which timeline mode (Assembly/Edit) is
 // currently displayed, since both share the same underlying duration data.
+// Absolute timeline px where a specific shot begins — used to figure out how far into that
+// shot's own footage the playhead currently sits (so scrubbing into a video actually seeks
+// it, instead of always showing frame 0).
+function getShotStartPx(sceneId, shotId){
+  let x = 0;
+  for(const scene of state.scenes){
+    for(const shot of scene.shots){
+      if(scene.id===sceneId && shot.id===shotId) return x;
+      x += Math.round(shot.duration * PX_PER_SEC);
+    }
+  }
+  return 0;
+}
+
 function getShotBoundariesPx(){
   const boundaries = [0];
   let x = 0;

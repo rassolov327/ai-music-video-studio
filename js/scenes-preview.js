@@ -156,9 +156,15 @@ function refreshMainPreview(){
   previewBarEl.textContent = shot ? `${scene.name} — ${shot.name}` : scene.name;
 
   if(shot && shot.videoUrl){
+    let seekTo = 0.01;
+    if(typeof getShotStartPx==='function' && typeof PX_PER_SEC!=='undefined' && typeof playheadX!=='undefined'){
+      const shotStartPx = getShotStartPx(scene.id, shot.id);
+      const offsetSec = (playheadX - shotStartPx) / PX_PER_SEC;
+      seekTo = Math.max(0.01, Math.min(shot.duration - 0.05, offsetSec));
+    }
     previewEl.innerHTML = `
       <div class="timeline-frame" style="border-color:transparent;">
-        <video src="${shot.videoUrl}" preload="auto" onloadedmetadata="if(this.paused) this.currentTime=0.01" ${typeof isPlaying!=='undefined' && isPlaying ? 'autoplay muted playsinline' : 'muted playsinline'}></video>
+        <video src="${shot.videoUrl}" preload="auto" onloadedmetadata="this.currentTime=${seekTo.toFixed(2)}" ${typeof isPlaying!=='undefined' && isPlaying ? 'autoplay muted playsinline' : 'muted playsinline'}></video>
         <span class="plabel" style="position:relative;z-index:1;color:#fff;background:rgba(0,0,0,.5);padding:3px 9px;border-radius:5px;align-self:flex-end;margin:10px;">${shot.name}</span>
       </div>`;
   } else if(shot && shot.previewImage){
