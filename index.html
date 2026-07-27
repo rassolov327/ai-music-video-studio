@@ -186,6 +186,11 @@
         <div class="timeline-mode-row">
           <div class="mode-tab active" id="modeAssemblyBtn" data-mode="assembly">Assembly</div>
           <div class="mode-tab" id="modeEditBtn" data-mode="edit">Edit</div>
+          <div class="timeline-zoom-control" id="timelineZoomControl">
+            <button class="tz-btn" id="tzZoomOutBtn" title="Zoom out (-)">−</button>
+            <input type="range" id="tzZoomSlider" min="10" max="150" step="1" value="40" title="Timeline zoom">
+            <button class="tz-btn" id="tzZoomInBtn" title="Zoom in (+)">+</button>
+          </div>
         </div>
         <div class="timeline-scenes" id="timelineScenes"></div>
         <div class="timecode-row">

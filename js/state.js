@@ -28,7 +28,7 @@ let sceneSeq = 1, shotSeq = 1, paletteSeq = 0, charSeq = 1, locSeq = 1, trackSeq
 let focus = { sceneId: null, shotId: null };
 let timelineMode = 'assembly'; // 'assembly' (spaced, insert-between) | 'edit' (flush clips, drag-to-reorder within scene)
 let playheadX = 0;
-const PX_PER_SEC = 40; // scale of the ruler/track: 1 real second of playback = 40px
+let PX_PER_SEC = 40; // scale of the ruler/track: 1 real second of playback = 40px — adjustable via timeline zoom
 let PROJECT_FPS = 25; // per-project — set from state.projectMeta.fps when a project is created/opened
 // CSS `zoom` scales rendered/visual pixels (getBoundingClientRect, clientX) but NOT layout
 // pixels (offsetLeft/offsetWidth/scrollWidth) — read it once so pointer math can convert

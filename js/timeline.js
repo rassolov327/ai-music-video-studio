@@ -212,6 +212,49 @@ function renderEditModeTrack(){
   renderTimeline();
 }
 
+// ---------- Timeline zoom ----------
+const TZ_MIN = 10, TZ_MAX = 150;
+
+function setTimelineZoom(newPxPerSec){
+  newPxPerSec = Math.max(TZ_MIN, Math.min(TZ_MAX, Math.round(newPxPerSec)));
+  if(newPxPerSec === PX_PER_SEC) return;
+  const ratio = newPxPerSec / PX_PER_SEC;
+  playheadX = playheadX * ratio; // keep the playhead pointing at the same moment in time, not the same pixel
+  PX_PER_SEC = newPxPerSec;
+  renderTimelineScenes();
+  positionPlayhead();
+  updateTimecodeReadout();
+  const slider = document.getElementById('tzZoomSlider');
+  if(slider) slider.value = PX_PER_SEC;
+  if(typeof saveProjectSoon==='function') saveProjectSoon();
+}
+function zoomTimelineBy(deltaPxPerSec){
+  setTimelineZoom(PX_PER_SEC + deltaPxPerSec);
+}
+
+function wireTimelineZoomControl(){
+  const slider = document.getElementById('tzZoomSlider');
+  const outBtn = document.getElementById('tzZoomOutBtn');
+  const inBtn = document.getElementById('tzZoomInBtn');
+  if(!slider || !outBtn || !inBtn) return;
+  slider.value = PX_PER_SEC;
+  slider.addEventListener('input', (e)=> setTimelineZoom(parseInt(e.target.value, 10)));
+  outBtn.addEventListener('click', ()=> zoomTimelineBy(-10));
+  inBtn.addEventListener('click', ()=> zoomTimelineBy(10));
+
+  // Redirects a normal (vertical) mouse-wheel gesture into horizontal scrolling of the
+  // timeline — browsers don't do this by default, only Shift+wheel does natively.
+  const scenesEl = document.getElementById('timelineScenes');
+  if(scenesEl && !scenesEl.dataset.wheelWired){
+    scenesEl.dataset.wheelWired = '1';
+    scenesEl.addEventListener('wheel', (e)=>{
+      if(Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return; // already a horizontal gesture (trackpad/shift+wheel) — let it through natively
+      e.preventDefault();
+      scenesEl.scrollLeft += e.deltaY;
+    }, { passive:false });
+  }
+}
+
 function wireCommonTimelineHandlers(){
   timelineScenesEl.querySelectorAll('[data-del-scene]').forEach(el=>{
     el.onclick = (e)=>{ e.stopPropagation(); deleteScene(el.dataset.delScene); };

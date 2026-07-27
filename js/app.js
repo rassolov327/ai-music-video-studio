@@ -22,6 +22,7 @@ function goHome(){
   wireGeminiChat();
   wireScriptPage();
   wireAiGeneratorModal();
+  wireTimelineZoomControl();
   startBackgroundTaskWatcher();
   const restored = await initProjectStore();
   if(restored){
@@ -78,6 +79,14 @@ window.addEventListener('keydown', (e)=>{
     if(inField) return;
     e.preventDefault();
     jumpPlayheadToCut(e.code==='ArrowDown' ? 1 : -1);
+  } else if(e.key==='+' || e.key==='=' || e.code==='NumpadAdd'){
+    if(inField) return;
+    e.preventDefault();
+    if(typeof zoomTimelineBy==='function') zoomTimelineBy(10);
+  } else if(e.key==='-' || e.code==='NumpadSubtract'){
+    if(inField) return;
+    e.preventDefault();
+    if(typeof zoomTimelineBy==='function') zoomTimelineBy(-10);
   }
 });
 window.addEventListener('resize', drawWave);

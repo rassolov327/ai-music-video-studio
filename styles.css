@@ -430,11 +430,19 @@
   }
   .scene-label-btn:hover{background:var(--bg-elevated);color:var(--text-1);opacity:1;}
   .scene-cells-row{display:flex;align-items:center;gap:3px;padding:5px;border-radius:8px;}
-  .timeline-mode-row{display:flex;gap:2px;padding:6px 12px 0;flex:0 0 auto;}
+  .timeline-mode-row{display:flex;align-items:center;justify-content:space-between;gap:2px;padding:6px 12px 0;flex:0 0 auto;}
   .mode-tab{
     padding:4px 10px;font-size:11px;color:var(--text-3);cursor:pointer;border-radius:5px 5px 0 0;
     border:1px solid transparent;border-bottom:none;
   }
+  .timeline-zoom-control{display:flex;align-items:center;gap:6px;}
+  .tz-btn{
+    width:18px;height:18px;border-radius:4px;display:flex;align-items:center;justify-content:center;
+    background:var(--bg-panel-2);border:1px solid var(--line);color:var(--text-2);cursor:pointer;
+    font-size:13px;line-height:1;padding:0;
+  }
+  .tz-btn:hover{color:var(--text-1);border-color:var(--accent-dim);}
+  #tzZoomSlider{width:90px;accent-color:var(--accent);height:14px;}
   .mode-tab.active{color:var(--text-1);background:var(--bg-elevated);border-color:var(--line);}
   .mode-tab:hover{color:var(--text-1);}
   .shot-thumb.edit-clip{border-radius:0;}
