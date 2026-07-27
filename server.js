@@ -42,6 +42,13 @@ app.use(express.json({ limit: '20mb' }));
 // in img-src and media-src — omitting it silently breaks restored photos/audio with no
 // console error, which cost a lot of debugging time earlier in this project.
 app.use((req, res, next) => {
+  // Cross-origin isolation — ffmpeg.wasm's newer SDK versions appear to silently hang inside
+  // ffmpeg.load() without this, even when using the single-threaded core that in principle
+  // shouldn't need it. credentialless (not the stricter require-corp) is used deliberately —
+  // require-corp would block any cross-origin resource that doesn't explicitly send a CORP
+  // header, which would break loading KIE-hosted images before they're persisted locally.
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless');
   res.setHeader(
     'Content-Security-Policy',
     [
