@@ -54,7 +54,7 @@ app.use((req, res, next) => {
     [
       "default-src 'self'",
       "script-src 'self' https: blob: 'unsafe-inline' 'wasm-unsafe-eval'",
-      "worker-src 'self' blob:",
+      "worker-src 'self' blob: https:",
       "style-src 'self' https: 'unsafe-inline'",
       "font-src 'self' https: data:",
       "img-src 'self' data: blob: https: *",

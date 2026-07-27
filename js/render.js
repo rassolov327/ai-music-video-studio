@@ -144,8 +144,17 @@ async function ensureFFmpegLoaded(onStatus){
       const coreURL = await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript');
       console.log('[render] core.js fetched, fetching wasm binary (the big one)…');
       const wasmURL = await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm');
-      console.log('[render] wasm fetched, fetching worker script…');
-      const classWorkerURL = await toBlobURL(`${ffmpegPkgURL}/worker.js`, 'text/javascript');
+      console.log('[render] wasm fetched, building worker proxy…');
+      // worker.js is itself an ES module that imports sibling files from the SAME package
+      // (e.g. ./const.js) — copying just its own text into a blob (what toBlobURL does)
+      // breaks those relative imports, since a blob URL has no real directory to resolve
+      // them against. This tiny passthrough module runs from a blob (satisfying the
+      // same-origin restriction on the Worker constructor itself) but immediately imports
+      // the REAL worker.js by its actual CDN URL, so ITS internal relative imports resolve
+      // against its true location instead.
+      const realWorkerURL = `${ffmpegPkgURL}/worker.js`;
+      const workerProxyBlob = new Blob([`import ${JSON.stringify(realWorkerURL)};`], { type: 'text/javascript' });
+      const classWorkerURL = URL.createObjectURL(workerProxyBlob);
       console.log('[render] step 3 done. step 4: starting the engine itself…');
       if(onStatus) onStatus('Loading render engine — step 4 of 4 (starting engine)…');
       await ffmpeg.load({ coreURL, wasmURL, classWorkerURL });
