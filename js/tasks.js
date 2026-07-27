@@ -204,8 +204,8 @@ function renderTasksGrid(){
         : t.status==='failed'
           ? `<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="9"></circle><line x1="9" y1="9" x2="15" y2="15"></line><line x1="15" y1="9" x2="9" y2="15"></line></svg>`
           : `<div class="task-tile-spin"></div>`;
-      const line1 = meta.kind==='movie' ? (meta.sceneName || 'Scene') : meta.kind==='shot' || !meta.kind ? (meta.sceneName || 'Scene') : meta.kind==='character-card' ? 'Character card' : meta.kind==='locations-card' ? 'Location card' : meta.kind==='props-card' ? 'Prop card' : (meta.kind==='looks'?'Look':meta.kind==='locations'?'Location':meta.kind==='props'?'Prop':'Asset');
-      const line2 = meta.kind==='movie' ? ((meta.shotName || 'Shot') + ' (animate)') : meta.kind==='shot' || !meta.kind ? (meta.shotName || 'Shot') : meta.kind==='character-card' ? ((meta.characterName||'') + ' — ' + (meta.outputKey||'')) : (meta.kind==='locations-card' || meta.kind==='props-card') ? (meta.assetName || '') : (meta.assetName || '');
+      const line1 = meta.kind==='ai-generator' ? 'AI Generator' : meta.kind==='movie' ? (meta.sceneName || 'Scene') : meta.kind==='shot' || !meta.kind ? (meta.sceneName || 'Scene') : meta.kind==='character-card' ? 'Character card' : meta.kind==='locations-card' ? 'Location card' : meta.kind==='props-card' ? 'Prop card' : (meta.kind==='looks'?'Look':meta.kind==='locations'?'Location':meta.kind==='props'?'Prop':'Asset');
+      const line2 = meta.kind==='ai-generator' ? ((t.prompt||'').slice(0,40)) : meta.kind==='movie' ? ((meta.shotName || 'Shot') + ' (animate)') : meta.kind==='shot' || !meta.kind ? (meta.shotName || 'Shot') : meta.kind==='character-card' ? ((meta.characterName||'') + ' — ' + (meta.outputKey||'')) : (meta.kind==='locations-card' || meta.kind==='props-card') ? (meta.assetName || '') : (meta.assetName || '');
       const canRegen = t.status==='success' || t.status==='failed';
       return `
         <div class="task-tile" data-task-id="${t.taskId}">
@@ -576,7 +576,9 @@ async function archiveGeneration(t){
   const kind = meta.kind || 'shot';
   const sourceLabel = kind==='shot'
     ? ((meta.sceneName || 'Scene') + ' / ' + (meta.shotName || 'Shot'))
-    : kind==='movie'
+    : kind==='ai-generator'
+      ? ('AI Generator / ' + (t.prompt||'').slice(0,40))
+      : kind==='movie'
       ? ((meta.sceneName || 'Scene') + ' / ' + (meta.shotName || 'Shot') + ' (animated)')
       : kind==='archive-derive'
         ? 'New idea from archive'
@@ -616,6 +618,53 @@ async function archiveUploadedImage(dataUrl, label){
   else entry.photo = dataUrl;
   if(typeof saveProjectSoon==='function') saveProjectSoon();
   return entry;
+}
+
+// ---------- AI Generator (Tools menu) — a standalone prompt+model generator, not tied to
+// any asset. Sends straight to the shared generation pipeline, same as everything else, so
+// it shows up live in TASKS and lands in ARCHIVE automatically once it succeeds. ----------
+function showAiGeneratorModal(){
+  const modal = document.getElementById('aiGeneratorModal');
+  const select = document.getElementById('aiGenModelSelect');
+  select.innerHTML = (modelOptions||[]).map(m=> `<option value="${m.id}">${m.label} — $${m.costUsd.toFixed(2)}</option>`).join('');
+  document.getElementById('aiGenHint').textContent = (modelOptions && modelOptions.length) ? '' : 'No connected model available yet.';
+  modal.classList.remove('hidden');
+}
+function wireAiGeneratorModal(){
+  const modal = document.getElementById('aiGeneratorModal');
+  const close = ()=> modal.classList.add('hidden');
+  document.getElementById('aiGenCloseBtn').onclick = close;
+  document.getElementById('aiGenCancelBtn').onclick = close;
+  modal.addEventListener('click', (e)=>{ if(e.target===modal) close(); });
+  document.getElementById('aiGenSendBtn').onclick = sendAiGeneratorRequest;
+}
+async function sendAiGeneratorRequest(){
+  const promptEl = document.getElementById('aiGenPromptInput');
+  const prompt = promptEl.value.trim();
+  if(!prompt){ alert('Write a prompt first.'); return; }
+  const modelId = document.getElementById('aiGenModelSelect').value;
+  if(!modelId){ alert('No model available.'); return; }
+  const btn = document.getElementById('aiGenSendBtn');
+  btn.disabled = true; btn.textContent = 'Sending…';
+  try{
+    const meta = state.projectMeta || { width:1920, height:1080 };
+    const res = await fetch('/api/generate-image/start', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt, width: meta.width, height: meta.height, model: modelId,
+        meta: { projectId: currentProjectId, kind: 'ai-generator' },
+      }),
+    });
+    const data = await res.json().catch(()=> null);
+    if(!res.ok || !data || !data.taskId) throw new Error((data && data.message) || 'Could not start generation.');
+    document.getElementById('aiGeneratorModal').classList.add('hidden');
+    promptEl.value = '';
+    if(typeof refreshTasks==='function') await refreshTasks();
+  } catch(err){
+    alert('Could not start generation: ' + err.message);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Generate';
+  }
 }
 
 // Adds a Look/Location/Prop to the queue — called from each asset form's "Add to Tasks"
