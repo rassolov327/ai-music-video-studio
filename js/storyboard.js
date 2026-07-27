@@ -16,6 +16,11 @@ function wireStoryboardPage(){
   const exportBtn = document.getElementById('storyboardExportBtn');
   if(exportBtn) exportBtn.onclick = exportStoryboardImage;
 
+  const openBtn = document.getElementById('storyboardOpenBtn');
+  if(openBtn) openBtn.onclick = openStoryboardModal;
+  const closeBtn = document.getElementById('storyboardModalClose');
+  if(closeBtn) closeBtn.onclick = closeStoryboardModal;
+
   const slider = document.getElementById('sbZoomSlider');
   const outBtn = document.getElementById('sbZoomOutBtn');
   const inBtn = document.getElementById('sbZoomInBtn');
@@ -27,8 +32,17 @@ function wireStoryboardPage(){
   if(inBtn) inBtn.addEventListener('click', ()=> setStoryboardZoom(storyboardCols - 1)); // fewer columns = bigger images = zoomed in
 
   window.addEventListener('resize', ()=>{
-    if(!document.getElementById('storyboardPage').classList.contains('hidden')) renderStoryboardGrid();
+    const modal = document.getElementById('storyboardModal');
+    if(modal && !modal.classList.contains('hidden')) renderStoryboardGrid();
   });
+}
+
+function openStoryboardModal(){
+  document.getElementById('storyboardModal').classList.remove('hidden');
+  renderStoryboardGrid();
+}
+function closeStoryboardModal(){
+  document.getElementById('storyboardModal').classList.add('hidden');
 }
 
 function setStoryboardZoom(cols){

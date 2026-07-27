@@ -24,6 +24,7 @@ function goHome(){
   wireAiGeneratorModal();
   wireTimelineZoomControl();
   wireStoryboardPage();
+  wireRenderPage();
   startBackgroundTaskWatcher();
   const restored = await initProjectStore();
   if(restored){
