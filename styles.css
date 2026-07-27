@@ -434,7 +434,8 @@
   }
   .scene-label-btn:hover{background:var(--bg-elevated);color:var(--text-1);opacity:1;}
   .scene-cells-row{display:flex;align-items:center;gap:3px;padding:5px;border-radius:8px;}
-  .timeline-mode-row{display:flex;align-items:center;justify-content:space-between;gap:2px;padding:6px 12px 0;flex:0 0 auto;}
+  .timeline-mode-row{display:flex;align-items:center;justify-content:space-between;padding:6px 12px 0;flex:0 0 auto;}
+  .timeline-mode-tabs{display:flex;gap:2px;}
   .mode-tab{
     padding:4px 10px;font-size:11px;color:var(--text-3);cursor:pointer;border-radius:5px 5px 0 0;
     border:1px solid transparent;border-bottom:none;
