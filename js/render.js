@@ -119,29 +119,161 @@ async function renderMoviePreviewThumbnail(){
   }
 }
 
-// ---------- render (parameter validation now; actual ffmpeg.wasm pipeline is a follow-up) ----------
-async function startRender(){
+// ---------- render engine (ffmpeg.wasm) — loaded lazily, only when Rendering is clicked ----------
+let ffmpegInstance = null;
+let ffmpegLoadingPromise = null;
+let ffmpegFetchFile = null;
+
+async function ensureFFmpegLoaded(onStatus){
+  if(ffmpegInstance) return ffmpegInstance;
+  if(!ffmpegLoadingPromise){
+    ffmpegLoadingPromise = (async ()=>{
+      if(onStatus) onStatus('Loading render engine (first time only, ~30MB)…');
+      const { FFmpeg } = await import('https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/+esm');
+      const { fetchFile, toBlobURL } = await import('https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.2/+esm');
+      ffmpegFetchFile = fetchFile;
+      const ffmpeg = new FFmpeg();
+      const baseURL = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd';
+      await ffmpeg.load({
+        coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
+        wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+      });
+      ffmpegInstance = ffmpeg;
+      return ffmpeg;
+    })();
+  }
+  try{
+    return await ffmpegLoadingPromise;
+  } catch(err){
+    ffmpegLoadingPromise = null; // let a later attempt retry instead of staying stuck on a failed load
+    throw err;
+  }
+}
+
+function evenize(n){ return Math.max(2, Math.round(n / 2) * 2); } // libx264 needs even width/height
+
+function getRenderResolution(){
+  const select = document.getElementById('renderResolutionSelect');
+  const meta = state.projectMeta || { width:1920, height:1080 };
+  if(!select || select.value==='project') return { width: meta.width, height: meta.height };
+  const [w, h] = select.value.split('x').map(Number);
+  return { width: w, height: h };
+}
+
+function setRenderProgress(fraction){
+  const wrap = document.getElementById('renderProgressWrap');
+  const fill = document.getElementById('renderProgressFill');
+  if(wrap) wrap.classList.remove('hidden');
+  if(fill) fill.style.width = Math.round(Math.max(0, Math.min(1, fraction)) * 100) + '%';
+}
+function hideRenderProgress(){
+  const wrap = document.getElementById('renderProgressWrap');
+  if(wrap) wrap.classList.add('hidden');
+}
+function setRenderStatus(text, isError){
   const statusEl = document.getElementById('renderStatusHint');
+  if(!statusEl) return;
+  statusEl.textContent = text;
+  statusEl.style.color = isError ? 'var(--danger)' : 'var(--text-2)';
+}
+
+async function startRender(){
   const entries = typeof collectAllShotsInOrder==='function' ? collectAllShotsInOrder() : [];
-  if(entries.length===0){
-    statusEl.textContent = 'Nothing on the timeline yet — add scenes and shots first.';
-    statusEl.style.color = 'var(--danger)';
+  if(entries.length===0){ setRenderStatus('Nothing on the timeline yet — add scenes and shots first.', true); return; }
+  if(!renderDestDirHandle){ setRenderStatus('Choose a destination folder first — rendering can\'t start without one.', true); return; }
+  const rawFileName = (document.getElementById('renderFileNameInput').value || '').trim();
+  if(!rawFileName){ setRenderStatus('Give the file a name first.', true); return; }
+  const missing = entries.find(e=> !e.shot.previewImage);
+  if(missing){
+    setRenderStatus('"' + missing.shot.name + '" in ' + missing.scene.name + ' has no generated picture yet — every shot needs one before rendering.', true);
     return;
   }
-  if(!renderDestDirHandle){
-    statusEl.textContent = 'Choose a destination folder first — rendering can\'t start without one.';
-    statusEl.style.color = 'var(--danger)';
-    return;
+  const fileName = rawFileName.replace(/\.mp4$/i, '');
+
+  const startBtn = document.getElementById('renderStartBtn');
+  startBtn.disabled = true;
+  const quality = RENDER_QUALITY_PRESETS[renderQuality];
+  const { width, height } = getRenderResolution();
+  const evenW = evenize(width), evenH = evenize(height);
+  const fps = (state.projectMeta && state.projectMeta.fps) || 25;
+
+  try{
+    setRenderProgress(0);
+    const ffmpeg = await ensureFFmpegLoaded((msg)=> setRenderStatus(msg));
+    setRenderStatus('Normalizing ' + entries.length + ' shot(s)…');
+
+    // Every shot gets scaled/padded to the SAME resolution+fps+codec first (a still image
+    // extended to its own duration, a video clip trimmed to its in-point+duration) — doing
+    // this per-shot keeps each ffmpeg call small and light on memory, rather than one giant
+    // filter graph across everything at once, which is what tends to crash or crawl.
+    const scaleFilter = `scale=${evenW}:${evenH}:force_original_aspect_ratio=decrease,pad=${evenW}:${evenH}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1`;
+    const segFiles = [];
+    for(let i=0; i<entries.length; i++){
+      const { shot } = entries[i];
+      const segName = 'seg' + i + '.mp4';
+      if(shot.videoUrl){
+        await ffmpeg.writeFile('src.mp4', await ffmpegFetchFile(shot.videoUrl));
+        await ffmpeg.exec([
+          '-ss', String(shot.trimInSec || 0), '-i', 'src.mp4', '-t', String(shot.duration),
+          '-vf', scaleFilter, '-r', String(fps),
+          '-c:v', 'libx264', '-crf', String(quality.crf), '-preset', quality.preset,
+          '-pix_fmt', 'yuv420p', '-an', segName,
+        ]);
+        await ffmpeg.deleteFile('src.mp4');
+      } else {
+        await ffmpeg.writeFile('src.png', await ffmpegFetchFile(shot.previewImage));
+        await ffmpeg.exec([
+          '-loop', '1', '-i', 'src.png', '-t', String(shot.duration),
+          '-vf', scaleFilter, '-r', String(fps),
+          '-c:v', 'libx264', '-crf', String(quality.crf), '-preset', quality.preset,
+          '-pix_fmt', 'yuv420p', segName,
+        ]);
+        await ffmpeg.deleteFile('src.png');
+      }
+      segFiles.push(segName);
+      setRenderProgress((i + 1) / (entries.length + 2) * 0.85);
+      setRenderStatus('Normalizing shot ' + (i + 1) + ' of ' + entries.length + '…');
+    }
+
+    setRenderStatus('Joining shots…');
+    await ffmpeg.writeFile('concat.txt', segFiles.map(f=> "file '" + f + "'").join('\n'));
+    await ffmpeg.exec(['-f', 'concat', '-safe', '0', '-i', 'concat.txt', '-c', 'copy', 'joined.mp4']);
+    setRenderProgress(0.9);
+
+    // Audio comes only from the timeline's own music track — nothing baked into any video
+    // shot is used, per the plan.
+    let finalName = 'joined.mp4';
+    const track = typeof getActiveTrack==='function' ? getActiveTrack() : null;
+    if(track && track.audioUrl){
+      setRenderStatus('Mixing in the music track…');
+      await ffmpeg.writeFile('music.src', await ffmpegFetchFile(track.audioUrl));
+      const trimIn = (state.timelineAudio && state.timelineAudio.trimIn) || 0;
+      const volume = (state.timelineAudio && typeof state.timelineAudio.volume==='number') ? state.timelineAudio.volume : 1;
+      const audioArgs = ['-i', 'joined.mp4'];
+      if(trimIn) audioArgs.push('-ss', String(trimIn));
+      audioArgs.push('-i', 'music.src',
+        '-map', '0:v', '-map', '1:a',
+        '-c:v', 'copy', '-af', 'volume=' + volume, '-c:a', 'aac', '-b:a', quality.audioBitrate,
+        'final.mp4');
+      await ffmpeg.exec(audioArgs);
+      finalName = 'final.mp4';
+    }
+    setRenderProgress(0.97);
+
+    setRenderStatus('Saving to disk…');
+    const data = await ffmpeg.readFile(finalName);
+    const outHandle = await renderDestDirHandle.getFileHandle(fileName + '.mp4', { create:true });
+    const writable = await outHandle.createWritable();
+    await writable.write(data.buffer);
+    await writable.close();
+
+    setRenderProgress(1);
+    setRenderStatus('Done — saved "' + fileName + '.mp4" to "' + renderDestDirHandle.name + '".');
+  } catch(err){
+    console.error('[render] failed:', err);
+    setRenderStatus('Render failed: ' + (err && err.message || err), true);
+  } finally {
+    startBtn.disabled = false;
+    setTimeout(hideRenderProgress, 4000);
   }
-  const fileName = (document.getElementById('renderFileNameInput').value || '').trim();
-  if(!fileName){
-    statusEl.textContent = 'Give the file a name first.';
-    statusEl.style.color = 'var(--danger)';
-    return;
-  }
-  // The actual ffmpeg.wasm render pipeline (normalize each shot, then concat, mix in the
-  // timeline's music track) is a separate, larger piece of work still to come — this wires
-  // up and validates every parameter so that piece has everything it needs to plug into.
-  statusEl.style.color = 'var(--text-2)';
-  statusEl.textContent = 'All settings ready — the actual render engine isn\'t wired up yet, that\'s next.';
 }

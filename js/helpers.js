@@ -226,8 +226,31 @@ function tryLoadImage(url, timeoutMs){
     img.src = url;
   });
 }
+const SHOT_SIZE_FRAMING = {
+  'Detail Shot': 'extreme macro detail shot — frame only a small specific detail (hands, an object, a texture), filling the entire frame',
+  'Extreme Close-Up': 'extreme close-up shot — frame only the eyes and immediate face, filling the entire frame',
+  'Close-Up': 'close-up shot — tightly framed on the face and shoulders only, no more of the body visible',
+  'Medium Close-Up': 'medium close-up shot — framed from the chest up',
+  'Medium Shot': 'medium shot — framed from the waist up',
+  'Medium Wide Shot': 'medium wide shot — framed from the knees up',
+  'Wide Shot': 'wide shot — full body visible within the environment',
+  'Extreme Wide Shot': 'extreme wide shot — the subject small within a large environment',
+};
+
 function buildShotPrompt(shot, scene){
   const parts = [];
+
+  // Framing goes first — earlier position in the prompt gets more weight from the model —
+  // and is spelled out explicitly rather than left as a single bare word, with an explicit
+  // instruction to override the framing shown in any reference images (a character card is
+  // a wide multi-panel turnaround sheet, which can otherwise pull the model toward a wide
+  // shot regardless of what the text says).
+  if(shot.shotSize){
+    const framing = SHOT_SIZE_FRAMING[shot.shotSize] || shot.shotSize.toLowerCase();
+    parts.push('SHOT FRAMING (follow exactly — this overrides whatever framing any reference image shows): ' + framing);
+  }
+
+  if(shot.description) parts.push(shot.description);
 
   // characters (and their assigned looks) now live on the scene, inherited by every shot
   if(scene && scene.characters && scene.characters.length){
@@ -248,8 +271,6 @@ function buildShotPrompt(shot, scene){
     });
   }
 
-  if(shot.description) parts.push(shot.description);
-  if(shot.shotSize) parts.push(shot.shotSize.toLowerCase());
   if(shot.cameraMove && shot.cameraMove!=='Static') parts.push(shot.cameraMove.toLowerCase()+' camera movement');
   const effectiveLighting = (shot.lightingSameAsScene !== false) ? (scene && scene.lighting) : shot.lighting;
   if(effectiveLighting) parts.push(effectiveLighting);

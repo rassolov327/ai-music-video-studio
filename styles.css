@@ -1110,3 +1110,7 @@
   .render-quality-btn.active{background:var(--accent);border-color:var(--accent);color:#1a1408;font-weight:600;}
   .render-big-btn{width:100%;margin-top:18px;padding:14px 0;font-size:14px;font-weight:700;letter-spacing:.03em;}
   .render-big-btn:disabled{opacity:.45;cursor:not-allowed;}
+  .render-progress-wrap{margin-top:10px;}
+  .render-progress-wrap.hidden{display:none;}
+  .render-progress-bar{height:6px;border-radius:3px;background:var(--bg-panel-2);overflow:hidden;}
+  .render-progress-fill{height:100%;width:0%;background:var(--accent);transition:width .2s;}
