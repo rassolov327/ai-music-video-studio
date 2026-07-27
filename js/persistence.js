@@ -144,10 +144,12 @@ async function createProject({ name, format, width, height, fps, folderHandle })
   state.taskQueue = [];
   state.archive = [];
   state.script = { text:'', proposal:null };
+  if(typeof scriptSelectedItem!=='undefined') scriptSelectedItem = null;
   PROJECT_FPS = meta.fps;
   applyProjectFrame();
   renderAssets();
   renderTimelineScenes();
+  if(typeof renderScriptPageIfNeeded==='function') renderScriptPageIfNeeded();
 
   await saveProjectMeta(meta);
   if(diskDirHandle){
@@ -1250,6 +1252,8 @@ async function applyProjectData(data, verbose){
   renderAssets();
   renderTimelineScenes();
   refreshMainPreview();
+  if(typeof scriptSelectedItem!=='undefined') scriptSelectedItem = null;
+  if(typeof renderScriptPageIfNeeded==='function') renderScriptPageIfNeeded();
   return hadErrors;
 }
 

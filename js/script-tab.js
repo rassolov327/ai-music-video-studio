@@ -17,6 +17,17 @@ function wireScriptPage(){
 
   document.getElementById('scriptAnalyzeBtn').onclick = runScriptAnalysis;
   document.getElementById('scriptExportBtn').onclick = exportScriptToProject;
+  document.getElementById('scriptClearBtn').onclick = clearScriptTab;
+}
+
+function clearScriptTab(){
+  if(state.script.text || state.script.proposal){
+    if(!confirm('Clear the script text and the proposed breakdown? This only affects this tab — nothing already exported to the project is touched.')) return;
+  }
+  state.script = { text:'', proposal:null };
+  scriptSelectedItem = null;
+  renderScriptPageIfNeeded();
+  if(typeof saveProjectSoon==='function') saveProjectSoon();
 }
 
 function renderScriptPageIfNeeded(){
@@ -26,6 +37,7 @@ function renderScriptPageIfNeeded(){
   }
   updateScriptStatusHint();
   renderScriptTree();
+  if(!scriptSelectedItem) renderScriptInspector(null, null);
 }
 
 function updateScriptStatusHint(){
