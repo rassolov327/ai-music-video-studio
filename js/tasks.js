@@ -35,6 +35,8 @@ function showPage(page){
   document.getElementById('scriptPage').classList.toggle('hidden', page!=='script');
   if(page==='script' && typeof renderScriptPageIfNeeded==='function') renderScriptPageIfNeeded();
   document.getElementById('workPage').classList.toggle('hidden', page!=='work');
+  document.getElementById('storyboardPage').classList.toggle('hidden', page!=='storyboard');
+  if(page==='storyboard' && typeof renderStoryboardGrid==='function') renderStoryboardGrid();
   document.getElementById('tasksPage').classList.toggle('hidden', page!=='tasks');
   document.getElementById('archivePage').classList.toggle('hidden', page!=='archive');
   document.getElementById('moviePage').classList.toggle('hidden', page!=='movie');

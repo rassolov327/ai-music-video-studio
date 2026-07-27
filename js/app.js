@@ -23,6 +23,7 @@ function goHome(){
   wireScriptPage();
   wireAiGeneratorModal();
   wireTimelineZoomControl();
+  wireStoryboardPage();
   startBackgroundTaskWatcher();
   const restored = await initProjectStore();
   if(restored){
