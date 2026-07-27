@@ -262,7 +262,12 @@
   <div class="tasks-page hidden" id="storyboardPage">
     <div class="tasks-header">
       <div class="tasks-title">Storyboard</div>
-      <div class="tasks-actions">
+      <div class="storyboard-header-extra">
+        <div class="storyboard-zoom-control">
+          <button class="tz-btn" id="sbZoomOutBtn" title="Zoom out (-)">−</button>
+          <input type="range" id="sbZoomSlider" min="2" max="8" step="1" value="4" title="Storyboard zoom">
+          <button class="tz-btn" id="sbZoomInBtn" title="Zoom in (+)">+</button>
+        </div>
         <button class="cf-btn primary" id="storyboardExportBtn">Export as image</button>
       </div>
     </div>

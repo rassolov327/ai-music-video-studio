@@ -1,4 +1,7 @@
 // ---------- STORYBOARD tab ----------
+let storyboardCols = 4; // live-view zoom level (how many images per row) — independent of
+// the export, which always uses a fixed 4-column/1920px layout as specified.
+
 function collectAllShotsInOrder(){
   const list = [];
   for(const scene of state.scenes){
@@ -10,27 +13,53 @@ function collectAllShotsInOrder(){
 }
 
 function wireStoryboardPage(){
-  const btn = document.getElementById('storyboardExportBtn');
-  if(btn) btn.onclick = exportStoryboardImage;
+  const exportBtn = document.getElementById('storyboardExportBtn');
+  if(exportBtn) exportBtn.onclick = exportStoryboardImage;
+
+  const slider = document.getElementById('sbZoomSlider');
+  const outBtn = document.getElementById('sbZoomOutBtn');
+  const inBtn = document.getElementById('sbZoomInBtn');
+  if(slider){
+    slider.value = storyboardCols;
+    slider.addEventListener('input', (e)=> setStoryboardZoom(parseInt(e.target.value, 10)));
+  }
+  if(outBtn) outBtn.addEventListener('click', ()=> setStoryboardZoom(storyboardCols + 1)); // more columns = smaller images = zoomed out
+  if(inBtn) inBtn.addEventListener('click', ()=> setStoryboardZoom(storyboardCols - 1)); // fewer columns = bigger images = zoomed in
+
+  window.addEventListener('resize', ()=>{
+    if(!document.getElementById('storyboardPage').classList.contains('hidden')) renderStoryboardGrid();
+  });
+}
+
+function setStoryboardZoom(cols){
+  storyboardCols = Math.max(2, Math.min(8, cols));
+  const slider = document.getElementById('sbZoomSlider');
+  if(slider) slider.value = storyboardCols;
+  renderStoryboardGrid();
 }
 
 function renderStoryboardGrid(){
   const grid = document.getElementById('storyboardGrid');
-  if(!grid) return;
+  const scroll = document.getElementById('storyboardScroll');
+  if(!grid || !scroll) return;
   const entries = collectAllShotsInOrder();
   if(entries.length===0){
-    grid.innerHTML = `<div class="gen-hint" style="padding:20px;grid-column:1/-1;">No shots yet — add scenes and shots on the WORK timeline first.</div>`;
+    grid.innerHTML = `<div class="gen-hint" style="padding:20px;">No shots yet — add scenes and shots on the WORK timeline first.</div>`;
     return;
   }
+  // Explicit pixel sizing (not CSS Grid + aspect-ratio, which has a real row-track-sizing
+  // bug — the grid track ends up taller than the cell it holds, showing as a gap) — every
+  // cell gets the exact same JS-computed width/height, so rows always butt up edge to edge.
+  const containerWidth = scroll.clientWidth || 1920;
+  const cellW = Math.floor(containerWidth / storyboardCols);
+  const meta = state.projectMeta || { width:1920, height:1080 };
+  const cellH = Math.round(cellW * (meta.height / meta.width));
+
   grid.innerHTML = entries.map(({shot})=>{
-    if(shot.previewImage){
-      const badge = shot.videoUrl
-        ? '<div class="storyboard-cell-badge" title="Animated"><svg viewBox="0 0 24 24" width="9" height="9" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg></div>'
-        : '';
-      return `<div class="storyboard-cell"><img src="${shot.previewImage}">${badge}</div>`;
-    }
-    const desc = shot.description ? escapeHtml(shot.description) : '(no description)';
-    return `<div class="storyboard-cell"><div class="storyboard-cell-empty">${desc}</div></div>`;
+    const inner = shot.previewImage
+      ? `<img src="${shot.previewImage}">${shot.videoUrl ? '<div class="storyboard-cell-badge" title="Animated"><svg viewBox="0 0 24 24" width="9" height="9" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg></div>' : ''}`
+      : `<div class="storyboard-cell-empty">${shot.description ? escapeHtml(shot.description) : '(no description)'}</div>`;
+    return `<div class="storyboard-cell" style="width:${cellW}px;height:${cellH}px;">${inner}</div>`;
   }).join('');
 }
 

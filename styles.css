@@ -1054,12 +1054,12 @@
   .script-tree-delete:hover{background:rgba(217,105,95,.18);color:var(--danger);opacity:1;}
 
   /* ---- STORYBOARD tab ---- */
-  .storyboard-scroll{flex:1 1 auto;overflow-y:auto;overflow-x:hidden;display:flex;justify-content:center;background:#000;}
-  .storyboard-grid{
-    width:1920px;max-width:100%;display:grid;grid-template-columns:repeat(4, 1fr);gap:0;
-  }
+  .storyboard-header-extra{display:flex;align-items:center;gap:10px;}
+  .storyboard-zoom-control{display:flex;align-items:center;gap:6px;}
+  .storyboard-scroll{flex:1 1 auto;overflow-y:auto;overflow-x:hidden;background:#000;}
+  .storyboard-grid{display:flex;flex-wrap:wrap;}
   .storyboard-cell{
-    position:relative;aspect-ratio:var(--project-aspect, 16/9);overflow:hidden;background:#000;
+    position:relative;overflow:hidden;background:#000;box-sizing:border-box;flex:0 0 auto;
   }
   .storyboard-cell img{width:100%;height:100%;object-fit:cover;display:block;}
   .storyboard-cell-empty{
