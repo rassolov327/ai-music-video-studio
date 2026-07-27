@@ -51,7 +51,7 @@ function renderArchiveGrid(){
     return;
   }
   grid.innerHTML = entries.map(entry=>{
-    const showInsert = entry.kind==='shot' || entry.kind==='movie' || entry.kind==='archive-derive' || entry.kind==='upload' || !entry.kind; // inserting only makes sense for shot-style content (still or animated)
+    const showInsert = true; // every archive entry can be inserted as a shot now, no exceptions
     return `
       <div class="task-tile" data-archive-id="${entry.id}">
         <div class="task-tile-thumb">

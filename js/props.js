@@ -117,9 +117,12 @@ async function renderPropTaskSlot(it){
   if(!available) return;
   const hasPhoto = !!it.photo;
   freshSlot.innerHTML = `
-    <button class="cf-btn primary" id="propAddToTasksBtn" style="width:100%;margin-top:8px;">Generate (real AI)</button>
-    ${hasPhoto ? '<div class="gen-hint" style="margin-top:6px;">Has a photo — will use it as a reference if the chosen model supports it, like a real object you photographed yourself.</div>' : ''}`;
-  document.getElementById('propAddToTasksBtn').onclick = ()=> runInlineAssetGeneration('props', it, freshSlot);
+    <button class="cf-btn" id="propAddToTasksBtn" style="width:100%;margin-top:8px;">Add to Tasks (real AI)</button>
+    ${hasPhoto ? '<div class="gen-hint" style="margin-top:6px;">Has a photo — pick a model marked (ref) in Tasks to generate from it, like a real object you photographed yourself.</div>' : ''}`;
+  document.getElementById('propAddToTasksBtn').onclick = ()=>{
+    queueAssetGeneration('props', it);
+    freshSlot.innerHTML = `<div class="gen-hint" style="margin-top:8px;color:#5fae7a;">Added to the TASKS queue.</div>`;
+  };
 }
 
 function renderPropGenSection(cat, idx){
@@ -315,7 +318,7 @@ function showPropForm(cat, editIdx){
     const freshSlot = document.getElementById('aiPaidGenSlot');
     if(!freshSlot) return;
     if(!available) return;
-    freshSlot.innerHTML = `<button class="cf-btn primary" id="aiPaidGenBtn" style="width:100%;margin-top:10px;">Generate (real AI)</button>`;
+    freshSlot.innerHTML = `<button class="cf-btn primary" id="aiPaidGenBtn" style="width:100%;margin-top:10px;">Add to Tasks (real AI)</button>`;
     document.getElementById('aiPaidGenBtn').onclick = async ()=>{
       const prompt = aiPromptInput.value.trim();
       if(!prompt){ alert('Write a prompt first.'); return; }
@@ -323,8 +326,9 @@ function showPropForm(cat, editIdx){
       btn.disabled = true; btn.textContent = 'Saving…';
       if(!notesInput.value.trim()) notesInput.value = prompt;
       const saved = await doSave(true);
-      if(!saved){ btn.disabled = false; btn.textContent = 'Generate (real AI)'; return; }
-      await runInlineAssetGeneration('props', saved, freshSlot);
+      if(!saved){ btn.disabled = false; btn.textContent = 'Add to Tasks (real AI)'; return; }
+      queueAssetGeneration('props', saved);
+      freshSlot.innerHTML = `<div class="gen-hint" style="color:#5fae7a;">Added to the TASKS queue.</div>`;
     };
   }
   renderAiPaidGenSlot();

@@ -530,6 +530,7 @@ async function applyFinishedTasks(list){
         // the next manual trim, so there's never a moment where the shot claims more
         // duration than the video actually has.
         shot.duration = MOVIE_CLIP_DURATION_SEC;
+        shot.trimInSec = 0;
         if(focus.sceneId===meta.sceneId && focus.shotId===meta.shotId) touchedCurrentView = true;
       }
       if(typeof renderMovieGrid==='function' && !document.getElementById('moviePage').classList.contains('hidden')) renderMovieGrid();

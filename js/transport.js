@@ -93,8 +93,8 @@ function runPlayLoop(){
   updateVuMeter();
 
   const anchor = anchorAtX(playheadX);
-  const newSceneId = anchor ? anchor.dataset.scene : null;
-  const newShotId = anchor ? (anchor.dataset.shot || null) : null;
+  const newSceneId = anchor ? anchor.sceneId : null;
+  const newShotId = anchor ? anchor.shotId : null;
   if(newSceneId!==focus.sceneId || newShotId!==focus.shotId){
     focus = { sceneId:newSceneId, shotId:newShotId };
     renderTimelineScenes();

@@ -117,9 +117,12 @@ async function renderLocTaskSlot(it){
   if(!available) return;
   const hasPhoto = !!it.photo;
   freshSlot.innerHTML = `
-    <button class="cf-btn primary" id="locAddToTasksBtn" style="width:100%;margin-top:8px;">Generate (real AI)</button>
-    ${hasPhoto ? '<div class="gen-hint" style="margin-top:6px;">Has a photo — will use it as a reference if the chosen model supports it, like a real location you photographed yourself.</div>' : ''}`;
-  document.getElementById('locAddToTasksBtn').onclick = ()=> runInlineAssetGeneration('locations', it, freshSlot);
+    <button class="cf-btn" id="locAddToTasksBtn" style="width:100%;margin-top:8px;">Add to Tasks (real AI)</button>
+    ${hasPhoto ? '<div class="gen-hint" style="margin-top:6px;">Has a photo — pick a model marked (ref) in Tasks to generate from it, like a real location you photographed yourself.</div>' : ''}`;
+  document.getElementById('locAddToTasksBtn').onclick = ()=>{
+    queueAssetGeneration('locations', it);
+    freshSlot.innerHTML = `<div class="gen-hint" style="margin-top:8px;color:#5fae7a;">Added to the TASKS queue.</div>`;
+  };
 }
 
 function renderLocGenSection(cat, idx){
@@ -315,16 +318,17 @@ function showLocationForm(cat, editIdx){
     const freshSlot = document.getElementById('aiPaidGenSlot');
     if(!freshSlot) return;
     if(!available) return;
-    freshSlot.innerHTML = `<button class="cf-btn primary" id="aiPaidGenBtn" style="width:100%;margin-top:10px;">Generate (real AI)</button>`;
+    freshSlot.innerHTML = `<button class="cf-btn primary" id="aiPaidGenBtn" style="width:100%;margin-top:10px;">Add to Tasks (real AI)</button>`;
     document.getElementById('aiPaidGenBtn').onclick = async ()=>{
       const prompt = aiPromptInput.value.trim();
       if(!prompt){ alert('Write a prompt first.'); return; }
       const btn = document.getElementById('aiPaidGenBtn');
       btn.disabled = true; btn.textContent = 'Saving…';
-      if(!notesInput.value.trim()) notesInput.value = prompt; // so the generation's prompt matches what was typed here
+      if(!notesInput.value.trim()) notesInput.value = prompt; // so the queued generation's prompt matches what was typed here
       const saved = await doSave(true); // auto-save, but stay on this tab
-      if(!saved){ btn.disabled = false; btn.textContent = 'Generate (real AI)'; return; }
-      await runInlineAssetGeneration('locations', saved, freshSlot);
+      if(!saved){ btn.disabled = false; btn.textContent = 'Add to Tasks (real AI)'; return; }
+      queueAssetGeneration('locations', saved);
+      freshSlot.innerHTML = `<div class="gen-hint" style="color:#5fae7a;">Added to the TASKS queue.</div>`;
     };
   }
   renderAiPaidGenSlot();

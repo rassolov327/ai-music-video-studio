@@ -260,14 +260,30 @@ function wireCommonTimelineHandlers(){
       const thumbEl = el.parentElement;
       const startX = e.clientX;
       const startDuration = shot.duration;
+      const startTrimIn = shot.trimInSec || 0;
       document.body.style.cursor = 'ew-resize';
       const MIN_SEC = 0.5;
-      const MAX_SEC = shot.videoUrl ? MOVIE_CLIP_DURATION_SEC : Infinity; // a clip's slot can never exceed its actual footage
+      const isVideo = !!shot.videoUrl;
+      const MAX_SEC = isVideo ? MOVIE_CLIP_DURATION_SEC : Infinity; // a clip's slot can never exceed its actual footage
       const onMove = (ev)=>{
         const deltaPx = (ev.clientX - startX) / ZOOM;
         const deltaSec = deltaPx / PX_PER_SEC;
-        const raw = side==='right' ? startDuration + deltaSec : startDuration - deltaSec;
-        const newDuration = Math.min(MAX_SEC, Math.max(MIN_SEC, Math.round(raw*10)/10));
+        let newDuration, newTrimIn = startTrimIn;
+        if(side==='right'){
+          const raw = startDuration + deltaSec;
+          newDuration = Math.min(MAX_SEC - startTrimIn, Math.max(MIN_SEC, Math.round(raw*10)/10));
+        } else if(isVideo){
+          // Dragging the left handle inward (right) skips further into the source clip —
+          // the in-point moves forward and duration shrinks by the same amount, so the
+          // shot's end position on the timeline doesn't jump. Dragging it back out reveals
+          // more of the clip's own beginning, down to its actual start (trimIn can't go below 0).
+          const rawTrimIn = Math.max(0, Math.min(startTrimIn + deltaSec, startTrimIn + startDuration - MIN_SEC));
+          newTrimIn = Math.round(rawTrimIn*10)/10;
+          newDuration = Math.round((startDuration - (newTrimIn - startTrimIn))*10)/10;
+        } else {
+          const raw = startDuration - deltaSec;
+          newDuration = Math.max(MIN_SEC, Math.round(raw*10)/10);
+        }
         // The element being dragged (and its parent thumb) may have been replaced by a
         // periodic re-render since the drag started (autosave-adjacent timers, Tasks
         // refresh) — re-look-up the current live element by the same data-trim key
@@ -281,6 +297,7 @@ function wireCommonTimelineHandlers(){
           const meta = liveThumb.querySelector('.st-meta');
           if(meta) meta.textContent = newDuration.toFixed(1) + 's';
           liveThumb.dataset.pendingDuration = newDuration;
+          liveThumb.dataset.pendingTrimIn = newTrimIn;
         }
       };
       const onUp = ()=>{
@@ -290,7 +307,9 @@ function wireCommonTimelineHandlers(){
         const liveHandle = timelineScenesEl.querySelector(`[data-trim="${sid}|${shid}|${side}"]`);
         const liveThumb = liveHandle ? liveHandle.parentElement : thumbEl;
         const pending = liveThumb ? parseFloat(liveThumb.dataset.pendingDuration) : NaN;
+        const pendingTrimIn = liveThumb ? parseFloat(liveThumb.dataset.pendingTrimIn) : NaN;
         if(!isNaN(pending)) shot.duration = pending;
+        if(!isNaN(pendingTrimIn)) shot.trimInSec = pendingTrimIn;
         renderTimelineScenes();
         if(focus.sceneId===sid && focus.shotId===shid) renderInspectorPanel();
         if(typeof saveProjectSoon==='function') saveProjectSoon();
@@ -416,16 +435,28 @@ function positionPlayhead(){
 
 // returns the shot/empty-cell whose pixel range contains x, or the last one before x if x sits in a gap
 function anchorAtX(x){
-  const track = document.getElementById('timelineTrack');
-  if(!track) return null;
-  const anchors = Array.from(track.querySelectorAll('[data-anchor]')).sort((a,b)=>a.offsetLeft-b.offsetLeft);
-  if(anchors.length===0) return null;
-  let candidate = null;
-  for(const el of anchors){
-    if(x >= el.offsetLeft && x < el.offsetLeft + el.offsetWidth) return el;
-    if(el.offsetLeft <= x) candidate = el;
+  let cursor = 0;
+  for(const scene of state.scenes){
+    if(scene.shots.length===0){
+      const w = 88; // matches the empty-scene-cell's fixed width in CSS
+      if(x >= cursor && x < cursor + w) return { sceneId: scene.id, shotId: null };
+      cursor += w;
+      continue;
+    }
+    for(const shot of scene.shots){
+      const w = Math.round(shot.duration * PX_PER_SEC);
+      if(x >= cursor && x < cursor + w) return { sceneId: scene.id, shotId: shot.id };
+      cursor += w;
+    }
   }
-  return candidate || anchors[0];
+  // past the end of everything — settle on the very last shot/scene rather than nothing,
+  // so playback doesn't lose focus right as it's about to stop
+  for(let i=state.scenes.length-1; i>=0; i--){
+    const scene = state.scenes[i];
+    if(scene.shots.length) return { sceneId: scene.id, shotId: scene.shots[scene.shots.length-1].id };
+    if(scene.shots.length===0) return { sceneId: scene.id, shotId: null };
+  }
+  return null;
 }
 
 // moves the playhead to sit exactly on the currently focused shot/scene (used after creating or clicking one)
@@ -440,7 +471,7 @@ function movePlayheadToFocus(){
 
 function syncFocusToPlayhead(){
   const anchor = anchorAtX(playheadX);
-  focus = anchor ? { sceneId: anchor.dataset.scene, shotId: anchor.dataset.shot || null } : { sceneId:null, shotId:null };
+  focus = anchor ? { sceneId: anchor.sceneId, shotId: anchor.shotId } : { sceneId:null, shotId:null };
   renderTimelineScenes();
   refreshMainPreview();
 }

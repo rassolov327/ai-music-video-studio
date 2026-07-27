@@ -156,11 +156,12 @@ function refreshMainPreview(){
   previewBarEl.textContent = shot ? `${scene.name} — ${shot.name}` : scene.name;
 
   if(shot && shot.videoUrl){
-    let seekTo = 0.01;
+    const trimIn = shot.trimInSec || 0;
+    let seekTo = trimIn + 0.01;
     if(typeof getShotStartPx==='function' && typeof PX_PER_SEC!=='undefined' && typeof playheadX!=='undefined'){
       const shotStartPx = getShotStartPx(scene.id, shot.id);
       const offsetSec = (playheadX - shotStartPx) / PX_PER_SEC;
-      seekTo = Math.max(0.01, Math.min(shot.duration - 0.05, offsetSec));
+      seekTo = trimIn + Math.max(0.01, Math.min(shot.duration - 0.05, offsetSec));
     }
     previewEl.innerHTML = `
       <div class="timeline-frame" style="border-color:transparent;">
