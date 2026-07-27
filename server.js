@@ -46,7 +46,8 @@ app.use((req, res, next) => {
     'Content-Security-Policy',
     [
       "default-src 'self'",
-      "script-src 'self' https: 'unsafe-inline'",
+      "script-src 'self' https: blob: 'unsafe-inline' 'wasm-unsafe-eval'",
+      "worker-src 'self' blob:",
       "style-src 'self' https: 'unsafe-inline'",
       "font-src 'self' https: data:",
       "img-src 'self' data: blob: https: *",
