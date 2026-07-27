@@ -128,18 +128,28 @@ async function ensureFFmpegLoaded(onStatus){
   if(ffmpegInstance) return ffmpegInstance;
   if(!ffmpegLoadingPromise){
     ffmpegLoadingPromise = (async ()=>{
-      if(onStatus) onStatus('Loading render engine (first time only, ~30MB)…');
+      console.log('[render] step 1: importing @ffmpeg/ffmpeg…');
+      if(onStatus) onStatus('Loading render engine — step 1 of 4 (fetching library)…');
       const { FFmpeg } = await import('https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/+esm');
+      console.log('[render] step 1 done. step 2: importing @ffmpeg/util…');
+      if(onStatus) onStatus('Loading render engine — step 2 of 4 (fetching helpers)…');
       const { fetchFile, toBlobURL } = await import('https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.2/+esm');
       ffmpegFetchFile = fetchFile;
+      console.log('[render] step 2 done. step 3: downloading core+worker (~30MB)…');
+      if(onStatus) onStatus('Loading render engine — step 3 of 4 (downloading ~30MB core)…');
       const ffmpeg = new FFmpeg();
+      ffmpeg.on('log', ({ message })=> console.log('[ffmpeg]', message));
       const baseURL = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd';
       const ffmpegPkgURL = 'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/dist/esm';
-      await ffmpeg.load({
-        coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-        wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
-        classWorkerURL: await toBlobURL(`${ffmpegPkgURL}/worker.js`, 'text/javascript'),
-      });
+      const coreURL = await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript');
+      console.log('[render] core.js fetched, fetching wasm binary (the big one)…');
+      const wasmURL = await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm');
+      console.log('[render] wasm fetched, fetching worker script…');
+      const classWorkerURL = await toBlobURL(`${ffmpegPkgURL}/worker.js`, 'text/javascript');
+      console.log('[render] step 3 done. step 4: starting the engine itself…');
+      if(onStatus) onStatus('Loading render engine — step 4 of 4 (starting engine)…');
+      await ffmpeg.load({ coreURL, wasmURL, classWorkerURL });
+      console.log('[render] engine fully loaded.');
       ffmpegInstance = ffmpeg;
       return ffmpeg;
     })();
@@ -147,6 +157,7 @@ async function ensureFFmpegLoaded(onStatus){
   try{
     return await ffmpegLoadingPromise;
   } catch(err){
+    console.error('[render] engine load failed at whichever step is last logged above:', err);
     ffmpegLoadingPromise = null; // let a later attempt retry instead of staying stuck on a failed load
     throw err;
   }
