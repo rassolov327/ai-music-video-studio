@@ -134,9 +134,11 @@ async function ensureFFmpegLoaded(onStatus){
       ffmpegFetchFile = fetchFile;
       const ffmpeg = new FFmpeg();
       const baseURL = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd';
+      const ffmpegPkgURL = 'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/dist/esm';
       await ffmpeg.load({
         coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
         wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+        classWorkerURL: await toBlobURL(`${ffmpegPkgURL}/worker.js`, 'text/javascript'),
       });
       ffmpegInstance = ffmpeg;
       return ffmpeg;
