@@ -139,7 +139,7 @@ async function ensureFFmpegLoaded(onStatus){
       if(onStatus) onStatus('Loading render engine — step 3 of 4 (downloading ~30MB core)…');
       const ffmpeg = new FFmpeg();
       ffmpeg.on('log', ({ message })=> console.log('[ffmpeg]', message));
-      const baseURL = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd';
+      const baseURL = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm';
       const ffmpegPkgURL = 'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/dist/esm';
       const coreURL = await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript');
       console.log('[render] core.js fetched, fetching wasm binary (the big one)…');
