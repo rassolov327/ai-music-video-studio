@@ -174,6 +174,54 @@ async function ensureFFmpegLoaded(onStatus){
 
 function evenize(n){ return Math.max(2, Math.round(n / 2) * 2); } // libx264 needs even width/height
 
+// ---------- elapsed / estimated-total timers ----------
+let renderStartTime = null;
+let renderElapsedInterval = null;
+let renderShotDurationsMs = []; // actual measured time per normalized shot, for estimating what's left
+let renderEngineLoadMs = 0;
+
+function formatHHMMSS(totalSeconds){
+  totalSeconds = Math.max(0, Math.round(totalSeconds));
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  const pad = (n)=> String(n).padStart(2, '0');
+  return pad(h) + ':' + pad(m) + ':' + pad(s);
+}
+function startRenderTimers(){
+  renderStartTime = Date.now();
+  renderShotDurationsMs = [];
+  renderEngineLoadMs = 0;
+  const wrap = document.getElementById('renderTimers');
+  if(wrap) wrap.classList.remove('hidden');
+  const elapsedEl = document.getElementById('renderElapsedTimer');
+  if(elapsedEl) elapsedEl.textContent = '00:00:00';
+  const estEl = document.getElementById('renderEstimateTimer');
+  if(estEl) estEl.textContent = '--:--:--';
+  if(renderElapsedInterval) clearInterval(renderElapsedInterval);
+  renderElapsedInterval = setInterval(tickRenderElapsedTimer, 1000);
+}
+function tickRenderElapsedTimer(){
+  if(!renderStartTime) return;
+  const el = document.getElementById('renderElapsedTimer');
+  if(el) el.textContent = formatHHMMSS((Date.now() - renderStartTime) / 1000);
+}
+function stopRenderTimers(){
+  if(renderElapsedInterval){ clearInterval(renderElapsedInterval); renderElapsedInterval = null; }
+  tickRenderElapsedTimer(); // one last update so the final displayed time is exact, not up-to-a-second-stale
+}
+// Re-estimated after every shot finishes normalizing, using the actual average time per
+// shot measured so far — gets more accurate as the render progresses, rather than being a
+// single static guess made at the start.
+function updateRenderEstimate(completedShots, totalShots){
+  const el = document.getElementById('renderEstimateTimer');
+  if(!el || renderShotDurationsMs.length===0) return;
+  const avgPerShotMs = renderShotDurationsMs.reduce((a,b)=> a+b, 0) / renderShotDurationsMs.length;
+  const overheadMs = avgPerShotMs * 0.5; // rough allowance for the concat+audio-mix+save steps at the end
+  const totalEstimateMs = renderEngineLoadMs + (avgPerShotMs * totalShots) + overheadMs;
+  el.textContent = formatHHMMSS(totalEstimateMs / 1000);
+}
+
 function getRenderResolution(){
   const select = document.getElementById('renderResolutionSelect');
   const meta = state.projectMeta || { width:1920, height:1080 };
@@ -219,9 +267,12 @@ async function startRender(){
   const evenW = evenize(width), evenH = evenize(height);
   const fps = (state.projectMeta && state.projectMeta.fps) || 25;
 
+  startRenderTimers();
   try{
     setRenderProgress(0);
+    const engineLoadStart = Date.now();
     const ffmpeg = await ensureFFmpegLoaded((msg)=> setRenderStatus(msg));
+    renderEngineLoadMs = Date.now() - engineLoadStart;
     setRenderStatus('Normalizing ' + entries.length + ' shot(s)…');
 
     // Every shot gets scaled/padded to the SAME resolution+fps+codec first (a still image
@@ -231,6 +282,7 @@ async function startRender(){
     const scaleFilter = `scale=${evenW}:${evenH}:force_original_aspect_ratio=decrease,pad=${evenW}:${evenH}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1`;
     const segFiles = [];
     for(let i=0; i<entries.length; i++){
+      const shotStart = Date.now();
       const { shot } = entries[i];
       const segName = 'seg' + i + '.mp4';
       if(shot.videoUrl){
@@ -253,8 +305,10 @@ async function startRender(){
         await ffmpeg.deleteFile('src.png');
       }
       segFiles.push(segName);
+      renderShotDurationsMs.push(Date.now() - shotStart);
       setRenderProgress((i + 1) / (entries.length + 2) * 0.85);
       setRenderStatus('Normalizing shot ' + (i + 1) + ' of ' + entries.length + '…');
+      updateRenderEstimate(i + 1, entries.length);
     }
 
     setRenderStatus('Joining shots…');
@@ -295,6 +349,7 @@ async function startRender(){
     console.error('[render] failed:', err);
     setRenderStatus('Render failed: ' + (err && err.message || err), true);
   } finally {
+    stopRenderTimers();
     startBtn.disabled = false;
     setTimeout(hideRenderProgress, 4000);
   }

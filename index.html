@@ -308,6 +308,16 @@
           <div class="gen-hint" id="renderFolderHint" style="margin-top:4px;"></div>
         </div>
         <button class="cf-btn primary render-big-btn" id="renderStartBtn">RENDERING</button>
+        <div class="render-timers hidden" id="renderTimers">
+          <div class="render-timer">
+            <span class="render-timer-label">Elapsed</span>
+            <span class="render-timer-value" id="renderElapsedTimer">00:00:00</span>
+          </div>
+          <div class="render-timer">
+            <span class="render-timer-label">Estimated total</span>
+            <span class="render-timer-value" id="renderEstimateTimer">--:--:--</span>
+          </div>
+        </div>
         <div class="render-progress-wrap hidden" id="renderProgressWrap">
           <div class="render-progress-bar"><div class="render-progress-fill" id="renderProgressFill"></div></div>
         </div>
