@@ -1110,6 +1110,13 @@
   .render-quality-btn.active{background:var(--accent);border-color:var(--accent);color:#1a1408;font-weight:600;}
   .render-big-btn{width:100%;margin-top:18px;padding:14px 0;font-size:14px;font-weight:700;letter-spacing:.03em;}
   .render-big-btn:disabled{opacity:.45;cursor:not-allowed;}
+  .render-btn-row{display:flex;gap:8px;align-items:stretch;}
+  .render-btn-row .render-big-btn{flex:1 1 auto;}
+  .render-stop-btn{
+    flex:0 0 auto;padding:0 18px;border-radius:9px;color:var(--danger);border-color:var(--danger);
+  }
+  .render-stop-btn:hover{background:rgba(217,105,95,.15);}
+  .render-stop-btn.hidden{display:none;}
   .render-timers{display:flex;gap:10px;margin-top:10px;}
   .render-timers.hidden{display:none;}
   .render-timer{

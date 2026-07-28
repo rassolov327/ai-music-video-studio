@@ -307,7 +307,10 @@
           <button class="cf-btn" id="renderFolderBtn" style="width:100%;">Choose folder…</button>
           <div class="gen-hint" id="renderFolderHint" style="margin-top:4px;"></div>
         </div>
-        <button class="cf-btn primary render-big-btn" id="renderStartBtn">RENDERING</button>
+        <div class="render-btn-row">
+          <button class="cf-btn primary render-big-btn" id="renderStartBtn">RENDERING</button>
+          <button class="cf-btn render-stop-btn hidden" id="renderStopBtn" title="Cancel this render">Stop</button>
+        </div>
         <div class="render-timers hidden" id="renderTimers">
           <div class="render-timer">
             <span class="render-timer-label">Elapsed</span>

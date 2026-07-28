@@ -33,6 +33,8 @@ function wireRenderPage(){
 
   const startBtn = document.getElementById('renderStartBtn');
   if(startBtn) startBtn.onclick = startRender;
+  const stopBtn = document.getElementById('renderStopBtn');
+  if(stopBtn) stopBtn.onclick = stopRender;
 }
 
 function updateRenderQualityHint(){
@@ -139,6 +141,10 @@ async function ensureFFmpegLoaded(onStatus){
       if(onStatus) onStatus('Loading render engine — step 3 of 4 (downloading ~30MB core)…');
       const ffmpeg = new FFmpeg();
       ffmpeg.on('log', ({ message })=> console.log('[ffmpeg]', message));
+      ffmpeg.on('progress', ({ progress })=>{
+        currentShotProgress = progress;
+        updateRenderEstimate();
+      });
       const baseURL = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm';
       const ffmpegPkgURL = 'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/dist/esm';
       const coreURL = await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript');
@@ -177,8 +183,12 @@ function evenize(n){ return Math.max(2, Math.round(n / 2) * 2); } // libx264 nee
 // ---------- elapsed / estimated-total timers ----------
 let renderStartTime = null;
 let renderElapsedInterval = null;
-let renderShotDurationsMs = []; // actual measured time per normalized shot, for estimating what's left
+let renderShotDurationsMs = []; // actual measured time per FULLY completed shot
 let renderEngineLoadMs = 0;
+let currentShotStartMs = null; // when the shot currently being processed began
+let currentShotProgress = 0; // 0-1, from ffmpeg's own progress event, for the shot in flight
+let renderTotalShots = 0;
+let renderCompletedShots = 0;
 
 function formatHHMMSS(totalSeconds){
   totalSeconds = Math.max(0, Math.round(totalSeconds));
@@ -192,6 +202,9 @@ function startRenderTimers(){
   renderStartTime = Date.now();
   renderShotDurationsMs = [];
   renderEngineLoadMs = 0;
+  currentShotStartMs = null;
+  currentShotProgress = 0;
+  renderCompletedShots = 0;
   const wrap = document.getElementById('renderTimers');
   if(wrap) wrap.classList.remove('hidden');
   const elapsedEl = document.getElementById('renderElapsedTimer');
@@ -210,16 +223,40 @@ function stopRenderTimers(){
   if(renderElapsedInterval){ clearInterval(renderElapsedInterval); renderElapsedInterval = null; }
   tickRenderElapsedTimer(); // one last update so the final displayed time is exact, not up-to-a-second-stale
 }
-// Re-estimated after every shot finishes normalizing, using the actual average time per
-// shot measured so far — gets more accurate as the render progresses, rather than being a
-// single static guess made at the start.
-function updateRenderEstimate(completedShots, totalShots){
+// Re-estimated continuously — both from shots that have FULLY finished (reliable, exact
+// timing) and from the shot CURRENTLY in flight (using ffmpeg's own progress fraction to
+// project how long it'll take once done). Without the in-flight half of this, the estimate
+// stayed blank for however long the very first shot took, which for a single slow shot
+// could be a long silent wait with no information at all.
+function updateRenderEstimate(){
   const el = document.getElementById('renderEstimateTimer');
-  if(!el || renderShotDurationsMs.length===0) return;
-  const avgPerShotMs = renderShotDurationsMs.reduce((a,b)=> a+b, 0) / renderShotDurationsMs.length;
+  if(!el || renderTotalShots===0) return;
+  let avgPerShotMs = null;
+  if(renderShotDurationsMs.length>0){
+    avgPerShotMs = renderShotDurationsMs.reduce((a,b)=> a+b, 0) / renderShotDurationsMs.length;
+  } else if(currentShotStartMs && currentShotProgress > 0.03){
+    // no shot has fully finished yet — project the current shot's own pace instead
+    avgPerShotMs = (Date.now() - currentShotStartMs) / currentShotProgress;
+  }
+  if(avgPerShotMs===null) return; // genuinely nothing to go on yet — leave the placeholder up
   const overheadMs = avgPerShotMs * 0.5; // rough allowance for the concat+audio-mix+save steps at the end
-  const totalEstimateMs = renderEngineLoadMs + (avgPerShotMs * totalShots) + overheadMs;
+  const totalEstimateMs = renderEngineLoadMs + (avgPerShotMs * renderTotalShots) + overheadMs;
   el.textContent = formatHHMMSS(totalEstimateMs / 1000);
+}
+
+let renderCancelled = false;
+
+// Terminating the ffmpeg worker is the only way to actually interrupt a command already in
+// flight — there's no cooperative "please stop soon" in ffmpeg.wasm. The instance can't be
+// reused after this, so it's cleared and the next render attempt loads a fresh one.
+async function stopRender(){
+  renderCancelled = true;
+  setRenderStatus('Stopping…');
+  try{
+    if(ffmpegInstance) ffmpegInstance.terminate();
+  } catch(err){}
+  ffmpegInstance = null;
+  ffmpegLoadingPromise = null;
 }
 
 function getRenderResolution(){
@@ -261,13 +298,17 @@ async function startRender(){
   const fileName = rawFileName.replace(/\.mp4$/i, '');
 
   const startBtn = document.getElementById('renderStartBtn');
+  const stopBtn = document.getElementById('renderStopBtn');
   startBtn.disabled = true;
+  if(stopBtn) stopBtn.classList.remove('hidden');
   const quality = RENDER_QUALITY_PRESETS[renderQuality];
   const { width, height } = getRenderResolution();
   const evenW = evenize(width), evenH = evenize(height);
   const fps = (state.projectMeta && state.projectMeta.fps) || 25;
 
+  renderCancelled = false;
   startRenderTimers();
+  renderTotalShots = entries.length;
   try{
     setRenderProgress(0);
     const engineLoadStart = Date.now();
@@ -283,6 +324,8 @@ async function startRender(){
     const segFiles = [];
     for(let i=0; i<entries.length; i++){
       const shotStart = Date.now();
+      currentShotStartMs = shotStart;
+      currentShotProgress = 0;
       const { shot } = entries[i];
       const segName = 'seg' + i + '.mp4';
       if(shot.videoUrl){
@@ -306,9 +349,12 @@ async function startRender(){
       }
       segFiles.push(segName);
       renderShotDurationsMs.push(Date.now() - shotStart);
+      renderCompletedShots = i + 1;
+      currentShotStartMs = null;
+      currentShotProgress = 0;
       setRenderProgress((i + 1) / (entries.length + 2) * 0.85);
       setRenderStatus('Normalizing shot ' + (i + 1) + ' of ' + entries.length + '…');
-      updateRenderEstimate(i + 1, entries.length);
+      updateRenderEstimate();
     }
 
     setRenderStatus('Joining shots…');
@@ -346,11 +392,16 @@ async function startRender(){
     setRenderProgress(1);
     setRenderStatus('Done — saved "' + fileName + '.mp4" to "' + renderDestDirHandle.name + '".');
   } catch(err){
-    console.error('[render] failed:', err);
-    setRenderStatus('Render failed: ' + (err && err.message || err), true);
+    if(renderCancelled){
+      setRenderStatus('Render cancelled.');
+    } else {
+      console.error('[render] failed:', err);
+      setRenderStatus('Render failed: ' + (err && err.message || err), true);
+    }
   } finally {
     stopRenderTimers();
     startBtn.disabled = false;
+    if(stopBtn) stopBtn.classList.add('hidden');
     setTimeout(hideRenderProgress, 4000);
   }
 }
