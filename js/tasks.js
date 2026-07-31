@@ -312,10 +312,11 @@ function requeueFromFinishedTask(t){
     const scene = state.scenes.find(s=> s.id===meta.sceneId);
     const shot = scene && scene.shots.find(sh=> sh.id===meta.shotId);
     if(!scene || !shot){ alert('That shot no longer exists.'); return; }
+    const fieldSuffix = meta.field==='last' ? ' (last frame)' : meta.field==='first' ? ' (first frame)' : '';
     state.taskQueue = state.taskQueue || [];
     state.taskQueue.push({
-      id: 'dt' + (draftTaskSeq++), kind:'shot',
-      sceneId: scene.id, shotId: shot.id, sceneName: scene.name, shotName: shot.name,
+      id: 'dt' + (draftTaskSeq++), kind:'shot', field: meta.field,
+      sceneId: scene.id, shotId: shot.id, sceneName: scene.name, shotName: shot.name + fieldSuffix,
       model: t.model, createdAt: Date.now(),
     });
   } else {
@@ -385,7 +386,11 @@ async function sendGenerationTask(draft){
     const scene = state.scenes.find(s=> s.id===draft.sceneId);
     const shot = scene && scene.shots.find(sh=> sh.id===draft.shotId);
     if(!scene || !shot) throw new Error('This shot no longer exists.');
-    prompt = buildShotPrompt(shot, scene);
+    // A Seedance-mode shot's "last frame" prompt swaps in for the description — everything
+    // else (characters/location/props inherited from the scene, camera settings, tags)
+    // stays exactly the same as a normal shot, since buildShotPrompt reads shot.description.
+    const promptShot = draft.field==='last' ? { ...shot, description: shot.lastFrameDescription } : shot;
+    prompt = buildShotPrompt(promptShot, scene);
 
     const allRefs = [];
     if(typeof gatherSceneCharacterReferences==='function' && typeof resolveTagsInPrompt==='function'){
@@ -422,7 +427,7 @@ async function sendGenerationTask(draft){
       }
     }
     if(allRefs.length) referenceImageUrl = allRefs.slice(0, 8); // Nano Banana Pro's own reference-image limit
-    taskMeta = { projectId: currentProjectId, kind:'shot', sceneId: scene.id, sceneName: scene.name, shotId: shot.id, shotName: shot.name };
+    taskMeta = { projectId: currentProjectId, kind:'shot', sceneId: scene.id, sceneName: scene.name, shotId: shot.id, shotName: shot.name, field: draft.field || 'first' };
   } else if(draft.kind==='archive-derive'){
     const entry = (state.archive||[]).find(a=> a.id===draft.archiveEntryId);
     if(!entry || !entry.photo) throw new Error('The original generation this was based on is no longer available.');
@@ -543,8 +548,13 @@ async function applyFinishedTasks(list){
       const scene = state.scenes.find(s=> s.id===meta.sceneId);
       const shot = scene && scene.shots.find(sh=> sh.id===meta.shotId);
       if(scene && shot){
-        if(typeof persistShotPreviewImage==='function') await persistShotPreviewImage(shot, t.imageUrl);
-        else shot.previewImage = t.imageUrl;
+        if(meta.field==='last'){
+          if(typeof persistShotLastFrameImage==='function') await persistShotLastFrameImage(shot, t.imageUrl);
+          else shot.lastFrameImage = t.imageUrl;
+        } else {
+          if(typeof persistShotPreviewImage==='function') await persistShotPreviewImage(shot, t.imageUrl);
+          else shot.previewImage = t.imageUrl;
+        }
         if(focus.sceneId===scene.id && focus.shotId===shot.id) touchedCurrentView = true;
       }
     } else {

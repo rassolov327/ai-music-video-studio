@@ -29,9 +29,10 @@ function collectAnimatableShots(){
   return list;
 }
 
-function videoModelSelectHtml(selectedId){
-  const fallback = videoModelOptions[0] && videoModelOptions[0].id;
-  const opts = videoModelOptions.map(m=>
+function videoModelSelectHtml(selectedId, seedanceOnly){
+  const pool = seedanceOnly ? videoModelOptions.filter(m=> m.supportsLastFrame) : videoModelOptions;
+  const fallback = pool[0] && pool[0].id;
+  const opts = pool.map(m=>
     `<option value="${m.id}" title="${m.blurb || ''}" ${m.id===(selectedId||fallback)?'selected':''}>${m.label} — $${m.costUsd.toFixed(2)}</option>`
   ).join('');
   return `<select class="movie-tile-model-select">${opts}</select>`;
@@ -53,13 +54,16 @@ function renderMovieGrid(){
   grid.innerHTML = entries.map(({scene, shot})=>{
     const selected = movieSelectedShotIds.has(shot.id);
     const isAnimated = !!shot.videoUrl;
-    const modelId = shot._movieModel || (videoModelOptions[0] && videoModelOptions[0].id);
+    const seedancePool = videoModelOptions.filter(m=> m.supportsLastFrame);
+    let modelId = shot._movieModel || (videoModelOptions[0] && videoModelOptions[0].id);
+    if(shot.seedanceMode && !seedancePool.some(m=> m.id===modelId)) modelId = seedancePool[0] && seedancePool[0].id;
     const model = videoModelOptions.find(m=> m.id===modelId);
     const blurb = model ? model.blurb : '';
     return `
       <div class="task-tile draft${selected ? ' selected' : ''}" data-shot-id="${shot.id}">
         <div class="task-tile-thumb" title="Click to select for batch animate">
           <img src="${shot.previewImage}">
+          ${shot.seedanceMode ? '<div class="movie-seedance-badge" title="Seedance 2-frame shot">2F</div>' : ''}
           ${isAnimated ? '<div class="movie-animated-badge" title="Already animated"><svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg></div>' : ''}
           ${selected ? '<div class="task-tile-selected-badge"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></div>' : ''}
         </div>
@@ -67,9 +71,10 @@ function renderMovieGrid(){
           <div class="task-tile-scene">${scene.name}</div>
           <div class="task-tile-shot">${shot.name}</div>
           <div class="movie-tile-desc">${shot.description ? shot.description : '<span style="color:var(--text-3);">(no description)</span>'}</div>
-          ${videoModelSelectHtml(modelId)}
+          ${shot.seedanceMode && !shot.lastFrameImage ? '<div class="gen-hint" style="color:var(--danger);">Last frame not generated yet — needed before this can animate.</div>' : ''}
+          ${videoModelSelectHtml(modelId, shot.seedanceMode)}
           ${blurb ? `<div class="gen-hint" style="margin-top:4px;">${blurb}</div>` : ''}
-          <button class="cf-btn primary movie-tile-send-btn" style="width:100%;margin-top:8px;">${isAnimated ? 'Re-animate' : 'Animate'}${model ? ' — $' + model.costUsd.toFixed(2) : ''}</button>
+          <button class="cf-btn primary movie-tile-send-btn" style="width:100%;margin-top:8px;" ${shot.seedanceMode && !shot.lastFrameImage ? 'disabled' : ''}>${isAnimated ? 'Re-animate' : 'Animate'}${model ? ' — $' + model.costUsd.toFixed(2) : ''}</button>
         </div>
       </div>`;
   }).join('');
@@ -145,13 +150,19 @@ async function sendMovieShot(shotId){
   try{
     const modelId = shot._movieModel || (videoModelOptions[0] && videoModelOptions[0].id);
     if(!modelId) throw new Error('No video model available.');
+    if(shot.seedanceMode && !shot.lastFrameImage) throw new Error('Generate the last frame first — this shot needs both frames to animate.');
     const imageUrl = await uploadReferencePhoto(shot.previewImage);
     if(!imageUrl) throw new Error('Could not upload the shot image.');
+    let lastFrameImageUrl;
+    if(shot.seedanceMode){
+      lastFrameImageUrl = await uploadReferencePhoto(shot.lastFrameImage);
+      if(!lastFrameImageUrl) throw new Error('Could not upload the last-frame image.');
+    }
     const prompt = buildVideoPromptForShot(shot, scene);
     const res = await fetch('/api/generate-video/start', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        prompt, imageUrl, duration: MOVIE_CLIP_DURATION_SEC, model: modelId,
+        prompt, imageUrl, lastFrameImageUrl, duration: MOVIE_CLIP_DURATION_SEC, model: modelId,
         meta: { projectId: currentProjectId, kind: 'movie', sceneId: scene.id, sceneName: scene.name, shotId: shot.id, shotName: shot.name },
       }),
     });

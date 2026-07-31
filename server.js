@@ -308,9 +308,10 @@ const VIDEO_MODELS = [
   { id: 'kling/v2-1-standard', label: 'Kling 2.1 Standard', costUsd: 0.125, blurb: '720p — fastest and cheapest, solid everyday motion' },
   { id: 'kling/v2-1-pro', label: 'Kling 2.1 Pro', costUsd: 0.25, blurb: '1080p — smoother, more realistic motion' },
   { id: 'kling/v2-1-master-image-to-video', label: 'Kling 2.1 Master', costUsd: 0.80, blurb: '1080p — best quality, realistic physics and camera work, priciest' },
+  { id: 'bytedance/seedance-2-fast', label: 'Seedance 2.0 Fast', costUsd: 0.30, blurb: 'Supports first+last frame — animates a clean transition between two chosen images', supportsLastFrame: true },
 ];
 app.get('/api/video-models', (req, res) => {
-  res.json({ models: VIDEO_MODELS.map(m => ({ id: m.id, label: m.label, costUsd: m.costUsd, blurb: m.blurb })) });
+  res.json({ models: VIDEO_MODELS.map(m => ({ id: m.id, label: m.label, costUsd: m.costUsd, blurb: m.blurb, supportsLastFrame: !!m.supportsLastFrame })) });
 });
 
 // ---- KIE.ai credit balance (for the small indicator in the corner of the UI) ----
@@ -453,7 +454,17 @@ app.post('/api/generate-image/start', async (req, res) => {
 // Reuses the exact same task store, webhook, and status-check machinery as image
 // generation above — applyTaskResult just extracts whatever URL comes back, regardless of
 // whether it's an image or a video, so nothing there needed to change.
-function buildVideoInputFor(imageUrl, prompt, duration) {
+function buildVideoInputFor(imageUrl, prompt, duration, lastFrameImageUrl) {
+  if (lastFrameImageUrl) {
+    // Seedance's first+last-frame mode — different field names from the plain single-image
+    // shape the rest of our models use.
+    return {
+      prompt,
+      first_frame_url: imageUrl,
+      last_frame_url: lastFrameImageUrl,
+      duration: String(duration || 5),
+    };
+  }
   return {
     prompt,
     image_url: imageUrl,
@@ -466,7 +477,7 @@ app.post('/api/generate-video/start', async (req, res) => {
   if (!KIE_API_KEY) {
     return res.status(503).json({ error: 'not_configured', message: 'KIE_API_KEY is not set on the server yet.' });
   }
-  const { prompt, imageUrl, duration, model, meta } = req.body || {};
+  const { prompt, imageUrl, lastFrameImageUrl, duration, model, meta } = req.body || {};
   if (!prompt || typeof prompt !== 'string') {
     return res.status(400).json({ error: 'bad_request', message: 'prompt is required.' });
   }
@@ -474,7 +485,7 @@ app.post('/api/generate-video/start', async (req, res) => {
     return res.status(400).json({ error: 'bad_request', message: 'imageUrl is required — video generation animates an already-generated shot image.' });
   }
   const modelId = (VIDEO_MODELS.find(m => m.id === model) || VIDEO_MODELS[0]).id;
-  const input = buildVideoInputFor(imageUrl, prompt, duration);
+  const input = buildVideoInputFor(imageUrl, prompt, duration, lastFrameImageUrl);
   const callBackUrl = PUBLIC_URL ? PUBLIC_URL + '/api/webhook/kie' : undefined;
 
   try {

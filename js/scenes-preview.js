@@ -447,10 +447,16 @@ function renderInspectorPanel(){
         </label>
         <input type="text" id="shotLightInput" placeholder="e.g. low key, back light, blue rim" value="${sameAsScene ? (scene.lighting||'') : (shot.lighting||'')}" ${sameAsScene ? 'disabled' : ''}>
       </div>
-      <div class="cf-field"><label>Description <span style="color:var(--text-3);font-weight:400;">— prompt for AI generation</span></label>
+      <div class="cf-field"><label>${shot.seedanceMode ? 'First frame' : 'Description'} <span style="color:var(--text-3);font-weight:400;">— prompt for AI generation</span></label>
         <textarea id="shotDescInput" style="min-height:90px;" placeholder="Describe exactly what should happen in this shot...">${shot.description||''}</textarea>
         <button class="cf-btn ai-assist-btn" id="shotDescAssistBtn" style="width:100%;margin-top:6px;display:none;">✨ Improve with AI</button>
       </div>
+      ${shot.seedanceMode ? `
+      <div class="cf-field"><label>Last frame <span style="color:var(--text-3);font-weight:400;">— prompt for AI generation</span></label>
+        <textarea id="shotLastFrameDescInput" style="min-height:90px;" placeholder="Describe how this shot should end...">${shot.lastFrameDescription||''}</textarea>
+        <button class="cf-btn ai-assist-btn" id="shotLastFrameAssistBtn" style="width:100%;margin-top:6px;display:none;">✨ Improve with AI</button>
+      </div>` : ''}
+      <button class="cf-btn" id="shotSeedanceToggleBtn" style="width:100%;margin-top:4px;">${shot.seedanceMode ? 'Back to single frame' : 'Convert to Seedance 2 frame'}</button>
 
       <div class="gen-section" id="shotGenSection"></div>
     </div>`;
@@ -461,6 +467,20 @@ function renderInspectorPanel(){
     + 'Rewrite this rough shot idea into a vivid, specific, camera-ready visual description for an AI image generator. One or two sentences, concrete imagery, no camera-move or shot-size talk (that\'s handled separately). Reply with only the rewritten description, nothing else.',
     (result)=>{ shot.description = result; });
   if(typeof wireTagAutocomplete==='function') wireTagAutocomplete('shotDescInput');
+  if(shot.seedanceMode){
+    wireAiAssistButton('shotLastFrameAssistBtn', 'shotLastFrameDescInput',
+      (buildShotFixedElementsContext(scene) ? buildShotFixedElementsContext(scene) + '\n\n' : '')
+      + 'Rewrite this rough idea into a vivid, specific, camera-ready visual description for an AI image generator, describing how this shot should look at its very END (the last frame of a first-to-last-frame video). One or two sentences, concrete imagery, no camera-move or shot-size talk. Reply with only the rewritten description, nothing else.',
+      (result)=>{ shot.lastFrameDescription = result; });
+    if(typeof wireTagAutocomplete==='function') wireTagAutocomplete('shotLastFrameDescInput');
+    document.getElementById('shotLastFrameDescInput').addEventListener('input', (e)=>{ shot.lastFrameDescription = e.target.value; if(typeof saveProjectSoon==='function') saveProjectSoon(); });
+  }
+  document.getElementById('shotSeedanceToggleBtn').onclick = ()=>{
+    shot.seedanceMode = !shot.seedanceMode; // toggling off just hides the last-frame field — the text itself is kept, not cleared
+    renderInspectorPanel();
+    renderTimelineScenes();
+    if(typeof saveProjectSoon==='function') saveProjectSoon();
+  };
 
   document.getElementById('jumpToSceneBtn').onclick = ()=> setFocus(scene.id, null);
   document.getElementById('shotNameInput').addEventListener('input', (e)=>{
@@ -546,14 +566,30 @@ function runShotGeneration(scene, shot){
 // DaVinci's render queue: stack up jobs, then render (one, several, or all).
 function queueShotGeneration(scene, shot){
   state.taskQueue = state.taskQueue || [];
-  state.taskQueue.push({
-    id: 'dt' + (draftTaskSeq++),
-    kind: 'shot',
-    sceneId: scene.id, shotId: shot.id,
-    sceneName: scene.name, shotName: shot.name,
-    model: (modelOptions[0] && modelOptions[0].id) || null,
-    createdAt: Date.now(),
-  });
+  if(shot.seedanceMode){
+    // Two separate drafts — the director may like the first frame but want to reroll the
+    // last one (or vice versa), so they need independent review/regeneration, not a single
+    // bundled result.
+    state.taskQueue.push({
+      id: 'dt' + (draftTaskSeq++), kind: 'shot', field: 'first',
+      sceneId: scene.id, shotId: shot.id, sceneName: scene.name, shotName: shot.name + ' (first frame)',
+      model: (modelOptions[0] && modelOptions[0].id) || null, createdAt: Date.now(),
+    });
+    state.taskQueue.push({
+      id: 'dt' + (draftTaskSeq++), kind: 'shot', field: 'last',
+      sceneId: scene.id, shotId: shot.id, sceneName: scene.name, shotName: shot.name + ' (last frame)',
+      model: (modelOptions[0] && modelOptions[0].id) || null, createdAt: Date.now(),
+    });
+  } else {
+    state.taskQueue.push({
+      id: 'dt' + (draftTaskSeq++),
+      kind: 'shot',
+      sceneId: scene.id, shotId: shot.id,
+      sceneName: scene.name, shotName: shot.name,
+      model: (modelOptions[0] && modelOptions[0].id) || null,
+      createdAt: Date.now(),
+    });
+  }
   if(typeof saveProjectSoon==='function') saveProjectSoon();
   if(typeof renderTasksGrid==='function' && typeof refreshTasks==='function') refreshTasks();
   const slot = document.getElementById('paidGenSlot');
