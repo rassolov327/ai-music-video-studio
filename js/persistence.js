@@ -506,13 +506,13 @@ async function persistRemoteImageAsset(assetKey, remoteUrl, assetsDirHandle){
 }
 async function loadImageAsset(assetKey, fileName, assetsDirHandle){
   if(diskDirHandle){
+    const lookupName = fileName || assetKey.replace(/[:]/g,'_');
     try{
       const assetsDir = assetsDirHandle || await getAssetsDirHandle(false);
-      const lookupName = fileName || assetKey.replace(/[:]/g,'_');
       const fileHandle = await assetsDir.getFileHandle(lookupName);
       const file = await fileHandle.getFile();
       return URL.createObjectURL(file);
-    } catch(err){ console.warn('[ProjectStore] image asset "' + fileName + '" not found on disk, trying browser storage:', err); }
+    } catch(err){ console.warn('[ProjectStore] image asset "' + lookupName + '" not found on disk, trying browser storage:', err); }
   }
   try{
     const blob = await idbGet(STORE_ASSETS, assetKey);

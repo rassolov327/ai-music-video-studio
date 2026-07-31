@@ -40,12 +40,12 @@ function collectProjectAssetRefs(){
   function fromAssetFiles(catKey, itemId, assetFilesMap){
     if(!assetFilesMap) return;
     Object.keys(assetFilesMap).forEach(fieldKey=>{
-      refs.push({ assetKey: pid()+':'+catKey+':'+itemId+':'+fieldKey, exportPath: `assets/${catKey}/${itemId}/${fieldKey}` });
+      refs.push({ assetKey: pid()+':'+catKey+':'+itemId+':'+fieldKey, fileName: assetFilesMap[fieldKey], exportPath: `assets/${catKey}/${itemId}/${fieldKey}` });
     });
   }
   function fromCardSheet(catKey, itemId, item){
     if(item.card && item.card.images && item.card.images.sheet && item.card.images.sheet.ok){
-      refs.push({ assetKey: pid()+':'+catKey+':'+itemId+':cardout:sheet', exportPath: `assets/${catKey}/${itemId}/cardout-sheet` });
+      refs.push({ assetKey: pid()+':'+catKey+':'+itemId+':cardout:sheet', fileName: item.card.images.sheet.assetFile, exportPath: `assets/${catKey}/${itemId}/cardout-sheet` });
     }
   }
 
@@ -62,10 +62,10 @@ function collectProjectAssetRefs(){
   state.scenes.forEach(scene=>{
     (scene.shots||[]).forEach(shot=>{
       if(shot._assetFiles && ('preview' in shot._assetFiles)){
-        refs.push({ assetKey: pid()+':shots:'+shot.id, exportPath: `assets/shots/${shot.id}/preview` });
+        refs.push({ assetKey: pid()+':shots:'+shot.id, fileName: shot._assetFiles.preview, exportPath: `assets/shots/${shot.id}/preview` });
       }
       if(shot._assetFiles && ('video' in shot._assetFiles)){
-        refs.push({ assetKey: pid()+':shots:'+shot.id+':video', exportPath: `assets/shots/${shot.id}/video` });
+        refs.push({ assetKey: pid()+':shots:'+shot.id+':video', fileName: shot._assetFiles.video, exportPath: `assets/shots/${shot.id}/video` });
       }
     });
   });
@@ -216,7 +216,7 @@ async function exportProjectToZip(){
     // Images/video/card sheets — generic catKey/id/fieldKey assets
     const refs = collectProjectAssetRefs();
     for(const ref of refs){
-      const blob = await loadAssetBlobForExport(ref.assetKey);
+      const blob = await loadAssetBlobForExport(ref.assetKey, ref.fileName);
       if(blob) zip.file(ref.exportPath + extFromBlobType(blob.type), blob);
     }
 
