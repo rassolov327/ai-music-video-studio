@@ -40,7 +40,6 @@ function collectProjectAssetRefs(){
   function fromAssetFiles(catKey, itemId, assetFilesMap){
     if(!assetFilesMap) return;
     Object.keys(assetFilesMap).forEach(fieldKey=>{
-      if(!assetFilesMap[fieldKey]) return;
       refs.push({ assetKey: pid()+':'+catKey+':'+itemId+':'+fieldKey, exportPath: `assets/${catKey}/${itemId}/${fieldKey}` });
     });
   }
