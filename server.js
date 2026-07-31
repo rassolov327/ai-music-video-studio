@@ -170,6 +170,10 @@ const MODELS = [
   { id: 'nano-banana-2', label: 'Nano Banana 2', supportsAspectRatio: true, supportsResolution: true, supportsReferenceImage: true, costUsd: 0.05 },
   { id: 'ideogram/character', label: 'Ideogram Character', supportsReferenceImage: true, referenceImageField: 'reference_image_urls', costUsd: 0.06 },
   { id: 'gpt-image-2-text-to-image', label: 'GPT Image 2', supportsAspectRatio: true, supportsReferenceImage: true, costUsd: 0.04, imageToImageId: 'gpt-image-2-image-to-image', referenceImageField: 'input_urls' },
+  // Model id inferred from Seedream 5.0 Lite's confirmed naming pattern (seedream/5-lite-*)
+  // — docs.kie.ai's own model list confirms a Pro text-to-image and image-to-image pair
+  // exist, but no literal request example for Pro specifically was found to copy exactly.
+  { id: 'seedream/5-pro-text-to-image', label: 'Seedream 5.0 Pro', supportsAspectRatio: true, supportsReferenceImage: true, costUsd: 0.06, imageToImageId: 'seedream/5-pro-image-to-image', referenceImageField: 'image_urls' },
 ];
 // ---- Script tab: breaks a pasted script into a structured scenes/characters/locations/
 // props/looks proposal. Uses Gemini's own JSON response mode (responseMimeType +
