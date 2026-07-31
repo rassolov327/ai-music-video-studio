@@ -886,6 +886,19 @@
   }
   .credits-spinner.hidden{display:none;}
 
+  .bg-status-indicator{
+    position:fixed;left:12px;bottom:12px;z-index:900;
+    display:flex;align-items:center;gap:7px;
+    background:var(--bg-panel);border:1px solid var(--line);border-radius:14px;
+    padding:5px 11px;font-size:11px;font-family:var(--font-mono);color:var(--text-2);
+    box-shadow:0 2px 8px rgba(0,0,0,.25);
+  }
+  .bg-status-indicator.hidden{display:none;}
+  .bg-status-spinner{
+    width:10px;height:10px;border-radius:50%;border:1.5px solid var(--line);border-top-color:var(--accent);
+    animation:taskspin .7s linear infinite;flex:0 0 auto;
+  }
+
   /* ---- Character Card builder ---- */
   .card-output-grid{
     display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px;

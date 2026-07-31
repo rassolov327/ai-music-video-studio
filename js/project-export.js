@@ -203,9 +203,21 @@ async function importProjectFromZip(file){
 }
 
 
+function showBgStatus(text){
+  const el = document.getElementById('bgStatusIndicator');
+  const textEl = document.getElementById('bgStatusText');
+  if(textEl) textEl.textContent = text;
+  if(el) el.classList.remove('hidden');
+}
+function hideBgStatus(){
+  const el = document.getElementById('bgStatusIndicator');
+  if(el) el.classList.add('hidden');
+}
+
 async function exportProjectToZip(){
   if(!currentProjectId){ alert('Open a project first.'); return; }
   try{
+    showBgStatus('Exporting…');
     await saveProjectNow(); // make sure what's exported matches what's actually on screen
     const JSZip = await ensureJSZipLoaded();
     const zip = new JSZip();
@@ -215,9 +227,12 @@ async function exportProjectToZip(){
 
     // Images/video/card sheets — generic catKey/id/fieldKey assets
     const refs = collectProjectAssetRefs();
-    for(const ref of refs){
+    showBgStatus('Assembling archive — collecting assets (0/' + refs.length + ')…');
+    for(let i=0; i<refs.length; i++){
+      const ref = refs[i];
       const blob = await loadAssetBlobForExport(ref.assetKey, ref.fileName);
       if(blob) zip.file(ref.exportPath + extFromBlobType(blob.type), blob);
+      showBgStatus('Assembling archive — collecting assets (' + (i+1) + '/' + refs.length + ')…');
     }
 
     // Music tracks — separate load path (loadAudioAsset returns the blob directly, no URL step)
@@ -231,6 +246,7 @@ async function exportProjectToZip(){
       }
     }
 
+    showBgStatus('Compressing archive…');
     const zipBlob = await zip.generateAsync({ type:'blob', compression:'DEFLATE', compressionOptions:{ level:6 } });
     const url = URL.createObjectURL(zipBlob);
     const a = document.createElement('a');
@@ -240,8 +256,10 @@ async function exportProjectToZip(){
     a.click();
     a.remove();
     setTimeout(()=> URL.revokeObjectURL(url), 5000);
+    hideBgStatus();
   } catch(err){
     console.error('[export] failed:', err);
+    hideBgStatus();
     alert('Could not export the project: ' + err.message);
   }
 }
