@@ -159,6 +159,13 @@ function assetHasPhoto(t){
 function renderTasksGrid(){
   const grid = document.getElementById('tasksGrid');
   if(!grid) return;
+  // A native <select> closes itself the instant its underlying DOM node is torn down and
+  // rebuilt — which is exactly what a full innerHTML rebuild does. Since this runs on a
+  // periodic timer (every few seconds) as well as on-demand, rebuilding while the user has
+  // one of this grid's dropdowns open/focused would close it out from under them mid-pick.
+  if(document.activeElement && grid.contains(document.activeElement) && document.activeElement.tagName==='SELECT'){
+    return;
+  }
   const entries = getSortedEntries();
   if(entries.length===0){
     grid.innerHTML = `<div class="tasks-empty">No generation tasks yet. Use "Add to Tasks" on a shot, look, location, or prop to queue one — pick a model here and hit Generate whenever you're ready.</div>`;
