@@ -172,8 +172,9 @@ async function importProjectFromZip(file){
           item.card.images.sheet.assetFile = fileName || null;
         }
       } else if(parsed.kind==='field'){
-        const cat = projectJson.categories.find(c=> c.key===parsed.catKey);
-        const item = cat && cat.items.find(x=> x.id===parsed.itemId);
+        const item = parsed.catKey==='archive'
+          ? (projectJson.archive || []).find(x=> x.id===parsed.itemId)
+          : (()=>{ const cat = projectJson.categories.find(c=> c.key===parsed.catKey); return cat && cat.items.find(x=> x.id===parsed.itemId); })();
         if(item){
           item._assetFiles = item._assetFiles || {};
           item._assetFiles[parsed.field] = fileName || true;
