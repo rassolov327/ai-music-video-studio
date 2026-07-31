@@ -234,6 +234,25 @@ function wireNewProjectScreen(){
   };
   document.getElementById('npCloseBtn').onclick = ()=> document.getElementById('npCancelBtn').click();
   document.getElementById('homeNewProjectBtn').onclick = ()=> showNewProjectScreen(true);
+  const importBtn = document.getElementById('homeImportBtn');
+  const importInput = document.getElementById('homeImportInput');
+  const importBtnLabel = document.getElementById('homeImportBtnLabel');
+  if(importBtn && importInput){
+    importBtn.onclick = ()=> importInput.click();
+    importInput.onchange = async ()=>{
+      const file = importInput.files[0];
+      importInput.value = '';
+      if(!file) return;
+      importBtn.disabled = true;
+      if(importBtnLabel) importBtnLabel.textContent = 'Importing…';
+      try{
+        if(typeof importProjectFromZip==='function') await importProjectFromZip(file);
+      } finally {
+        importBtn.disabled = false;
+        if(importBtnLabel) importBtnLabel.textContent = 'Import';
+      }
+    };
+  }
   document.getElementById('npCreateBtn').onclick = async ()=>{
     const name = document.getElementById('npName').value.trim();
     hideNewProjectScreen();
@@ -282,6 +301,8 @@ function wireFileMenu(){
   wireMenuDropdown('menuFileBtn', 'menuFileDropdown', async (action)=>{
     if(action==='save'){
       if(currentProjectId) await saveProjectNow();
+    } else if(action==='export'){
+      if(typeof exportProjectToZip==='function') await exportProjectToZip();
     } else if(action==='close'){
       if(currentProjectId) await saveProjectNow();
       pausePlayback();
