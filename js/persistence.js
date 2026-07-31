@@ -182,8 +182,8 @@ async function openProject(id, verbose){
         if(perm === 'granted'){
           diskDirHandle = handle;
         } else {
-          if(verbose) logLoadingStep('Project folder needs permission again.', 'error');
-          const granted = await requestFolderPermissionInteractive(handle);
+          if(verbose) logLoadingStep('This project\'s folder needs permission again — click "Reconnect folder" below.', 'error');
+          const granted = await requestFolderReconnectViaButton(handle);
           if(granted) diskDirHandle = handle;
         }
       } catch(err){}
@@ -217,6 +217,38 @@ async function requestFolderPermissionInteractive(handle){
     const perm = await handle.requestPermission({ mode:'readwrite' });
     return perm === 'granted';
   } catch(err){ return false; }
+}
+
+// Asking for permission again several awaits removed from the original click (reading
+// project meta, reading the stored handle, querying its current permission) is exactly the
+// kind of gap that makes browsers silently refuse the request — no prompt, no error, it
+// just fails as if nothing happened. Showing a real button and waiting for an actual fresh
+// click guarantees the eventual requestPermission() call is a genuine, current user gesture.
+function requestFolderReconnectViaButton(handle){
+  return new Promise((resolve)=>{
+    const btn = document.getElementById('loadingReconnectBtn');
+    if(!btn){ resolve(false); return; }
+    btn.style.display = '';
+    btn.disabled = false;
+    btn.textContent = 'Reconnect folder';
+    btn.onclick = async ()=>{
+      btn.disabled = true;
+      btn.textContent = 'Connecting…';
+      try{
+        const granted = await requestFolderPermissionInteractive(handle);
+        if(granted){
+          btn.style.display = 'none';
+          resolve(true);
+        } else {
+          btn.textContent = 'Permission denied — try again';
+          btn.disabled = false;
+        }
+      } catch(err){
+        btn.textContent = 'Failed — try again';
+        btn.disabled = false;
+      }
+    };
+  });
 }
 
 async function deleteProject(id){
@@ -1370,6 +1402,8 @@ function showLoadingScreen(){
   if(log) log.innerHTML = '';
   const btn = document.getElementById('loadingContinueBtn');
   if(btn) btn.style.display = 'none';
+  const reconnectBtn = document.getElementById('loadingReconnectBtn');
+  if(reconnectBtn) reconnectBtn.style.display = 'none';
 }
 function finishLoadingScreen(hadErrors){
   const btn = document.getElementById('loadingContinueBtn');
