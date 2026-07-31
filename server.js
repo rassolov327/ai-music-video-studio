@@ -167,6 +167,9 @@ const MODELS = [
   { id: 'gpt-image/1.5-text-to-image', label: 'GPT-Image 1.5', supportsAspectRatio: true, supportsQuality: true, costUsd: 0.03 },
   { id: 'qwen2/text-to-image', label: 'Qwen2', supportsImageSize: true, costUsd: 0.02 },
   { id: 'nano-banana-pro', label: 'Nano Banana Pro', supportsAspectRatio: true, supportsResolution: true, supportsReferenceImage: true, costUsd: 0.04 },
+  { id: 'nano-banana-2', label: 'Nano Banana 2', supportsAspectRatio: true, supportsResolution: true, supportsReferenceImage: true, costUsd: 0.05 },
+  { id: 'ideogram/character', label: 'Ideogram Character', supportsReferenceImage: true, referenceImageField: 'reference_image_urls', costUsd: 0.06 },
+  { id: 'gpt-image-2-text-to-image', label: 'GPT Image 2', supportsAspectRatio: true, supportsReferenceImage: true, costUsd: 0.04, imageToImageId: 'gpt-image-2-image-to-image', referenceImageField: 'input_urls' },
 ];
 // ---- Script tab: breaks a pasted script into a structured scenes/characters/locations/
 // props/looks proposal. Uses Gemini's own JSON response mode (responseMimeType +
@@ -359,10 +362,20 @@ function buildInputFor(modelId, prompt, width, height, referenceImageUrl) {
   else if (model.supportsAspectRatio) input.aspect_ratio = ratio;
   if (model.supportsQuality) input.quality = 'high';
   if (model.supportsResolution) input.resolution = '2K';
+  let actualModelId = modelId;
   if (model.supportsReferenceImage && referenceImageUrl) {
-    input.image_input = Array.isArray(referenceImageUrl) ? referenceImageUrl.filter(Boolean) : [referenceImageUrl];
+    const urls = Array.isArray(referenceImageUrl) ? referenceImageUrl.filter(Boolean) : [referenceImageUrl];
+    const field = model.referenceImageField || 'image_input';
+    // gpt-image-2 has no single "reference or not" switch on one model id — using a
+    // reference means sending the request to its separate image-to-image model entirely.
+    if (model.imageToImageId) {
+      actualModelId = model.imageToImageId;
+      input[field] = urls;
+    } else {
+      input[field] = urls;
+    }
   }
-  return input;
+  return { modelId: actualModelId, input };
 }
 
 // ---- reference image upload — for generating a location/prop from a real photo of it ----
@@ -416,11 +429,13 @@ app.post('/api/generate-image/start', async (req, res) => {
     return res.status(400).json({ error: 'bad_request', message: 'prompt is required.' });
   }
   const modelId = (MODELS.find(m => m.id === model) || MODELS[0]).id;
-  const input = buildInputFor(modelId, prompt, width, height, referenceImageUrl);
+  const built = buildInputFor(modelId, prompt, width, height, referenceImageUrl);
+  const actualModelId = built.modelId;
+  const input = built.input;
   const callBackUrl = PUBLIC_URL ? PUBLIC_URL + '/api/webhook/kie' : undefined;
 
   try {
-    const body = { model: modelId, input };
+    const body = { model: actualModelId, input };
     if (callBackUrl) body.callBackUrl = callBackUrl;
     const createRes = await fetch(`${KIE_BASE}/api/v1/jobs/createTask`, {
       method: 'POST',
@@ -437,7 +452,7 @@ app.post('/api/generate-image/start', async (req, res) => {
       });
     }
     tasks.set(taskId, {
-      status: 'pending', imageUrl: null, message: null, model: modelId, prompt,
+      status: 'pending', imageUrl: null, message: null, model: actualModelId, prompt,
       meta: meta || {}, createdAt: Date.now(), updatedAt: Date.now(),
     });
     if (!callBackUrl) {
