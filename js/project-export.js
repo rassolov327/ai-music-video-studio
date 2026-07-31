@@ -103,7 +103,8 @@ async function importProjectFromZip(file){
 
     // Ask where this project should live going forward — same choice any disk-backed
     // project already has, just surfaced right at import time instead of as a separate
-    // later step.
+    // later step. Asked before the loading screen since it's an interactive prompt, not
+    // loading work.
     let folderHandle = null;
     if('showDirectoryPicker' in window){
       if(confirm('Choose a folder to save this project to on your disk?\n\nCancel keeps it in browser storage instead (like a normal new project).')){
@@ -112,12 +113,22 @@ async function importProjectFromZip(file){
       }
     }
 
+    // Same screen sequence the normal New Project flow uses — hide the home screen, show
+    // the loading overlay (with step-by-step log, since import genuinely has several
+    // stages), and reveal the finished project the same way at the end. Without this the
+    // import was completing correctly in the background but the home screen just stayed
+    // on screen the whole time, looking like nothing had happened.
+    hideHomeScreen();
+    showLoadingScreen();
+    logLoadingStep('Reading project file…');
+
     // Registers a fresh project (new id, added to the project list).
     await createProject({
       name: (meta.name || 'Imported Project') + ' (imported)',
       format: meta.format, width: meta.width, height: meta.height, fps: meta.fps,
       folderHandle,
     });
+    logLoadingStep('Project created — restoring assets…');
 
     // Write every asset the zip contains — via persistBlobAsset, so it actually respects
     // the disk-vs-browser-storage choice just made — under keys scoped to the NEW
@@ -125,6 +136,7 @@ async function importProjectFromZip(file){
     // mode is used, the resulting filename differs from whatever was recorded in the
     // original export, so each item's own reference gets corrected to match.
     const assetPaths = Object.keys(zip.files).filter(p=> p.startsWith('assets/') && !zip.files[p].dir);
+    let assetsRestored = 0;
     for(const path of assetPaths){
       const parsed = parseAssetExportPath(path);
       if(!parsed) continue;
@@ -140,6 +152,7 @@ async function importProjectFromZip(file){
       if(!key) continue;
 
       const fileName = await persistBlobAsset(key, blob, ext);
+      assetsRestored++;
 
       if(parsed.kind==='music'){
         const musicCat = projectJson.categories.find(c=> c.key==='music');
@@ -167,16 +180,25 @@ async function importProjectFromZip(file){
         }
       }
     }
+    logLoadingStep('Restored ' + assetsRestored + ' asset(s).', 'ok');
 
     // Now that every asset is in place, restore the actual project content the same way
     // opening any saved project already does.
     await applyProjectData(projectJson, true);
     await saveProjectNow();
-    showPage('work');
+    logLoadingStep('Done.', 'ok');
+    finishLoadingScreen(false);
+    updateFolderButton();
     updateProjTitleDisplay();
   } catch(err){
     console.error('[import] failed:', err);
-    alert('Could not import that project: ' + err.message);
+    const loadingScreen = document.getElementById('loadingScreen');
+    if(loadingScreen && !loadingScreen.classList.contains('hidden')){
+      logLoadingStep('Import failed: ' + err.message, 'error');
+      finishLoadingScreen(true);
+    } else {
+      alert('Could not import that project: ' + err.message);
+    }
   }
 }
 
