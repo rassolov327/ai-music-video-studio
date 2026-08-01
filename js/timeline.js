@@ -1,23 +1,33 @@
 // ---------- timeline: scenes ----------
 
-// Renders the lip-sync control for a shot's timeline block. Structured now for all three
-// states the user specified, even though only the neutral "no lip-sync version yet" state
-// is actually reachable before the real generation pipeline (a later stage) exists:
-//  - neutral (gray "Lip-sync"): no shot.lipsyncVideoUrl yet
-//  - "Lip-sync ON" (bright): a lip-sync version exists AND it's the active one
-//  - "Lip-sync OFF" (bright): a lip-sync version exists but the original is active
-// The little arrow next to the button only appears once there's actually a second version
-// to switch to.
+// Renders the lip-sync reserve/release control for a shot's timeline block. This only
+// applies to the photo->singing-performance pipeline (a still image + the song audio
+// under it, sent as one model call) — NOT the older video-resync pipeline, which is kept
+// in the codebase (queueLipsyncGeneration, /api/lipsync/start, etc.) but no longer wired to
+// any button, per the decision to set it aside for now rather than delete it outright.
+// One click both reserves the shot (blocking it from being sent to ANIMATIC) and queues
+// the TASKS draft in the same action; clicking again just releases the reservation — the
+// TASKS draft/result, if any, is left alone rather than being un-queued or deleted.
 function renderLipsyncControl(sceneId, shot){
-  const hasLipsync = !!shot.lipsyncVideoUrl;
-  const isOn = hasLipsync && shot.lipsyncActiveVersion !== 'original';
-  const label = !hasLipsync ? 'Lip-sync' : (isOn ? 'Lip-sync ON' : 'Lip-sync OFF');
-  const stateClass = !hasLipsync ? '' : (isOn ? ' on' : ' off');
+  const reserved = !!shot.lipsyncReserved;
   return `
     <div class="shot-lipsync-wrap">
-      <button class="shot-lipsync-btn${stateClass}" data-lipsync-shot="${sceneId}|${shot.id}">${label}</button>
-      ${hasLipsync ? `<button class="shot-lipsync-arrow" data-lipsync-arrow="${sceneId}|${shot.id}" title="Toggle lip-sync on/off"><svg viewBox="0 0 20 12" width="14" height="9" fill="none"><rect x="0.5" y="0.5" width="19" height="11" rx="5.5" fill="currentColor" fill-opacity="${isOn?0.9:0.35}" stroke="currentColor" stroke-opacity="0.6"></rect><circle cx="${isOn?14:6}" cy="6" r="4" fill="#12141a"></circle></svg></button>` : ''}
+      <button class="shot-lipsync-btn${reserved ? ' on' : ''}" data-lipsync-toggle="${sceneId}|${shot.id}" title="${reserved ? 'Reserved for lip-sync — click the switch to release it' : 'Reserve this shot for lip-sync (sends to TASKS)'}">Lip-sync</button>
+      <button class="shot-lipsync-arrow" data-lipsync-toggle="${sceneId}|${shot.id}" title="${reserved ? 'Release — allow sending to Animatic again' : 'Reserve for lip-sync'}"><svg viewBox="0 0 20 12" width="14" height="9" fill="none"><rect x="0.5" y="0.5" width="19" height="11" rx="5.5" fill="currentColor" fill-opacity="${reserved?0.9:0.35}" stroke="currentColor" stroke-opacity="0.6"></rect><circle cx="${reserved?14:6}" cy="6" r="4" fill="#12141a"></circle></svg></button>
     </div>`;
+}
+function toggleLipsyncReservation(sceneId, shotId){
+  const scene = state.scenes.find(s=> s.id===sceneId);
+  const shot = scene && scene.shots.find(sh=> sh.id===shotId);
+  if(!scene || !shot) return;
+  if(shot.lipsyncReserved){
+    shot.lipsyncReserved = false;
+  } else {
+    shot.lipsyncReserved = true;
+    if(typeof queuePhotoLipsyncGeneration==='function') queuePhotoLipsyncGeneration(scene, shot);
+  }
+  renderTimelineScenes();
+  if(typeof saveProjectSoon==='function') saveProjectSoon();
 }
 
 function addScene(){
@@ -153,7 +163,7 @@ function renderAssemblyModeTrack(){
           <div class="shot-thumb${isFocused?' focused':''}" data-anchor data-scene="${scene.id}" data-shot="${shot.id}" style="${thumbBg}width:${wpx}px;flex-basis:${wpx}px;">
             ${shot.previewImage ? `<img src="${shot.previewImage}">` : ''}
             ${shot.videoUrl ? `<div class="shot-thumb-animated-badge" title="Animated"><svg viewBox="0 0 24 24" width="9" height="9" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg></div>` : ''}
-            ${shot.videoUrl && typeof getActiveTrack==='function' && getActiveTrack() ? renderLipsyncControl(scene.id, shot) : ''}
+            ${shot.previewImage && !shot.videoUrl && typeof getActiveTrack==='function' && getActiveTrack() ? renderLipsyncControl(scene.id, shot) : ''}
             <div class="shot-trim left" data-trim="${scene.id}|${shot.id}|left" title="Drag to trim"></div>
             <div class="shot-trim right" data-trim="${scene.id}|${shot.id}|right" title="Drag to trim"></div>
             <div class="block-rename" data-rename-btn-shot="${scene.id}|${shot.id}" title="Rename">${pencilSvg(9)}</div>
@@ -195,7 +205,7 @@ function renderEditModeTrack(){
              style="${thumbBg}border-bottom:3px solid ${col.dot};position:absolute;left:${x}px;top:0;width:${wpx}px;height:100%;">
           ${shot.previewImage ? `<img src="${shot.previewImage}">` : ''}
           ${shot.videoUrl ? `<div class="shot-thumb-animated-badge" title="Animated"><svg viewBox="0 0 24 24" width="9" height="9" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg></div>` : ''}
-          ${shot.videoUrl && typeof getActiveTrack==='function' && getActiveTrack() ? renderLipsyncControl(scene.id, shot) : ''}
+          ${shot.previewImage && !shot.videoUrl && typeof getActiveTrack==='function' && getActiveTrack() ? renderLipsyncControl(scene.id, shot) : ''}
           <div class="shot-trim left" data-trim="${scene.id}|${shot.id}|left" title="Drag to trim"></div>
           <div class="shot-trim right" data-trim="${scene.id}|${shot.id}|right" title="Drag to trim"></div>
           <div class="block-rename" data-rename-btn-shot="${scene.id}|${shot.id}" title="Rename">${pencilSvg(9)}</div>
@@ -308,25 +318,11 @@ function wireCommonTimelineHandlers(){
       if(label) startRenameShot(sid, shid, label);
     };
   });
-  timelineScenesEl.querySelectorAll('[data-lipsync-shot]').forEach(el=>{
+  timelineScenesEl.querySelectorAll('[data-lipsync-toggle]').forEach(el=>{
     el.onclick = (e)=>{
       e.stopPropagation();
-      const [sid, shid] = el.dataset.lipsyncShot.split('|');
-      const scene = state.scenes.find(s=> s.id===sid);
-      const shot = scene && scene.shots.find(sh=> sh.id===shid);
-      if(scene && shot && typeof queueLipsyncGeneration==='function') queueLipsyncGeneration(scene, shot);
-    };
-  });
-  timelineScenesEl.querySelectorAll('[data-lipsync-arrow]').forEach(el=>{
-    el.onclick = (e)=>{
-      e.stopPropagation();
-      const [sid, shid] = el.dataset.lipsyncArrow.split('|');
-      const scene = state.scenes.find(s=> s.id===sid);
-      const shot = scene && scene.shots.find(sh=> sh.id===shid);
-      if(!shot || !shot.lipsyncVideoUrl) return;
-      shot.lipsyncActiveVersion = (shot.lipsyncActiveVersion==='original') ? 'lipsync' : 'original';
-      renderTimelineScenes();
-      if(typeof saveProjectSoon==='function') saveProjectSoon();
+      const [sid, shid] = el.dataset.lipsyncToggle.split('|');
+      toggleLipsyncReservation(sid, shid);
     };
   });
   timelineScenesEl.querySelectorAll('.shot-thumb').forEach(el=>{

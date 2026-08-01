@@ -404,6 +404,67 @@ app.post('/api/lipsync/start', async (req, res) => {
   }
 });
 
+// ---- photo -> singing-performance models (image + song audio -> one finished video) ----
+// Chosen over the video-resync path above after real-world quality testing — see the
+// research discussion; OmniHuman's fields are confirmed directly from its own KIE page
+// (kie.ai/omnihuman-1-5). Kling Avatar's exact field names weren't found as a literal
+// example anywhere — inferred from the same image_url/audio_url convention every other
+// verified KIE model uses, and its model id from docs.kie.ai's own listing ("Kling AI
+// Avatar Standard") via the same slug pattern as our other Kling models. Lower confidence
+// than OmniHuman; the first real attempt is the actual confirmation, same pattern as
+// every other inferred model id so far.
+const PHOTO_LIPSYNC_MODELS = [
+  { id: 'bytedance/omnihuman-v1-5', label: 'OmniHuman 1.5', costUsd: 0.80, blurb: 'Built specifically for singing — captures musical phrasing and pauses, not just phoneme-level lip sync', provider: 'omnihuman' },
+  { id: 'kling/ai-avatar-standard', label: 'Kling AI Avatar (Standard)', costUsd: 0.45, blurb: 'Cheaper alternative — independent side-by-side tests rated it behind OmniHuman for singing specifically, but it is faster and less costly', provider: 'kling-avatar' },
+];
+app.get('/api/photo-lipsync-models', (req, res) => {
+  res.json({ models: PHOTO_LIPSYNC_MODELS.map(m => ({ id: m.id, label: m.label, costUsd: m.costUsd, blurb: m.blurb })) });
+});
+app.post('/api/photo-lipsync/start', async (req, res) => {
+  if (!KIE_API_KEY) {
+    return res.status(503).json({ error: 'not_configured', message: 'KIE_API_KEY is not set on the server yet.' });
+  }
+  const { imageUrl, audioUrl, model, meta } = req.body || {};
+  if (!imageUrl || !audioUrl) {
+    return res.status(400).json({ error: 'bad_request', message: 'imageUrl and audioUrl are both required.' });
+  }
+  const matched = PHOTO_LIPSYNC_MODELS.find(m => m.id === model) || PHOTO_LIPSYNC_MODELS[0];
+  const input = matched.provider === 'omnihuman'
+    ? { image_url: imageUrl, audio_url: audioUrl, resolution: 1080 }
+    : { image_url: imageUrl, audio_url: audioUrl };
+  const callBackUrl = PUBLIC_URL ? PUBLIC_URL + '/api/webhook/kie' : undefined;
+
+  try {
+    const body = { model: matched.id, input };
+    if (callBackUrl) body.callBackUrl = callBackUrl;
+    const createRes = await fetch(`${KIE_BASE}/api/v1/jobs/createTask`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${KIE_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const createData = await createRes.json().catch(() => null);
+    console.log('[server] create photo-lipsync task (' + matched.id + '):', JSON.stringify(createData));
+    const taskId = createData && createData.data && createData.data.taskId;
+    if (!createRes.ok || !taskId) {
+      return res.status(502).json({
+        error: 'provider_error',
+        message: (createData && createData.msg) || ('KIE.ai rejected the request (HTTP ' + createRes.status + ').'),
+      });
+    }
+    tasks.set(taskId, {
+      status: 'pending', imageUrl: null, message: null, model: matched.id, prompt: '', isVideo: true,
+      meta: meta || {}, createdAt: Date.now(), updatedAt: Date.now(),
+    });
+    if (!callBackUrl) {
+      console.warn('[server] no PUBLIC_URL known — this task will rely entirely on the polling fallback.');
+    }
+    return res.json({ taskId });
+  } catch (err) {
+    console.error('[server] /api/photo-lipsync/start failed:', err);
+    return res.status(500).json({ error: 'server_error', message: String(err && err.message || err) });
+  }
+});
+
 // ---- KIE.ai credit balance (for the small indicator in the corner of the UI) ----
 const KIE_CREDIT_USD = 0.005; // KIE's own published rate — see docs.kie.ai
 app.get('/api/kie-credits', async (req, res) => {

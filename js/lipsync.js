@@ -1,6 +1,39 @@
 // ---------- Lip-sync: audio segment extraction (stage 2) ----------
 
-let lipsyncModelOptions = []; // [{id, label, costUsd, blurb}]
+let photoLipsyncModelOptions = []; // [{id, label, costUsd, blurb}]
+async function loadPhotoLipsyncModelList(){
+  try{
+    const res = await fetch('/api/photo-lipsync-models');
+    const data = await res.json();
+    photoLipsyncModelOptions = (data && data.models) || [];
+  } catch(err){
+    photoLipsyncModelOptions = [];
+  }
+}
+function photoLipsyncModelSelectHtml(selectedId){
+  const fallback = photoLipsyncModelOptions[0] && photoLipsyncModelOptions[0].id;
+  const opts = photoLipsyncModelOptions.map(m=>
+    `<option value="${m.id}" title="${m.blurb || ''}" ${m.id===(selectedId||fallback)?'selected':''}>${m.label}${m.costUsd?' — '+formatCost(m.costUsd):''}</option>`
+  ).join('');
+  return `<select class="task-tile-model-select">${opts || '<option>No model available</option>'}</select>`;
+}
+
+// Real entry point for the photo->singing pipeline — called the instant the timeline
+// toggle is switched on (queuing happens together with reserving, per the agreed design,
+// not as a separate step). Both models are queued as the SAME draft's dropdown choices —
+// the user has already narrowed candidates to these two, no need for a separate pick step
+// here beyond the one already in the TASKS tile itself.
+function queuePhotoLipsyncGeneration(scene, shot){
+  state.taskQueue = state.taskQueue || [];
+  state.taskQueue.push({
+    id: 'dt' + (draftTaskSeq++), kind: 'photo-lipsync',
+    sceneId: scene.id, shotId: shot.id, sceneName: scene.name, shotName: shot.name,
+    model: (photoLipsyncModelOptions[0] && photoLipsyncModelOptions[0].id) || null,
+    createdAt: Date.now(),
+  });
+  if(typeof saveProjectSoon==='function') saveProjectSoon();
+  if(typeof refreshTasks==='function') refreshTasks();
+}
 async function loadLipsyncModelList(){
   try{
     const res = await fetch('/api/lipsync-models');

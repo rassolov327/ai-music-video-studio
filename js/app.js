@@ -20,6 +20,7 @@ function goHome(){
   wireMoviePage();
   loadVideoModelList();
   loadLipsyncModelList();
+  loadPhotoLipsyncModelList();
   wireGeminiChat();
   wireScriptPage();
   wireAiGeneratorModal();

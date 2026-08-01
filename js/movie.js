@@ -75,9 +75,10 @@ function renderMovieGrid(){
             <button class="movie-motion-edit-btn" data-shot-id="${shot.id}" title="Edit motion prompt">${shot.motionPrompt ? '✏️' : (shot._motionPromptPending ? '<span class="movie-motion-spinner"></span>' : '✏️')}</button>
           </div>
           ${shot.seedanceMode && !shot.lastFrameImage ? '<div class="gen-hint" style="color:var(--danger);">Last frame not generated yet — needed before this can animate.</div>' : ''}
+          ${shot.lipsyncReserved ? '<div class="gen-hint" style="color:var(--danger);">Reserved for lip-sync — release it on the timeline to animate normally.</div>' : ''}
           ${videoModelSelectHtml(modelId, shot.seedanceMode)}
           ${blurb ? `<div class="gen-hint" style="margin-top:4px;">${blurb}</div>` : ''}
-          <button class="cf-btn primary movie-tile-send-btn" style="width:100%;margin-top:8px;" ${shot.seedanceMode && !shot.lastFrameImage ? 'disabled' : ''}>${isAnimated ? 'Re-animate' : 'Animate'}${model ? ' — ' + formatCost(model.costUsd) : ''}</button>
+          <button class="cf-btn primary movie-tile-send-btn" style="width:100%;margin-top:8px;" ${(shot.seedanceMode && !shot.lastFrameImage) || shot.lipsyncReserved ? 'disabled' : ''}>${isAnimated ? 'Re-animate' : 'Animate'}${model ? ' — ' + formatCost(model.costUsd) : ''}</button>
         </div>
       </div>`;
   }).join('');
@@ -223,6 +224,10 @@ async function sendMovieShot(shotId){
   const found = collectAnimatableShots().find(x=> x.shot.id===shotId);
   if(!found) return;
   const { scene, shot } = found;
+  if(shot.lipsyncReserved){
+    alert('This shot is reserved for lip-sync — release it on the timeline first if you want to animate it normally.');
+    return;
+  }
   const tile = document.querySelector('#movieGrid .task-tile[data-shot-id="' + shotId + '"]');
   const btn = tile ? tile.querySelector('.movie-tile-send-btn') : null;
   if(btn){ btn.disabled = true; btn.textContent = 'Sending…'; }
