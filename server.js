@@ -321,6 +321,66 @@ app.get('/api/video-models', (req, res) => {
   res.json({ models: VIDEO_MODELS.map(m => ({ id: m.id, label: m.label, costUsd: m.costUsd, blurb: m.blurb, supportsLastFrame: !!m.supportsLastFrame })) });
 });
 
+// ---- lip-sync models — separate list since these take video+audio, not prompt+image ----
+// Model id is a best inference (matches the URL-slug convention every other multi-word KIE
+// model page follows, e.g. "Kling-3.0 motion-control" -> "kling-3.0/motion-control") — no
+// literal request example was found on docs.kie.ai itself for this one specifically, only
+// through a third-party reseller using its own internal naming. Flagged as lower-confidence
+// than our other models; the first real call here is the actual confirmation.
+const LIPSYNC_MODELS = [
+  { id: 'volcengine/video-to-video-lip-sync', label: 'Volcengine Video-to-Video Lip Sync', costUsd: 0.20, blurb: 'Syncs mouth movement to any audio, with built-in vocal separation for singing over a full music mix' },
+];
+app.get('/api/lipsync-models', (req, res) => {
+  res.json({ models: LIPSYNC_MODELS.map(m => ({ id: m.id, label: m.label, costUsd: m.costUsd, blurb: m.blurb })) });
+});
+app.post('/api/lipsync/start', async (req, res) => {
+  if (!KIE_API_KEY) {
+    return res.status(503).json({ error: 'not_configured', message: 'KIE_API_KEY is not set on the server yet.' });
+  }
+  const { videoUrl, audioUrl, model, meta } = req.body || {};
+  if (!videoUrl || !audioUrl) {
+    return res.status(400).json({ error: 'bad_request', message: 'videoUrl and audioUrl are both required.' });
+  }
+  const modelId = (LIPSYNC_MODELS.find(m => m.id === model) || LIPSYNC_MODELS[0]).id;
+  const input = {
+    source_video_url: videoUrl,
+    source_audio_url: audioUrl,
+    mode: 'lite',
+    enable_vocal_separation: true, // isolates the singer's voice from the instrumental mix before syncing
+  };
+  const callBackUrl = PUBLIC_URL ? PUBLIC_URL + '/api/webhook/kie' : undefined;
+
+  try {
+    const body = { model: modelId, input };
+    if (callBackUrl) body.callBackUrl = callBackUrl;
+    const createRes = await fetch(`${KIE_BASE}/api/v1/jobs/createTask`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${KIE_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const createData = await createRes.json().catch(() => null);
+    console.log('[server] create lip-sync task (' + modelId + '):', JSON.stringify(createData));
+    const taskId = createData && createData.data && createData.data.taskId;
+    if (!createRes.ok || !taskId) {
+      return res.status(502).json({
+        error: 'provider_error',
+        message: (createData && createData.msg) || ('KIE.ai rejected the request (HTTP ' + createRes.status + ').'),
+      });
+    }
+    tasks.set(taskId, {
+      status: 'pending', imageUrl: null, message: null, model: modelId, prompt: '', isVideo: true,
+      meta: meta || {}, createdAt: Date.now(), updatedAt: Date.now(),
+    });
+    if (!callBackUrl) {
+      console.warn('[server] no PUBLIC_URL known — this task will rely entirely on the polling fallback.');
+    }
+    return res.json({ taskId });
+  } catch (err) {
+    console.error('[server] /api/lipsync/start failed:', err);
+    return res.status(500).json({ error: 'server_error', message: String(err && err.message || err) });
+  }
+});
+
 // ---- KIE.ai credit balance (for the small indicator in the corner of the UI) ----
 const KIE_CREDIT_USD = 0.005; // KIE's own published rate — see docs.kie.ai
 app.get('/api/kie-credits', async (req, res) => {

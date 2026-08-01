@@ -312,7 +312,9 @@ function wireCommonTimelineHandlers(){
     el.onclick = (e)=>{
       e.stopPropagation();
       const [sid, shid] = el.dataset.lipsyncShot.split('|');
-      testExtractShotAudioSegment(sid, shid);
+      const scene = state.scenes.find(s=> s.id===sid);
+      const shot = scene && scene.shots.find(sh=> sh.id===shid);
+      if(scene && shot && typeof queueLipsyncGeneration==='function') queueLipsyncGeneration(scene, shot);
     };
   });
   timelineScenesEl.querySelectorAll('[data-lipsync-arrow]').forEach(el=>{

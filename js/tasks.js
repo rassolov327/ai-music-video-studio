@@ -111,6 +111,7 @@ function modelSelectHtml(selectedId, extraClass, onlyReferenceCapable){
 
 // Draft display labels — shots show "Scene / Shot", asset drafts show "Kind / Name".
 function draftTitleLines(t){
+  if(t.kind==='lipsync') return [t.sceneName || 'Scene', (t.shotName || 'Shot') + ' (lip-sync)'];
   if(t.kind==='shot') return [t.sceneName || 'Scene', t.shotName || 'Shot'];
   if(t.kind==='archive-derive') return ['New idea', t.assetName || ''];
   const kindLabel = t.kind==='looks' ? 'Look' : t.kind==='locations' ? 'Location' : t.kind==='props' ? 'Prop' : 'Asset';
@@ -182,7 +183,7 @@ function renderTasksGrid(){
       const t = entry.data;
       const selected = selectedDraftIds.has(t.id);
       const [line1, line2] = draftTitleLines(t);
-      const model = modelById(t.model);
+      const model = t.kind==='lipsync' ? (lipsyncModelOptions.find(m=> m.id===t.model) || lipsyncModelOptions[0] || null) : modelById(t.model);
       const hasPhoto = assetHasPhoto(t);
       const willUseRef = hasPhoto && model && model.supportsReferenceImage;
       const refSourceLabel = t.kind==='shot' ? 'the scene\'s assigned character (and look)' : 'the uploaded photo';
@@ -203,7 +204,7 @@ function renderTasksGrid(){
           <div class="task-tile-body">
             <div class="task-tile-scene">${line1}</div>
             <div class="task-tile-shot">${line2}</div>
-            ${modelSelectHtml(t.model || (modelOptions[0] && modelOptions[0].id), 'task-tile-model-select', t.kind==='archive-derive')}
+            ${t.kind==='lipsync' ? lipsyncModelSelectHtml(t.model) : modelSelectHtml(t.model || (modelOptions[0] && modelOptions[0].id), 'task-tile-model-select', t.kind==='archive-derive')}
             ${refHint}
             ${noRefModelAvailable ? '<div class="gen-hint" style="margin-top:6px;color:var(--danger);">No connected model supports reference images yet — can\'t generate this.</div>' : ''}
             <button class="cf-btn primary task-tile-send-btn" style="width:100%;margin-top:8px;" ${noRefModelAvailable?'disabled':''}>Generate${model && model.costUsd ? ' — ' + formatCost(model.costUsd) : ''}</button>
@@ -393,6 +394,35 @@ async function sendGenerationTask(draft){
   const meta = state.projectMeta || { width:1920, height:1080 };
   let prompt, taskMeta, referenceImageUrl;
 
+  if(draft.kind==='lipsync'){
+    const scene = state.scenes.find(s=> s.id===draft.sceneId);
+    const shot = scene && scene.shots.find(sh=> sh.id===draft.shotId);
+    if(!scene || !shot) throw new Error('This shot no longer exists.');
+    if(!shot.videoUrl) throw new Error('This shot needs to be animated first.');
+    const track = typeof getActiveTrack==='function' ? getActiveTrack() : null;
+    if(!track) throw new Error('No music track on the timeline to sync to.');
+
+    const audioBlob = await extractShotAudioSegment(scene, shot, (msg)=> console.log('[lipsync]', msg));
+    const audioBlobUrl = URL.createObjectURL(audioBlob);
+    const [videoUrl, audioUrl] = await Promise.all([
+      uploadReferencePhoto(shot.videoUrl),
+      uploadReferencePhoto(audioBlobUrl),
+    ]);
+    URL.revokeObjectURL(audioBlobUrl);
+    if(!videoUrl || !audioUrl) throw new Error('Could not upload the video/audio for lip-sync.');
+
+    const lipsyncTaskMeta = { projectId: currentProjectId, kind:'lipsync', sceneId: scene.id, sceneName: scene.name, shotId: shot.id, shotName: shot.name };
+    const res = await fetch('/api/lipsync/start', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ videoUrl, audioUrl, model: draft.model, meta: lipsyncTaskMeta }),
+    });
+    const data = await res.json().catch(()=> null);
+    if(!res.ok || !data || !data.taskId){
+      throw new Error((data && data.message) || ('Request failed (HTTP ' + res.status + ')'));
+    }
+    return data.taskId;
+  }
+
   if(draft.kind==='shot'){
     const scene = state.scenes.find(s=> s.id===draft.sceneId);
     const shot = scene && scene.shots.find(sh=> sh.id===draft.shotId);
@@ -552,6 +582,18 @@ async function applyFinishedTasks(list){
         if(focus.sceneId===meta.sceneId && focus.shotId===meta.shotId) touchedCurrentView = true;
       }
       if(typeof renderMovieGrid==='function' && !document.getElementById('moviePage').classList.contains('hidden')) renderMovieGrid();
+      renderTimelineScenes();
+      continue;
+    }
+    if(meta.kind==='lipsync'){
+      const scene = state.scenes.find(s=> s.id===meta.sceneId);
+      const shot = scene && scene.shots.find(sh=> sh.id===meta.shotId);
+      if(scene && shot){
+        if(typeof persistShotLipsyncVideo==='function') await persistShotLipsyncVideo(shot, t.imageUrl);
+        else shot.lipsyncVideoUrl = t.imageUrl;
+        shot.lipsyncActiveVersion = 'lipsync'; // show the just-generated version by default
+        if(focus.sceneId===scene.id && focus.shotId===shot.id) touchedCurrentView = true;
+      }
       renderTimelineScenes();
       continue;
     }

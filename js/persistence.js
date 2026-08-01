@@ -943,6 +943,30 @@ async function restoreShotLastFrameImage(shot, assetsDirHandle){
   if(url){ shot.lastFrameImage = url; return true; }
   return false;
 }
+// A shot's lip-synced video — a second, independent video alongside the original animated
+// one (shot.videoUrl), so switching between them never loses either.
+async function persistShotLipsyncVideo(shot, resultUrl){
+  if(!shot || !shot.id || !resultUrl) return;
+  try{
+    const assetKey = pid() + ':shots:' + shot.id + ':lipsync';
+    const result = await persistRemoteImageAsset(assetKey, resultUrl);
+    shot.lipsyncVideoUrl = URL.createObjectURL(result.blob);
+    shot._assetFiles = shot._assetFiles || {};
+    shot._assetFiles.lipsync = result.fileName;
+    console.log('[ProjectStore] saved shot lip-sync video locally for "' + shot.name + '"');
+  } catch(err){
+    console.warn('[ProjectStore] could not save shot lip-sync video locally, keeping the provider link only (it may expire later):', err);
+    shot.lipsyncVideoUrl = resultUrl;
+  }
+  if(typeof saveProjectSoon==='function') saveProjectSoon();
+}
+async function restoreShotLipsyncVideo(shot, assetsDirHandle){
+  if(!shot._assetFiles || !('lipsync' in shot._assetFiles)) return true;
+  const assetKey = pid() + ':shots:' + shot.id + ':lipsync';
+  const url = await loadImageAsset(assetKey, shot._assetFiles.lipsync, assetsDirHandle);
+  if(url){ shot.lipsyncVideoUrl = url; return true; }
+  return false;
+}
 async function deleteShotPreviewImage(shot){
   if(shot._assetFiles && ('video' in shot._assetFiles)){
     try{ await idbDelete(STORE_ASSETS, pid() + ':shots:' + shot.id + ':video'); } catch(err){}
@@ -1122,6 +1146,7 @@ function serializeProject(){
       if(liveShot && liveShot._assetFiles && ('preview' in liveShot._assetFiles)) shot.previewImage = null;
       if(liveShot && liveShot._assetFiles && ('video' in liveShot._assetFiles)) shot.videoUrl = null;
       if(liveShot && liveShot._assetFiles && ('lastFrame' in liveShot._assetFiles)) shot.lastFrameImage = null;
+      if(liveShot && liveShot._assetFiles && ('lipsync' in liveShot._assetFiles)) shot.lipsyncVideoUrl = null;
       return shot;
     });
     return scene;
@@ -1258,7 +1283,7 @@ async function applyProjectData(data, verbose){
     logLoadingStep('Restored ' + archiveRestored + '/' + state.archive.length + ' archived generation(s)', archiveRestored===state.archive.length ? 'ok' : 'error');
   }
 
-  let shotPreviewCount = 0, shotPreviewRestored = 0, shotVideoCount = 0, shotVideoRestored = 0, shotLastFrameCount = 0, shotLastFrameRestored = 0;
+  let shotPreviewCount = 0, shotPreviewRestored = 0, shotVideoCount = 0, shotVideoRestored = 0, shotLastFrameCount = 0, shotLastFrameRestored = 0, shotLipsyncCount = 0, shotLipsyncRestored = 0;
   for(const scene of state.scenes){
     for(const shot of (scene.shots||[])){
       if(shot._assetFiles && ('preview' in shot._assetFiles)){
@@ -1282,10 +1307,20 @@ async function applyProjectData(data, verbose){
           if(ok) shotLastFrameRestored++; else hadErrors = true;
         } catch(err){ hadErrors = true; }
       }
+      if(shot._assetFiles && ('lipsync' in shot._assetFiles)){
+        shotLipsyncCount++;
+        try{
+          const ok = await restoreShotLipsyncVideo(shot);
+          if(ok) shotLipsyncRestored++; else hadErrors = true;
+        } catch(err){ hadErrors = true; }
+      }
     }
   }
   if(shotLastFrameCount && verbose){
     logLoadingStep('Restored ' + shotLastFrameRestored + '/' + shotLastFrameCount + ' Seedance last-frame image(s)', shotLastFrameRestored===shotLastFrameCount ? 'ok' : 'error');
+  }
+  if(shotLipsyncCount && verbose){
+    logLoadingStep('Restored ' + shotLipsyncRestored + '/' + shotLipsyncCount + ' lip-sync video(s)', shotLipsyncRestored===shotLipsyncCount ? 'ok' : 'error');
   }
   if(shotPreviewCount && verbose){
     logLoadingStep('Restored ' + shotPreviewRestored + '/' + shotPreviewCount + ' saved shot preview(s)', shotPreviewRestored===shotPreviewCount ? 'ok' : 'error');

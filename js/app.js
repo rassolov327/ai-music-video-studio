@@ -19,6 +19,7 @@ function goHome(){
   loadModelList();
   wireMoviePage();
   loadVideoModelList();
+  loadLipsyncModelList();
   wireGeminiChat();
   wireScriptPage();
   wireAiGeneratorModal();

@@ -1,5 +1,37 @@
 // ---------- Lip-sync: audio segment extraction (stage 2) ----------
 
+let lipsyncModelOptions = []; // [{id, label, costUsd, blurb}]
+async function loadLipsyncModelList(){
+  try{
+    const res = await fetch('/api/lipsync-models');
+    const data = await res.json();
+    lipsyncModelOptions = (data && data.models) || [];
+  } catch(err){
+    lipsyncModelOptions = [];
+  }
+}
+function lipsyncModelSelectHtml(selectedId){
+  const fallback = lipsyncModelOptions[0] && lipsyncModelOptions[0].id;
+  const opts = lipsyncModelOptions.map(m=>
+    `<option value="${m.id}" title="${m.blurb || ''}" ${m.id===(selectedId||fallback)?'selected':''}>${m.label}${m.costUsd?' — '+formatCost(m.costUsd):''}</option>`
+  ).join('');
+  return `<select class="task-tile-model-select">${opts || '<option>No lip-sync model available</option>'}</select>`;
+}
+
+// Real stage-3 entry point — queues a lip-sync generation in TASKS (the extraction itself
+// happens at send time, not here, since that's where the model gets chosen).
+function queueLipsyncGeneration(scene, shot){
+  state.taskQueue = state.taskQueue || [];
+  state.taskQueue.push({
+    id: 'dt' + (draftTaskSeq++), kind: 'lipsync',
+    sceneId: scene.id, shotId: shot.id, sceneName: scene.name, shotName: shot.name,
+    model: (lipsyncModelOptions[0] && lipsyncModelOptions[0].id) || null,
+    createdAt: Date.now(),
+  });
+  if(typeof saveProjectSoon==='function') saveProjectSoon();
+  if(typeof refreshTasks==='function') refreshTasks();
+}
+
 // Cuts out the slice of the timeline's music track that plays under a given shot — from
 // the moment that shot starts on the timeline, for exactly its own duration — regardless
 // of how long the whole song is. The track's own trimIn (where in the SOURCE file its
