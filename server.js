@@ -315,7 +315,13 @@ const VIDEO_MODELS = [
   { id: 'kling/v2-1-standard', label: 'Kling 2.1 Standard', costUsd: 0.125, blurb: '720p — fastest and cheapest, solid everyday motion' },
   { id: 'kling/v2-1-pro', label: 'Kling 2.1 Pro', costUsd: 0.25, blurb: '1080p — smoother, more realistic motion' },
   { id: 'kling/v2-1-master-image-to-video', label: 'Kling 2.1 Master', costUsd: 0.80, blurb: '1080p — best quality, realistic physics and camera work, priciest' },
-  { id: 'bytedance/seedance-2-fast', label: 'Seedance 2.0 Fast', costUsd: 0.30, blurb: 'Supports first+last frame — animates a clean transition between two chosen images', supportsLastFrame: true },
+  // Confirmed via docs.kie.ai's own request example for this exact model id: Seedance uses
+  // first_frame_url (and, only when animating between two chosen images, last_frame_url
+  // too) even for plain single-image animation — NOT the image_url field Kling uses. A
+  // first real single-image (non-2-frame) generation sent image_url here, which Seedance
+  // didn't recognize, silently generated with no visual anchor at all, and produced a
+  // completely different character/location — this flag is what fixed it.
+  { id: 'bytedance/seedance-2-fast', label: 'Seedance 2.0 Fast', costUsd: 0.30, blurb: 'Supports first+last frame — animates a clean transition between two chosen images', supportsLastFrame: true, imageFieldName: 'first_frame_url' },
 ];
 app.get('/api/video-models', (req, res) => {
   res.json({ models: VIDEO_MODELS.map(m => ({ id: m.id, label: m.label, costUsd: m.costUsd, blurb: m.blurb, supportsLastFrame: !!m.supportsLastFrame })) });
@@ -332,7 +338,8 @@ app.get('/api/video-models', (req, res) => {
 // same page — if this alone were wrong, the error would likely read "model not found"
 // rather than "field is required", so the id is probably fine, but not 100% confirmed yet.
 const LIPSYNC_MODELS = [
-  { id: 'volcengine/video-to-video-lip-sync', label: 'Volcengine Video-to-Video Lip Sync', costUsd: 0.20, blurb: 'Syncs mouth movement to any audio, with built-in vocal separation for singing over a full music mix' },
+  { id: 'volcengine/video-to-video-lip-sync', label: 'Volcengine Video-to-Video Lip Sync (Lite)', costUsd: 0.20, blurb: 'Syncs mouth movement to any audio, with built-in vocal separation for singing over a full music mix', volcMode: 'lite' },
+  { id: 'volcengine/video-to-video-lip-sync-basic', label: 'Volcengine Video-to-Video Lip Sync (Basic)', costUsd: 0.30, blurb: 'Same model, advanced mode — adds scene/speaker detection, worth trying if Lite quality disappoints', volcMode: 'basic' },
 ];
 app.get('/api/lipsync-models', (req, res) => {
   res.json({ models: LIPSYNC_MODELS.map(m => ({ id: m.id, label: m.label, costUsd: m.costUsd, blurb: m.blurb })) });
@@ -345,11 +352,14 @@ app.post('/api/lipsync/start', async (req, res) => {
   if (!videoUrl || !audioUrl) {
     return res.status(400).json({ error: 'bad_request', message: 'videoUrl and audioUrl are both required.' });
   }
-  const modelId = (LIPSYNC_MODELS.find(m => m.id === model) || LIPSYNC_MODELS[0]).id;
+  const matched = LIPSYNC_MODELS.find(m => m.id === model) || LIPSYNC_MODELS[0];
+  // Both entries are really the same KIE model id — "Basic" is just a different mode value
+  // in the request, not a different model — so the real id sent to KIE is always the base one.
+  const modelId = 'volcengine/video-to-video-lip-sync';
   const input = {
     video_url: videoUrl,
     audio_url: audioUrl,
-    mode: 'lite',
+    mode: matched.volcMode || 'lite',
     separate_vocal: true, // isolates the singer's voice from the instrumental mix before syncing
   };
   const callBackUrl = PUBLIC_URL ? PUBLIC_URL + '/api/webhook/kie' : undefined;
@@ -372,7 +382,7 @@ app.post('/api/lipsync/start', async (req, res) => {
       });
     }
     tasks.set(taskId, {
-      status: 'pending', imageUrl: null, message: null, model: modelId, prompt: '', isVideo: true,
+      status: 'pending', imageUrl: null, message: null, model: matched.id, prompt: '', isVideo: true,
       meta: meta || {}, createdAt: Date.now(), updatedAt: Date.now(),
     });
     if (!callBackUrl) {
@@ -537,16 +547,12 @@ app.post('/api/generate-image/start', async (req, res) => {
 // Reuses the exact same task store, webhook, and status-check machinery as image
 // generation above — applyTaskResult just extracts whatever URL comes back, regardless of
 // whether it's an image or a video, so nothing there needed to change.
-function buildVideoInputFor(imageUrl, prompt, duration, lastFrameImageUrl) {
-  if (lastFrameImageUrl) {
-    // Seedance's first+last-frame mode — different field names from the plain single-image
-    // shape the rest of our models use.
-    return {
-      prompt,
-      first_frame_url: imageUrl,
-      last_frame_url: lastFrameImageUrl,
-      duration: String(duration || 5),
-    };
+function buildVideoInputFor(modelId, imageUrl, prompt, duration, lastFrameImageUrl) {
+  const model = VIDEO_MODELS.find(m => m.id === modelId);
+  if (model && model.imageFieldName === 'first_frame_url') {
+    const input = { prompt, first_frame_url: imageUrl, duration: String(duration || 5) };
+    if (lastFrameImageUrl) input.last_frame_url = lastFrameImageUrl;
+    return input;
   }
   return {
     prompt,
@@ -568,7 +574,7 @@ app.post('/api/generate-video/start', async (req, res) => {
     return res.status(400).json({ error: 'bad_request', message: 'imageUrl is required — video generation animates an already-generated shot image.' });
   }
   const modelId = (VIDEO_MODELS.find(m => m.id === model) || VIDEO_MODELS[0]).id;
-  const input = buildVideoInputFor(imageUrl, prompt, duration, lastFrameImageUrl);
+  const input = buildVideoInputFor(modelId, imageUrl, prompt, duration, lastFrameImageUrl);
   const callBackUrl = PUBLIC_URL ? PUBLIC_URL + '/api/webhook/kie' : undefined;
 
   try {

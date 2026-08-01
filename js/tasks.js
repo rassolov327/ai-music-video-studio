@@ -232,6 +232,7 @@ function renderTasksGrid(){
             <div class="task-tile-scene">${line1}</div>
             <div class="task-tile-shot">${line2}</div>
             <div class="task-tile-model">${t.model || ''}</div>
+            ${t.status==='failed' ? `<div class="task-tile-error">${(t.message || 'Generation failed — no further details from the provider.').replace(/</g,'&lt;')}</div>` : ''}
             ${canRegen ? `<button class="cf-btn task-tile-regen-btn" style="width:100%;margin-top:8px;">Regenerate</button>` : ''}
           </div>
         </div>`;

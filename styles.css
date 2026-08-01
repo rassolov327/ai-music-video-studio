@@ -795,6 +795,7 @@
   .task-tile-scene{font-size:12px;font-weight:500;color:var(--text-1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .task-tile-shot{font-size:11px;color:var(--text-3);margin-top:2px;}
   .task-tile-model{font-size:10px;color:var(--text-3);margin-top:6px;font-family:var(--font-mono);}
+  .task-tile-error{font-size:10.5px;color:var(--danger);margin-top:6px;line-height:1.4;word-break:break-word;}
 
   /* ---- Full-size task preview modal ---- */
   .task-preview-modal{
