@@ -73,6 +73,15 @@ const timelineScenesEl = document.getElementById('timelineScenes');
 function trashSvg(size){
   return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg>`;
 }
+// The one place that decides which video actually plays for a shot — the lip-sync version
+// when one exists and is the active choice, the original otherwise. Every playback and
+// render path reads through this instead of shot.videoUrl directly, so the toggle actually
+// has an effect everywhere, not just on the button's own label.
+function getActiveShotVideoUrl(shot){
+  if(!shot) return null;
+  if(shot.lipsyncVideoUrl && shot.lipsyncActiveVersion!=='original') return shot.lipsyncVideoUrl;
+  return shot.videoUrl || null;
+}
 function pencilSvg(size){
   return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4Z"></path></svg>`;
 }

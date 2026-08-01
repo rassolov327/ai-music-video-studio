@@ -16,7 +16,7 @@ function renderLipsyncControl(sceneId, shot){
   return `
     <div class="shot-lipsync-wrap">
       <button class="shot-lipsync-btn${stateClass}" data-lipsync-shot="${sceneId}|${shot.id}">${label}</button>
-      ${hasLipsync ? `<button class="shot-lipsync-arrow" data-lipsync-arrow="${sceneId}|${shot.id}" title="Choose version">▾</button>` : ''}
+      ${hasLipsync ? `<button class="shot-lipsync-arrow" data-lipsync-arrow="${sceneId}|${shot.id}" title="Toggle lip-sync on/off"><svg viewBox="0 0 20 12" width="14" height="9" fill="none"><rect x="0.5" y="0.5" width="19" height="11" rx="5.5" fill="currentColor" fill-opacity="${isOn?0.9:0.35}" stroke="currentColor" stroke-opacity="0.6"></rect><circle cx="${isOn?14:6}" cy="6" r="4" fill="#12141a"></circle></svg></button>` : ''}
     </div>`;
 }
 

@@ -1026,10 +1026,11 @@
   .shot-lipsync-btn.on{background:var(--accent);color:#1a1408;}
   .shot-lipsync-btn.off{background:var(--text-3);color:#1a1408;}
   .shot-lipsync-arrow{
-    border:none;border-radius:0 3px 3px 0;width:12px;padding:2px 0;font-size:8px;cursor:pointer;
-    background:rgba(0,0,0,.55);color:rgba(255,255,255,.55);
+    border:none;border-radius:0 3px 3px 0;width:16px;padding:0 2px;
+    background:rgba(0,0,0,.55);color:rgba(255,255,255,.7);cursor:pointer;
+    display:flex;align-items:center;justify-content:center;
   }
-  .shot-lipsync-arrow:hover{background:rgba(0,0,0,.75);color:rgba(255,255,255,.8);}
+  .shot-lipsync-arrow:hover{background:rgba(0,0,0,.75);color:#fff;}
 
   /* ---- Gemini quick-assistant button + chat popup ---- */
   .gemini-assist-btn{

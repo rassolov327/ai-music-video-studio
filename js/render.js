@@ -329,7 +329,7 @@ async function startRender(){
       const { shot } = entries[i];
       const segName = 'seg' + i + '.mp4';
       if(shot.videoUrl){
-        await ffmpeg.writeFile('src.mp4', await ffmpegFetchFile(shot.videoUrl));
+        await ffmpeg.writeFile('src.mp4', await ffmpegFetchFile(getActiveShotVideoUrl(shot)));
         await ffmpeg.exec([
           '-ss', String(shot.trimInSec || 0), '-i', 'src.mp4', '-t', String(shot.duration),
           '-vf', scaleFilter, '-r', String(fps),
