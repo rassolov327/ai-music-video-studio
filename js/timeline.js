@@ -311,7 +311,8 @@ function wireCommonTimelineHandlers(){
   timelineScenesEl.querySelectorAll('[data-lipsync-shot]').forEach(el=>{
     el.onclick = (e)=>{
       e.stopPropagation();
-      alert('Lip-sync — coming soon. This is a placeholder for the icon/condition micro-iteration.');
+      const [sid, shid] = el.dataset.lipsyncShot.split('|');
+      testExtractShotAudioSegment(sid, shid);
     };
   });
   timelineScenesEl.querySelectorAll('[data-lipsync-arrow]').forEach(el=>{
@@ -572,6 +573,19 @@ function getShotStartPx(sceneId, shotId){
     for(const shot of scene.shots){
       if(scene.id===sceneId && shot.id===shotId) return x;
       x += Math.round(shot.duration * PX_PER_SEC);
+    }
+  }
+  return 0;
+}
+// Same idea as getShotStartPx but in real seconds, independent of the timeline's current
+// zoom level — this is what actually matters for figuring out which slice of the music
+// file corresponds to a given shot.
+function getShotStartSec(sceneId, shotId){
+  let t = 0;
+  for(const scene of state.scenes){
+    for(const shot of scene.shots){
+      if(scene.id===sceneId && shot.id===shotId) return t;
+      t += shot.duration;
     }
   }
   return 0;
