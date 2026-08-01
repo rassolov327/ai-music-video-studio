@@ -405,16 +405,16 @@ app.post('/api/lipsync/start', async (req, res) => {
 });
 
 // ---- photo -> singing-performance models (image + song audio -> one finished video) ----
-// Chosen over the video-resync path above after real-world quality testing — see the
-// research discussion; OmniHuman's fields are confirmed directly from its own KIE page
-// (kie.ai/omnihuman-1-5). Kling Avatar's exact field names weren't found as a literal
-// example anywhere — inferred from the same image_url/audio_url convention every other
-// verified KIE model uses, and its model id from docs.kie.ai's own listing ("Kling AI
-// Avatar Standard") via the same slug pattern as our other Kling models. Lower confidence
-// than OmniHuman; the first real attempt is the actual confirmation, same pattern as
-// every other inferred model id so far.
+// Confirmed directly from KIE's own full docs navigation sidebar (docs.kie.ai) — OmniHuman
+// is its own top-level category, not nested under Bytedance like Seedance is, so its id has
+// no provider prefix at all: docs.kie.ai/market/omnihuman-1-5 -> model id "omnihuman-1-5".
+// Two earlier guesses (bytedance/omnihuman-v1-5, then bytedance/omnihuman-1-5) both wrongly
+// assumed a bytedance/ prefix by analogy with Seedance — this is now a real, confirmed id,
+// not another inference. Kling AI Avatar's id (kling/ai-avatar-standard) was independently
+// confirmed correct too from the same navigation — that one's earlier failure was purely
+// the missing prompt field, already fixed, not a wrong model id.
 const PHOTO_LIPSYNC_MODELS = [
-  { id: 'bytedance/omnihuman-1-5', label: 'OmniHuman 1.5', costUsd: 0.80, blurb: 'Built specifically for singing — captures musical phrasing and pauses, not just phoneme-level lip sync', provider: 'omnihuman' },
+  { id: 'omnihuman-1-5', label: 'OmniHuman 1.5', costUsd: 0.80, blurb: 'Built specifically for singing — captures musical phrasing and pauses, not just phoneme-level lip sync', provider: 'omnihuman' },
   { id: 'kling/ai-avatar-standard', label: 'Kling AI Avatar (Standard)', costUsd: 0.45, blurb: 'Cheaper alternative — independent side-by-side tests rated it behind OmniHuman for singing specifically, but it is faster and less costly', provider: 'kling-avatar' },
 ];
 app.get('/api/photo-lipsync-models', (req, res) => {
