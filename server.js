@@ -167,13 +167,18 @@ const MODELS = [
   { id: 'gpt-image/1.5-text-to-image', label: 'GPT-Image 1.5', supportsAspectRatio: true, supportsQuality: true, costUsd: 0.03 },
   { id: 'qwen2/text-to-image', label: 'Qwen2', supportsImageSize: true, costUsd: 0.02 },
   { id: 'nano-banana-pro', label: 'Nano Banana Pro', supportsAspectRatio: true, supportsResolution: true, supportsReferenceImage: true, costUsd: 0.04 },
-  { id: 'nano-banana-2', label: 'Nano Banana 2', supportsAspectRatio: true, supportsResolution: true, supportsReferenceImage: true, costUsd: 0.05 },
+  { id: 'nano-banana-2', label: 'Nano Banana 2', supportsAspectRatio: true, supportsResolution: true, supportsReferenceImage: true, costUsd: 0.06 },
   { id: 'ideogram/character', label: 'Ideogram Character', supportsReferenceImage: true, referenceImageField: 'reference_image_urls', costUsd: 0.06 },
   { id: 'gpt-image-2-text-to-image', label: 'GPT Image 2', supportsAspectRatio: true, supportsReferenceImage: true, costUsd: 0.04, imageToImageId: 'gpt-image-2-image-to-image', referenceImageField: 'input_urls' },
   // Model id inferred from Seedream 5.0 Lite's confirmed naming pattern (seedream/5-lite-*)
   // — docs.kie.ai's own model list confirms a Pro text-to-image and image-to-image pair
   // exist, but no literal request example for Pro specifically was found to copy exactly.
-  { id: 'seedream/5-pro-text-to-image', label: 'Seedream 5.0 Pro', supportsAspectRatio: true, supportsReferenceImage: true, costUsd: 0.06, imageToImageId: 'seedream/5-pro-image-to-image', referenceImageField: 'image_urls' },
+  // maxPromptLength: KIE's own validation for this model family enforces a hard character
+  // cap — confirmed 3000 for the Lite tier's docs; Pro isn't separately confirmed but is
+  // assumed to share it, since a real generation hit "text length cannot exceed the
+  // maximum limit" with our normal shot-prompt length (character/location context easily
+  // pushes past 3000 chars, unlike our other models which don't enforce this).
+  { id: 'seedream/5-pro-text-to-image', label: 'Seedream 5.0 Pro', supportsAspectRatio: true, supportsReferenceImage: true, costUsd: 0.06, imageToImageId: 'seedream/5-pro-image-to-image', referenceImageField: 'image_urls', maxPromptLength: 2900 },
 ];
 // ---- Script tab: breaks a pasted script into a structured scenes/characters/locations/
 // props/looks proposal. Uses Gemini's own JSON response mode (responseMimeType +
@@ -321,7 +326,11 @@ const VIDEO_MODELS = [
   // first real single-image (non-2-frame) generation sent image_url here, which Seedance
   // didn't recognize, silently generated with no visual anchor at all, and produced a
   // completely different character/location — this flag is what fixed it.
-  { id: 'bytedance/seedance-2-fast', label: 'Seedance 2.0 Fast', costUsd: 0.30, blurb: 'Supports first+last frame — animates a clean transition between two chosen images', supportsLastFrame: true, imageFieldName: 'first_frame_url' },
+  // Video-model pricing on KIE actually scales with duration/resolution, not a flat
+  // per-generation fee — a real 5s generation billed 165 credits ($0.825) against our
+  // earlier flat $0.30 guess, a 2.75x miss. Recalibrated from that real bill rather than
+  // another guess; still an estimate (shown as "≈"), KIE's own dashboard is the real total.
+  { id: 'bytedance/seedance-2-fast', label: 'Seedance 2.0 Fast', costUsd: 0.80, blurb: 'Supports first+last frame — animates a clean transition between two chosen images', supportsLastFrame: true, imageFieldName: 'first_frame_url' },
 ];
 app.get('/api/video-models', (req, res) => {
   res.json({ models: VIDEO_MODELS.map(m => ({ id: m.id, label: m.label, costUsd: m.costUsd, blurb: m.blurb, supportsLastFrame: !!m.supportsLastFrame })) });
@@ -339,7 +348,7 @@ app.get('/api/video-models', (req, res) => {
 // rather than "field is required", so the id is probably fine, but not 100% confirmed yet.
 const LIPSYNC_MODELS = [
   { id: 'volcengine/video-to-video-lip-sync', label: 'Volcengine Video-to-Video Lip Sync (Lite)', costUsd: 0.20, blurb: 'Syncs mouth movement to any audio, with built-in vocal separation for singing over a full music mix', volcMode: 'lite' },
-  { id: 'volcengine/video-to-video-lip-sync-basic', label: 'Volcengine Video-to-Video Lip Sync (Basic)', costUsd: 0.30, blurb: 'Same model, advanced mode — adds scene/speaker detection, worth trying if Lite quality disappoints', volcMode: 'basic' },
+  { id: 'volcengine/video-to-video-lip-sync-basic', label: 'Volcengine Video-to-Video Lip Sync (Basic)', costUsd: 0.20, blurb: 'Same model, advanced mode — adds scene/speaker detection, worth trying if Lite quality disappoints', volcMode: 'basic' },
 ];
 app.get('/api/lipsync-models', (req, res) => {
   res.json({ models: LIPSYNC_MODELS.map(m => ({ id: m.id, label: m.label, costUsd: m.costUsd, blurb: m.blurb })) });
@@ -435,7 +444,12 @@ function closestAspectRatio(width, height) {
 function buildInputFor(modelId, prompt, width, height, referenceImageUrl) {
   const model = MODELS.find(m => m.id === modelId) || MODELS[0];
   const ratio = closestAspectRatio(width, height);
-  const input = { prompt };
+  let safePrompt = prompt;
+  if (model.maxPromptLength && safePrompt && safePrompt.length > model.maxPromptLength) {
+    console.warn('[server] prompt too long for ' + modelId + ' (' + safePrompt.length + ' chars) — truncating to ' + model.maxPromptLength);
+    safePrompt = safePrompt.slice(0, model.maxPromptLength - 3) + '...';
+  }
+  const input = { prompt: safePrompt };
   if (model.supportsImageSize) input.image_size = ratio;
   else if (model.supportsAspectRatio) input.aspect_ratio = ratio;
   if (model.supportsQuality) input.quality = 'high';
