@@ -431,7 +431,7 @@ app.post('/api/photo-lipsync/start', async (req, res) => {
   const matched = PHOTO_LIPSYNC_MODELS.find(m => m.id === model) || PHOTO_LIPSYNC_MODELS[0];
   const input = matched.provider === 'omnihuman'
     ? { image_url: imageUrl, audio_url: audioUrl, resolution: 1080 }
-    : { image_url: imageUrl, audio_url: audioUrl };
+    : { image_url: imageUrl, audio_url: audioUrl, prompt: 'The person sings passionately along with the audio, with facial expressions and movement matching the rhythm and emotion of the song.' };
   const callBackUrl = PUBLIC_URL ? PUBLIC_URL + '/api/webhook/kie' : undefined;
 
   try {
