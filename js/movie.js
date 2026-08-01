@@ -33,7 +33,7 @@ function videoModelSelectHtml(selectedId, seedanceOnly){
   const pool = seedanceOnly ? videoModelOptions.filter(m=> m.supportsLastFrame) : videoModelOptions;
   const fallback = pool[0] && pool[0].id;
   const opts = pool.map(m=>
-    `<option value="${m.id}" title="${m.blurb || ''}" ${m.id===(selectedId||fallback)?'selected':''}>${m.label} — $${m.costUsd.toFixed(2)}</option>`
+    `<option value="${m.id}" title="${m.blurb || ''}" ${m.id===(selectedId||fallback)?'selected':''}>${m.label} — ${formatCost(m.costUsd)}</option>`
   ).join('');
   return `<select class="movie-tile-model-select">${opts}</select>`;
 }
@@ -70,17 +70,93 @@ function renderMovieGrid(){
         <div class="task-tile-body">
           <div class="task-tile-scene">${scene.name}</div>
           <div class="task-tile-shot">${shot.name}</div>
-          <div class="movie-tile-desc">${shot.description ? shot.description : '<span style="color:var(--text-3);">(no description)</span>'}</div>
+          <div class="movie-tile-desc-row">
+            <div class="movie-tile-desc">${shot.description ? shot.description : '<span style="color:var(--text-3);">(no description)</span>'}</div>
+            <button class="movie-motion-edit-btn" data-shot-id="${shot.id}" title="Edit motion prompt">${shot.motionPrompt ? '✏️' : (shot._motionPromptPending ? '<span class="movie-motion-spinner"></span>' : '✏️')}</button>
+          </div>
           ${shot.seedanceMode && !shot.lastFrameImage ? '<div class="gen-hint" style="color:var(--danger);">Last frame not generated yet — needed before this can animate.</div>' : ''}
           ${videoModelSelectHtml(modelId, shot.seedanceMode)}
           ${blurb ? `<div class="gen-hint" style="margin-top:4px;">${blurb}</div>` : ''}
-          <button class="cf-btn primary movie-tile-send-btn" style="width:100%;margin-top:8px;" ${shot.seedanceMode && !shot.lastFrameImage ? 'disabled' : ''}>${isAnimated ? 'Re-animate' : 'Animate'}${model ? ' — $' + model.costUsd.toFixed(2) : ''}</button>
+          <button class="cf-btn primary movie-tile-send-btn" style="width:100%;margin-top:8px;" ${shot.seedanceMode && !shot.lastFrameImage ? 'disabled' : ''}>${isAnimated ? 'Re-animate' : 'Animate'}${model ? ' — ' + formatCost(model.costUsd) : ''}</button>
         </div>
       </div>`;
   }).join('');
 
   wireMovieTiles();
   updateMovieGenerateButton();
+  entries.forEach(({shot})=> ensureMotionPrompt(shot));
+}
+
+// Generates the motion-language reformulation exactly once per shot (per the agreed
+// design) — the FIRST time this shot is seen in MOVIE, not re-run automatically even if
+// the shot's own description changes later; the edit modal's Regenerate button is the only
+// other way to refresh it.
+async function ensureMotionPrompt(shot){
+  if(shot.motionPrompt || shot._motionPromptPending || !shot.description) return;
+  const available = await checkAssistAvailable();
+  if(!available) return;
+  shot._motionPromptPending = true;
+  refreshMotionPromptButton(shot.id);
+  try{
+    const result = await callAiAssist(MOTION_PROMPT_INSTRUCTION, shot.description);
+    shot.motionPrompt = result;
+    if(typeof saveProjectSoon==='function') saveProjectSoon();
+  } catch(err){
+    console.warn('[movie] could not auto-generate motion prompt:', err);
+  } finally {
+    shot._motionPromptPending = false;
+    refreshMotionPromptButton(shot.id);
+  }
+}
+function refreshMotionPromptButton(shotId){
+  const btn = document.querySelector('#movieGrid .movie-motion-edit-btn[data-shot-id="' + shotId + '"]');
+  if(!btn) return;
+  const found = collectAnimatableShots().find(x=> x.shot.id===shotId);
+  const shot = found && found.shot;
+  btn.innerHTML = (shot && shot._motionPromptPending) ? '<span class="movie-motion-spinner"></span>' : '✏️';
+}
+
+const MOTION_PROMPT_INSTRUCTION = 'You are helping write a prompt for an AI VIDEO model that animates an already-generated still image. Rewrite this shot description into pure motion language: what physically moves and how (body movement, gesture, object motion, expression change) — a couple of concrete action phrases. Do NOT describe appearance, lighting, setting, or composition — the video model already sees all of that in the reference image. Do NOT mention camera movement (handled separately). Reply with only the rewritten motion description, nothing else.';
+
+let motionPromptModalShotId = null;
+function wireMotionPromptModal(){
+  const modal = document.getElementById('motionPromptModal');
+  const close = ()=>{ modal.classList.add('hidden'); motionPromptModalShotId = null; };
+  document.getElementById('motionPromptCloseBtn').onclick = close;
+  document.getElementById('motionPromptCancelBtn').onclick = close;
+  modal.addEventListener('click', (e)=>{ if(e.target===modal) close(); });
+  document.getElementById('motionPromptSaveBtn').onclick = ()=>{
+    if(!motionPromptModalShotId) return;
+    const found = collectAnimatableShots().find(x=> x.shot.id===motionPromptModalShotId);
+    if(found){
+      found.shot.motionPrompt = document.getElementById('motionPromptTextarea').value;
+      if(typeof saveProjectSoon==='function') saveProjectSoon();
+      renderMovieGrid();
+    }
+    close();
+  };
+  document.getElementById('motionPromptRegenBtn').onclick = async ()=>{
+    if(!motionPromptModalShotId) return;
+    const found = collectAnimatableShots().find(x=> x.shot.id===motionPromptModalShotId);
+    if(!found || !found.shot.description) return;
+    const btn = document.getElementById('motionPromptRegenBtn');
+    btn.disabled = true; btn.textContent = 'Thinking…';
+    try{
+      const result = await callAiAssist(MOTION_PROMPT_INSTRUCTION, found.shot.description);
+      document.getElementById('motionPromptTextarea').value = result;
+    } catch(err){
+      alert('Could not regenerate: ' + err.message);
+    } finally {
+      btn.disabled = false; btn.textContent = '↻ Regenerate';
+    }
+  };
+}
+function openMotionPromptModal(shotId){
+  const found = collectAnimatableShots().find(x=> x.shot.id===shotId);
+  if(!found) return;
+  motionPromptModalShotId = shotId;
+  document.getElementById('motionPromptTextarea').value = found.shot.motionPrompt || '';
+  document.getElementById('motionPromptModal').classList.remove('hidden');
 }
 
 function wireMovieTiles(){
@@ -105,6 +181,8 @@ function wireMovieTiles(){
       e.stopPropagation();
       sendMovieShot(shotId);
     };
+    const editBtn = tile.querySelector('.movie-motion-edit-btn');
+    if(editBtn) editBtn.onclick = (e)=>{ e.stopPropagation(); openMotionPromptModal(shotId); };
   });
 }
 
@@ -119,14 +197,15 @@ function updateMovieGenerateButton(){
     return sum + (m ? m.costUsd : 0);
   }, 0);
   btn.disabled = count===0;
-  btn.textContent = count ? ('Animate (' + count + ')' + (total ? ' — $' + total.toFixed(2) : '')) : 'Animate';
+  btn.textContent = count ? ('Animate (' + count + ')' + (total ? ' — ' + formatCost(total) : '')) : 'Animate';
 }
 
 // Shot size and camera movement are already set in the shot's own inspector settings —
 // the prompt only clarifies/reinforces them for the video model, it doesn't re-decide them.
 function buildVideoPromptForShot(shot, scene){
   const parts = [];
-  if(shot.description) parts.push(shot.description);
+  if(shot.motionPrompt) parts.push(shot.motionPrompt);
+  else if(shot.description) parts.push(shot.description);
   const moveText = {
     'Static': 'camera holds steady, no camera movement',
     'Push In': 'camera slowly pushes in toward the subject',

@@ -69,7 +69,11 @@ async function loadModelList(){
   }
 }
 function modelById(id){ return modelOptions.find(m=> m.id===id) || modelOptions[0] || null; }
-function formatCost(usd){ return usd ? ('$' + usd.toFixed(usd < 0.01 ? 4 : 2).replace(/0+$/,'').replace(/\.$/,'')) : ''; }
+function formatCost(usd){
+  if(!usd) return '';
+  const credits = Math.round(usd / 0.005);
+  return '≈' + credits + ' cr';
+}
 
 async function refreshTasks(){
   if(!currentProjectId) return;
@@ -646,7 +650,7 @@ async function archiveUploadedImage(dataUrl, label){
 function showAiGeneratorModal(){
   const modal = document.getElementById('aiGeneratorModal');
   const select = document.getElementById('aiGenModelSelect');
-  select.innerHTML = (modelOptions||[]).map(m=> `<option value="${m.id}">${m.label} — $${m.costUsd.toFixed(2)}</option>`).join('');
+  select.innerHTML = (modelOptions||[]).map(m=> `<option value="${m.id}">${m.label} — ${formatCost(m.costUsd)}</option>`).join('');
   document.getElementById('aiGenHint').textContent = (modelOptions && modelOptions.length) ? '' : 'No connected model available yet.';
   modal.classList.remove('hidden');
 }

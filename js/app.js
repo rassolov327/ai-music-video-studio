@@ -22,6 +22,7 @@ function goHome(){
   wireGeminiChat();
   wireScriptPage();
   wireAiGeneratorModal();
+  wireMotionPromptModal();
   wireTimelineZoomControl();
   wireStoryboardPage();
   wireRenderPage();

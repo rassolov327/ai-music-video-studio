@@ -334,6 +334,22 @@
     </div>
   </div>
 
+  <div class="task-preview-modal hidden" id="motionPromptModal">
+    <div class="new-idea-box" style="width:440px;">
+      <div class="new-idea-title">Motion prompt</div>
+      <div class="gen-hint" style="margin-top:0;">What actually moves in this shot — written for the video model, separately from the picture's own description.</div>
+      <div class="cf-field" style="margin-top:10px;"><textarea id="motionPromptTextarea" style="min-height:110px;"></textarea></div>
+      <div class="cf-actions" style="margin-top:10px;justify-content:space-between;">
+        <button class="cf-btn" id="motionPromptRegenBtn">↻ Regenerate</button>
+        <div style="display:flex;gap:8px;">
+          <button class="cf-btn" id="motionPromptCancelBtn">Cancel</button>
+          <button class="cf-btn primary" id="motionPromptSaveBtn">Save</button>
+        </div>
+      </div>
+    </div>
+    <div class="task-preview-close" id="motionPromptCloseBtn"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
+  </div>
+
   <div class="storyboard-modal hidden" id="storyboardModal">
     <div class="tasks-header">
       <div class="tasks-title">Storyboard</div>
