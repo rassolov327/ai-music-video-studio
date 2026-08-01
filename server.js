@@ -322,11 +322,15 @@ app.get('/api/video-models', (req, res) => {
 });
 
 // ---- lip-sync models — separate list since these take video+audio, not prompt+image ----
-// Model id is a best inference (matches the URL-slug convention every other multi-word KIE
-// model page follows, e.g. "Kling-3.0 motion-control" -> "kling-3.0/motion-control") — no
-// literal request example was found on docs.kie.ai itself for this one specifically, only
-// through a third-party reseller using its own internal naming. Flagged as lower-confidence
-// than our other models; the first real call here is the actual confirmation.
+// Field names (video_url, audio_url, mode, separate_vocal, etc.) confirmed directly from
+// KIE's own interactive playground page for this model — an earlier version of this had
+// guessed reseller-style names (source_video_url/enable_vocal_separation) that KIE
+// rejected with "field is required" on the first real attempt; fixed once the playground's
+// own field schema was found. The model id itself is still a best inference (matches the
+// URL-slug convention every other multi-word KIE model page follows, e.g. "Kling-3.0
+// motion-control" -> "kling-3.0/motion-control") since no createTask id was shown on that
+// same page — if this alone were wrong, the error would likely read "model not found"
+// rather than "field is required", so the id is probably fine, but not 100% confirmed yet.
 const LIPSYNC_MODELS = [
   { id: 'volcengine/video-to-video-lip-sync', label: 'Volcengine Video-to-Video Lip Sync', costUsd: 0.20, blurb: 'Syncs mouth movement to any audio, with built-in vocal separation for singing over a full music mix' },
 ];
@@ -343,10 +347,10 @@ app.post('/api/lipsync/start', async (req, res) => {
   }
   const modelId = (LIPSYNC_MODELS.find(m => m.id === model) || LIPSYNC_MODELS[0]).id;
   const input = {
-    source_video_url: videoUrl,
-    source_audio_url: audioUrl,
+    video_url: videoUrl,
+    audio_url: audioUrl,
     mode: 'lite',
-    enable_vocal_separation: true, // isolates the singer's voice from the instrumental mix before syncing
+    separate_vocal: true, // isolates the singer's voice from the instrumental mix before syncing
   };
   const callBackUrl = PUBLIC_URL ? PUBLIC_URL + '/api/webhook/kie' : undefined;
 
