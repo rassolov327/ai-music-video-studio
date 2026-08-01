@@ -132,6 +132,7 @@ function renderAssemblyModeTrack(){
           <div class="shot-thumb${isFocused?' focused':''}" data-anchor data-scene="${scene.id}" data-shot="${shot.id}" style="${thumbBg}width:${wpx}px;flex-basis:${wpx}px;">
             ${shot.previewImage ? `<img src="${shot.previewImage}">` : ''}
             ${shot.videoUrl ? `<div class="shot-thumb-animated-badge" title="Animated"><svg viewBox="0 0 24 24" width="9" height="9" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg></div>` : ''}
+            ${shot.videoUrl && typeof getActiveTrack==='function' && getActiveTrack() ? `<div class="shot-lipsync-icon" data-lipsync-shot="${scene.id}|${shot.id}" title="Lip-sync">👄</div>` : ''}
             <div class="shot-trim left" data-trim="${scene.id}|${shot.id}|left" title="Drag to trim"></div>
             <div class="shot-trim right" data-trim="${scene.id}|${shot.id}|right" title="Drag to trim"></div>
             <div class="block-rename" data-rename-btn-shot="${scene.id}|${shot.id}" title="Rename">${pencilSvg(9)}</div>
@@ -173,6 +174,7 @@ function renderEditModeTrack(){
              style="${thumbBg}border-bottom:3px solid ${col.dot};position:absolute;left:${x}px;top:0;width:${wpx}px;height:100%;">
           ${shot.previewImage ? `<img src="${shot.previewImage}">` : ''}
           ${shot.videoUrl ? `<div class="shot-thumb-animated-badge" title="Animated"><svg viewBox="0 0 24 24" width="9" height="9" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg></div>` : ''}
+          ${shot.videoUrl && typeof getActiveTrack==='function' && getActiveTrack() ? `<div class="shot-lipsync-icon" data-lipsync-shot="${scene.id}|${shot.id}" title="Lip-sync">👄</div>` : ''}
           <div class="shot-trim left" data-trim="${scene.id}|${shot.id}|left" title="Drag to trim"></div>
           <div class="shot-trim right" data-trim="${scene.id}|${shot.id}|right" title="Drag to trim"></div>
           <div class="block-rename" data-rename-btn-shot="${scene.id}|${shot.id}" title="Rename">${pencilSvg(9)}</div>
@@ -285,9 +287,15 @@ function wireCommonTimelineHandlers(){
       if(label) startRenameShot(sid, shid, label);
     };
   });
+  timelineScenesEl.querySelectorAll('[data-lipsync-shot]').forEach(el=>{
+    el.onclick = (e)=>{
+      e.stopPropagation();
+      alert('Lip-sync — coming soon. This is a placeholder for the icon/condition micro-iteration.');
+    };
+  });
   timelineScenesEl.querySelectorAll('.shot-thumb').forEach(el=>{
     el.onclick = (e)=>{
-      if(e.target.closest('.block-del') || e.target.closest('.block-rename') || e.target.closest('.shot-trim')) return;
+      if(e.target.closest('.block-del') || e.target.closest('.block-rename') || e.target.closest('.shot-trim') || e.target.closest('.shot-lipsync-icon')) return;
       if(el.dataset.wasDragged) { delete el.dataset.wasDragged; return; }
       setFocus(el.dataset.scene, el.dataset.shot);
     };
