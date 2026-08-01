@@ -512,15 +512,9 @@ function renderShotGenSection(scene, shot){
   if(shot.previewImage){
     section.innerHTML = `
       <div class="shot-preview-thumb"><img src="${shot.previewImage}"></div>
-      <button class="cf-btn" id="shotRegenBtn" style="width:100%;">Regenerate preview <span class="gen-cost">${SHOT_GEN_COST_LABEL}</span></button>
       <div id="paidGenSlot"></div>`;
-    document.getElementById('shotRegenBtn').onclick = ()=> runShotGeneration(scene, shot);
   } else {
-    section.innerHTML = `
-      <button class="gen-btn" id="shotGenBtn">Generate preview <span class="gen-cost">${SHOT_GEN_COST_LABEL}</span></button>
-      <div class="gen-hint">Generates a preview frame (via ${SHOT_GEN_MODEL_LABEL}) from this shot's parameters. Shown here, on the timeline thumbnail, and in the main preview.</div>
-      <div id="paidGenSlot"></div>`;
-    document.getElementById('shotGenBtn').onclick = ()=> runShotGeneration(scene, shot);
+    section.innerHTML = `<div id="paidGenSlot"></div>`;
   }
   renderPaidGenSlot(scene, shot);
 }
@@ -538,27 +532,9 @@ async function renderPaidGenSlot(scene, shot){
     return;
   }
   freshSlot.innerHTML = `
-    <button class="cf-btn primary" id="shotPaidGenBtn" style="width:100%;margin-top:10px;">Add to Tasks (real AI) <span class="gen-cost">${PAID_GEN_COST_LABEL}</span></button>
+    <button class="cf-btn primary" id="shotPaidGenBtn" style="width:100%;margin-top:10px;">${shot.previewImage ? 'Regenerate' : 'Add to Tasks'} (real AI)</button>
     <div class="gen-hint" style="margin-top:6px;">Adds this shot to the TASKS queue — pick a model and hit Generate there (one at a time, or several together).</div>`;
   document.getElementById('shotPaidGenBtn').onclick = ()=> queueShotGeneration(scene, shot);
-}
-
-function runShotGeneration(scene, shot){
-  const section = document.getElementById('shotGenSection');
-  if(!section) return;
-  section.innerHTML = `<button class="gen-btn" disabled><span class="gen-spin"></span>Generating…</button>`;
-  const prompt = buildShotPrompt(shot, scene);
-  const size = shotGenerationSize();
-  tryLoadImage(buildPollinationsUrl(prompt, size.w, size.h))
-    .catch(()=> generateShotPreviewImage(shot, scene))
-    .then(async (result)=>{
-      if(typeof persistShotPreviewImage==='function') await persistShotPreviewImage(shot, result);
-      else shot.previewImage = result;
-      renderTimelineScenes();
-      if(focus.sceneId===scene.id && focus.shotId===shot.id) refreshMainPreview();
-      else renderShotGenSection(scene, shot);
-      if(typeof saveProjectSoon==='function') saveProjectSoon();
-    });
 }
 
 // Adds a draft entry to the task queue — nothing is sent to any provider yet. The Tasks

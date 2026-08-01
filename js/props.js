@@ -84,12 +84,10 @@ function showPropCard(cat, idx){
           </div>
         </div>
         <button class="cf-btn primary" id="propCardBuildBtn" style="width:100%;margin-top:12px;">${hasObjCard ? 'Edit Prop Card' : 'Create Prop Card'}</button>
-        <div class="gen-section" id="propGenSection"></div>
         <div id="propTaskSlot"></div>
       </div>
     </div>`;
 
-  renderPropGenSection(cat, idx);
   renderPropTaskSlot(it);
 
   document.getElementById('propCardBack').onclick = ()=> showPropGallery(cat);
@@ -125,14 +123,6 @@ async function renderPropTaskSlot(it){
   };
 }
 
-function renderPropGenSection(cat, idx){
-  const it = cat.items[idx];
-  renderGenBlock(document.getElementById('propGenSection'), it, it.referenceCard, (text)=>{
-    it.referenceCard = text;
-    renderAssets();
-    renderPropGenSection(cat, idx);
-  }, { kind:'prop', requireRole:false });
-}
 
 // ---------- preview: prop creation / edit form ----------
 function showPropForm(cat, editIdx){
@@ -177,8 +167,6 @@ function showPropForm(cat, editIdx){
           <div class="angles-row" id="propAnglesRow"></div>
           <input type="file" id="propAngleInput" accept="image/*,.heic,.heif,.tiff,.tif,.bmp,.svg,.avif,.webp" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;">
         </div>
-
-        <div class="gen-section" id="propGenSectionForm"></div>
       </div>
 
       <div class="form-tab-panel" id="tabAI" style="display:none;">
@@ -187,9 +175,6 @@ function showPropForm(cat, editIdx){
           <textarea id="aiPromptInput" style="min-height:70px;" placeholder="Describe the prop — e.g. a worn leather-top wooden bar counter with brass rail">${existing && existing.description ? existing.description : ''}</textarea>
           <button class="cf-btn ai-assist-btn" id="aiPromptAssistBtn" style="width:100%;margin-top:6px;display:none;">✨ Improve with AI</button>
         </div>
-        <button class="gen-btn" id="aiGenBtn">Generate free preview <span class="gen-cost">Free</span></button>
-        <div class="gen-hint">Uses Pollinations.ai — no key, no cost, rough quality. Good for blocking out the look before a real generation pass later.</div>
-        <div id="aiResultWrap"></div>
         <div id="aiPaidGenSlot"></div>
       </div>
 
@@ -216,16 +201,9 @@ function showPropForm(cat, editIdx){
   let formRefText = existing ? existing.referenceCard || null : null;
 
   function refreshFormGen(){
-    const data = {
-      name: nameInput.value.trim(),
-      description: notesInput.value.trim(),
-      photo: photoDataUrl,
-      angles: anglePhotos,
-    };
-    renderGenBlock(document.getElementById('propGenSectionForm'), data, formRefText, (text)=>{
-      formRefText = text;
-      refreshFormGen();
-    }, { kind:'prop', requireRole:false });
+    // Was the legacy free-preview block's refresh hook — no longer needed now that the
+    // real (paid) generation path is the only one, but left as a no-op rather than tracing
+    // out its several existing call sites.
   }
 
   function renderAngles(){
@@ -302,9 +280,7 @@ function showPropForm(cat, editIdx){
     refreshFormGen();
   };
 
-  const aiGenBtn = document.getElementById('aiGenBtn');
   const aiPromptInput = document.getElementById('aiPromptInput');
-  const aiResultWrap = document.getElementById('aiResultWrap');
   wireAiAssistButton('aiPromptAssistBtn', 'aiPromptInput',
     (typeof buildAssetContextSummary==='function' ? buildAssetContextSummary() + '\n\n' : '')
     + 'Rewrite this rough prop idea into a vivid, specific object description for an AI image generator — material, color, wear, size. One or two sentences. Reply with only the rewritten description, nothing else.',
@@ -332,39 +308,6 @@ function showPropForm(cat, editIdx){
     };
   }
   renderAiPaidGenSlot();
-
-  aiGenBtn.onclick = ()=>{
-    const prompt = aiPromptInput.value.trim();
-    if(!prompt) return;
-    aiGenBtn.disabled = true;
-    aiGenBtn.innerHTML = `<span class="gen-spin"></span>Generating…`;
-    aiResultWrap.innerHTML = '';
-    tryLoadImage(buildPollinationsUrl(prompt + ', product reference photo, plain neutral background, studio lighting', 640, 480))
-      .catch(()=> null)
-      .then((url)=>{
-        aiGenBtn.disabled = false;
-        aiGenBtn.innerHTML = `Generate free preview <span class="gen-cost">Free</span>`;
-        if(!url){
-          aiResultWrap.innerHTML = `<div class="gen-hint">Generation failed (network issue) — try again.</div>`;
-          return;
-        }
-        aiResultWrap.innerHTML = `
-          <img class="ai-result-img" src="${url}">
-          <div class="ai-result-actions">
-            <button class="cf-btn primary" id="useAiPhotoBtn">Use as main photo</button>
-          </div>`;
-        document.getElementById('useAiPhotoBtn').onclick = ()=>{
-          photoDataUrl = url;
-          photoDrop.classList.add('has-photo');
-          setPhotoDropImage(url);
-          applyNaturalAspect(photoDrop, url);
-          if(!notesInput.value.trim()) notesInput.value = prompt;
-          refreshFormGen();
-          refreshSaveState();
-          previewEl.querySelector('[data-tab="details"]').click();
-        };
-      });
-  };
 
   function refreshSaveState(){
     saveBtn.disabled = nameInput.value.trim().length===0;

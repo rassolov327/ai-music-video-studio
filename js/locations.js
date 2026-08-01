@@ -84,12 +84,10 @@ function showLocationCard(cat, idx){
           </div>
         </div>
         <button class="cf-btn primary" id="locCardBuildBtn" style="width:100%;margin-top:12px;">${hasObjCard ? 'Edit Location Card' : 'Create Location Card'}</button>
-        <div class="gen-section" id="locGenSection"></div>
         <div id="locTaskSlot"></div>
       </div>
     </div>`;
 
-  renderLocGenSection(cat, idx);
   renderLocTaskSlot(it);
 
   document.getElementById('locCardBack').onclick = ()=> showLocationGallery(cat);
@@ -123,15 +121,6 @@ async function renderLocTaskSlot(it){
     queueAssetGeneration('locations', it);
     freshSlot.innerHTML = `<div class="gen-hint" style="margin-top:8px;color:#5fae7a;">Added to the TASKS queue.</div>`;
   };
-}
-
-function renderLocGenSection(cat, idx){
-  const it = cat.items[idx];
-  renderGenBlock(document.getElementById('locGenSection'), it, it.referenceCard, (text)=>{
-    it.referenceCard = text;
-    renderAssets();
-    renderLocGenSection(cat, idx);
-  }, { kind:'location', requireRole:false });
 }
 
 // ---------- preview: location creation / edit form ----------
@@ -177,8 +166,6 @@ function showLocationForm(cat, editIdx){
           <div class="angles-row" id="locAnglesRow"></div>
           <input type="file" id="locAngleInput" accept="image/*,.heic,.heif,.tiff,.tif,.bmp,.svg,.avif,.webp" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;">
         </div>
-
-        <div class="gen-section" id="locGenSectionForm"></div>
       </div>
 
       <div class="form-tab-panel" id="tabAI" style="display:none;">
@@ -187,9 +174,6 @@ function showLocationForm(cat, editIdx){
           <textarea id="aiPromptInput" style="min-height:70px;" placeholder="Describe the location — e.g. a dim roadside bar, neon signs, wooden counter, smoke in the air">${existing && existing.description ? existing.description : ''}</textarea>
           <button class="cf-btn ai-assist-btn" id="aiPromptAssistBtn" style="width:100%;margin-top:6px;display:none;">✨ Improve with AI</button>
         </div>
-        <button class="gen-btn" id="aiGenBtn">Generate free preview <span class="gen-cost">Free</span></button>
-        <div class="gen-hint">Uses Pollinations.ai — no key, no cost, rough quality. Good for blocking out the look before a real generation pass later.</div>
-        <div id="aiResultWrap"></div>
         <div id="aiPaidGenSlot"></div>
       </div>
 
@@ -216,16 +200,9 @@ function showLocationForm(cat, editIdx){
   let formRefText = existing ? existing.referenceCard || null : null;
 
   function refreshFormGen(){
-    const data = {
-      name: nameInput.value.trim(),
-      description: notesInput.value.trim(),
-      photo: photoDataUrl,
-      angles: anglePhotos,
-    };
-    renderGenBlock(document.getElementById('locGenSectionForm'), data, formRefText, (text)=>{
-      formRefText = text;
-      refreshFormGen();
-    }, { kind:'location', requireRole:false });
+    // Was the legacy free-preview block's refresh hook — no longer needed now that the
+    // real (paid) generation path is the only one, but left as a no-op rather than tracing
+    // out its several existing call sites.
   }
 
   function renderAngles(){
@@ -302,9 +279,7 @@ function showLocationForm(cat, editIdx){
     refreshFormGen();
   };
 
-  const aiGenBtn = document.getElementById('aiGenBtn');
   const aiPromptInput = document.getElementById('aiPromptInput');
-  const aiResultWrap = document.getElementById('aiResultWrap');
   wireAiAssistButton('aiPromptAssistBtn', 'aiPromptInput',
     (typeof buildAssetContextSummary==='function' ? buildAssetContextSummary() + '\n\n' : '')
     + 'Rewrite this rough location idea into a vivid, specific setting description for an AI image generator — layout, furniture, materials, lighting style. One or two sentences. Reply with only the rewritten description, nothing else.',
@@ -332,39 +307,6 @@ function showLocationForm(cat, editIdx){
     };
   }
   renderAiPaidGenSlot();
-
-  aiGenBtn.onclick = ()=>{
-    const prompt = aiPromptInput.value.trim();
-    if(!prompt) return;
-    aiGenBtn.disabled = true;
-    aiGenBtn.innerHTML = `<span class="gen-spin"></span>Generating…`;
-    aiResultWrap.innerHTML = '';
-    tryLoadImage(buildPollinationsUrl(prompt + ', location establishing shot, cinematic', 640, 360))
-      .catch(()=> null)
-      .then((url)=>{
-        aiGenBtn.disabled = false;
-        aiGenBtn.innerHTML = `Generate free preview <span class="gen-cost">Free</span>`;
-        if(!url){
-          aiResultWrap.innerHTML = `<div class="gen-hint">Generation failed (network issue) — try again.</div>`;
-          return;
-        }
-        aiResultWrap.innerHTML = `
-          <img class="ai-result-img" src="${url}">
-          <div class="ai-result-actions">
-            <button class="cf-btn primary" id="useAiPhotoBtn">Use as main photo</button>
-          </div>`;
-        document.getElementById('useAiPhotoBtn').onclick = ()=>{
-          photoDataUrl = url;
-          photoDrop.classList.add('has-photo');
-          setPhotoDropImage(url);
-          applyNaturalAspect(photoDrop, url);
-          if(!notesInput.value.trim()) notesInput.value = prompt;
-          refreshFormGen();
-          refreshSaveState();
-          previewEl.querySelector('[data-tab="details"]').click();
-        };
-      });
-  };
 
   function refreshSaveState(){
     saveBtn.disabled = nameInput.value.trim().length===0;

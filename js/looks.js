@@ -64,31 +64,11 @@ function renderLookGenSection(sectionEl, look){
   let html = '';
   if(look.previewImage){
     html += `<div class="shot-preview-thumb"><img src="${look.previewImage}"></div>`;
-  }
-  html += `<button class="gen-btn" id="lookGenBtn">${look.previewImage ? 'Regenerate' : 'Generate preview'} <span class="gen-cost">Free</span></button>`;
-  if(!look.previewImage){
-    html += `<div class="gen-hint">Uses Pollinations.ai (free) to rough out the outfit. Regenerate as many times as you like before approving.</div>`;
-  } else {
     html += `<button class="cf-btn${look.approved?'':' primary'}" id="lookApproveBtn" style="width:100%;margin-top:8px;">${look.approved ? 'Approved ✓ — this is the locked look' : 'Approve this look'}</button>`;
   }
   html += `<div id="lookTaskSlot"></div>`;
   sectionEl.innerHTML = html;
 
-  document.getElementById('lookGenBtn').onclick = ()=>{
-    sectionEl.innerHTML = `<button class="gen-btn" disabled><span class="gen-spin"></span>Generating…</button>`;
-    const prompt = buildLookPrompt(look.description.trim());
-    tryLoadImage(buildPollinationsUrl(prompt, 480, 640))
-      .catch(()=> null)
-      .then(async (url)=>{
-        if(url){
-          if(typeof persistGeneratedAssetImage==='function' && look.id) await persistGeneratedAssetImage(look, 'looks', 'previewImage', url);
-          else look.previewImage = url;
-          look.approved = false;
-        }
-        renderLookGenSection(sectionEl, look);
-        renderAssets();
-      });
-  };
   const approveBtn = document.getElementById('lookApproveBtn');
   if(approveBtn){
     approveBtn.onclick = ()=>{
