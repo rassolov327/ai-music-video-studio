@@ -414,7 +414,7 @@ app.post('/api/lipsync/start', async (req, res) => {
 // than OmniHuman; the first real attempt is the actual confirmation, same pattern as
 // every other inferred model id so far.
 const PHOTO_LIPSYNC_MODELS = [
-  { id: 'bytedance/omnihuman-v1-5', label: 'OmniHuman 1.5', costUsd: 0.80, blurb: 'Built specifically for singing — captures musical phrasing and pauses, not just phoneme-level lip sync', provider: 'omnihuman' },
+  { id: 'bytedance/omnihuman-1-5', label: 'OmniHuman 1.5', costUsd: 0.80, blurb: 'Built specifically for singing — captures musical phrasing and pauses, not just phoneme-level lip sync', provider: 'omnihuman' },
   { id: 'kling/ai-avatar-standard', label: 'Kling AI Avatar (Standard)', costUsd: 0.45, blurb: 'Cheaper alternative — independent side-by-side tests rated it behind OmniHuman for singing specifically, but it is faster and less costly', provider: 'kling-avatar' },
 ];
 app.get('/api/photo-lipsync-models', (req, res) => {
@@ -430,7 +430,7 @@ app.post('/api/photo-lipsync/start', async (req, res) => {
   }
   const matched = PHOTO_LIPSYNC_MODELS.find(m => m.id === model) || PHOTO_LIPSYNC_MODELS[0];
   const input = matched.provider === 'omnihuman'
-    ? { image_url: imageUrl, audio_url: audioUrl, resolution: 1080 }
+    ? { image_url: imageUrl, audio_url: audioUrl, output_resolution: '1080P' }
     : { image_url: imageUrl, audio_url: audioUrl, prompt: 'The person sings passionately along with the audio, with facial expressions and movement matching the rhythm and emotion of the song.' };
   const callBackUrl = PUBLIC_URL ? PUBLIC_URL + '/api/webhook/kie' : undefined;
 
