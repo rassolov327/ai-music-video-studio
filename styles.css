@@ -778,7 +778,7 @@
     border-radius:5px;padding:5px 8px;font-size:12px;
   }
   .tasks-grid{
-    flex:1 1 auto;overflow-y:auto;padding:20px;
+    flex:1 1 auto;overflow-y:auto;padding:20px;scrollbar-gutter:stable;
     display:grid;grid-template-columns:repeat(auto-fill, minmax(200px, 1fr));gap:14px;
     align-content:start;
   }
