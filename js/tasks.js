@@ -689,7 +689,11 @@ async function archiveGeneration(t){
       ? ('AI Generator / ' + (t.prompt||'').slice(0,40))
       : kind==='movie'
       ? ((meta.sceneName || 'Scene') + ' / ' + (meta.shotName || 'Shot') + ' (animated)')
-      : kind==='archive-derive'
+      : kind==='lipsync'
+        ? ((meta.sceneName || 'Scene') + ' / ' + (meta.shotName || 'Shot') + ' (lip-sync)')
+        : kind==='photo-lipsync'
+          ? ((meta.sceneName || 'Scene') + ' / ' + (meta.shotName || 'Shot') + ' (lip-sync)')
+          : kind==='archive-derive'
         ? 'New idea from archive'
         : kind==='character-card'
           ? ('Character card / ' + (meta.characterName || '') + ' — ' + (meta.outputKey || ''))

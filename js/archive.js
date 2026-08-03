@@ -26,27 +26,16 @@ function wireArchivePage(){
     const file = fileInput.files[0];
     if(!file) return;
     try{
-      const dataUrl = await loadImageAsDataURL(file);
-      await archiveUploadedImage(dataUrl, file.name);
+      if(file.type && file.type.indexOf('audio/')===0){
+        await archiveUploadedAudio(file);
+      } else {
+        const dataUrl = await loadImageAsDataURL(file);
+        await archiveUploadedImage(dataUrl, file.name);
+      }
       renderArchiveGrid();
       renderAssets();
     } catch(err){
       alert('Could not add that file: ' + err.message);
-    }
-    fileInput.value = '';
-  };
-
-  document.getElementById('archiveUploadAudioBtn').onclick = ()=> document.getElementById('archiveUploadAudioInput').click();
-  document.getElementById('archiveUploadAudioInput').onchange = async ()=>{
-    const fileInput = document.getElementById('archiveUploadAudioInput');
-    const file = fileInput.files[0];
-    if(!file) return;
-    try{
-      await archiveUploadedAudio(file);
-      renderArchiveGrid();
-      renderAssets();
-    } catch(err){
-      alert('Could not add that audio file: ' + err.message);
     }
     fileInput.value = '';
   };
