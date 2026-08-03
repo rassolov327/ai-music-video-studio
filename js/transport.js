@@ -121,51 +121,68 @@ function stopPlayback(){
   syncFocusToPlayhead();
 }
 
-// ---------- mixer: vertical volume fader + live VU meter ----------
+// ---------- mixer: one vertical volume fader + live VU meter per track, side by side ----------
 function renderMixerPanel(){
   if(typeof markProjectDirty==='function') markProjectDirty();
   const panel = document.getElementById('mixerPanel');
   if(!panel) return;
-  const track = getActiveTrack();
-  if(!track || !state.timelineAudio){
+
+  const channels = [];
+  const musicTrack = getActiveTrack();
+  if(musicTrack && state.timelineAudio){
+    channels.push({
+      id: 'music', name: musicTrack.name, hasVu: true,
+      getVolume: ()=> state.timelineAudio.volume,
+      setVolume: (v)=>{ state.timelineAudio.volume = v; if(audioEl) audioEl.volume = v; },
+    });
+  }
+  (state.voiceTracks || []).forEach(vt=>{
+    channels.push({
+      id: vt.id, name: vt.name, hasVu: false,
+      getVolume: ()=> vt.volume,
+      setVolume: (v)=>{ vt.volume = v; },
+    });
+  });
+
+  if(channels.length===0){
     panel.innerHTML = `<div class="mixer-empty">No audio track<br>on the timeline</div>`;
     return;
   }
-  const vol = Math.round(state.timelineAudio.volume * 100);
-  panel.innerHTML = `
-    <div class="mixer-track-name" title="${track.name}">${track.name}</div>
-    <div class="mixer-fader-row">
-      <div class="vu-meter"><div class="vu-meter-fill" id="vuMeterFill" style="height:0%;"></div></div>
-      <div class="fader-track" id="faderTrack">
-        <div class="fader-fill" id="faderFill" style="height:${vol}%;"></div>
-        <div class="fader-handle" id="faderHandle" style="bottom:${vol}%;"></div>
-      </div>
-    </div>
-    <div class="mixer-vol-label" id="mixerVolLabel">${vol}</div>
-  `;
-  wireFader();
+
+  panel.innerHTML = channels.map(ch=>{
+    const vol = Math.round(ch.getVolume() * 100);
+    return `
+      <div class="mixer-channel">
+        <div class="mixer-track-name" title="${ch.name}">${ch.name}</div>
+        <div class="mixer-fader-row">
+          ${ch.hasVu ? `<div class="vu-meter"><div class="vu-meter-fill" id="vuMeterFill" style="height:0%;"></div></div>` : ''}
+          <div class="fader-track" data-fader-channel="${ch.id}">
+            <div class="fader-fill" style="height:${vol}%;"></div>
+            <div class="fader-handle" style="bottom:${vol}%;"></div>
+          </div>
+        </div>
+        <div class="mixer-vol-label" data-vol-label-channel="${ch.id}">${vol}</div>
+      </div>`;
+  }).join('');
+
+  channels.forEach(ch=> wireFader(ch));
 }
 
-function applyVolume(vol){
-  if(!state.timelineAudio) return;
-  vol = Math.max(0, Math.min(100, Math.round(vol)));
-  state.timelineAudio.volume = vol / 100;
-  if(audioEl) audioEl.volume = vol / 100;
-  const fill = document.getElementById('faderFill');
-  const handle = document.getElementById('faderHandle');
-  const label = document.getElementById('mixerVolLabel');
-  if(fill) fill.style.height = vol + '%';
-  if(handle) handle.style.bottom = vol + '%';
-  if(label) label.textContent = vol;
-}
-
-function wireFader(){
-  const trackEl = document.getElementById('faderTrack');
+function wireFader(channel){
+  const trackEl = document.querySelector(`[data-fader-channel="${channel.id}"]`);
   if(!trackEl) return;
   function setFromClientY(clientY){
     const rect = trackEl.getBoundingClientRect();
     let ratio = 1 - (clientY - rect.top) / rect.height; // ratio-based: immune to CSS zoom, top=100%
-    applyVolume(ratio * 100);
+    ratio = Math.max(0, Math.min(1, ratio));
+    const vol = Math.round(ratio * 100);
+    channel.setVolume(vol / 100);
+    const fill = trackEl.querySelector('.fader-fill');
+    const handle = trackEl.querySelector('.fader-handle');
+    const label = document.querySelector(`[data-vol-label-channel="${channel.id}"]`);
+    if(fill) fill.style.height = vol + '%';
+    if(handle) handle.style.bottom = vol + '%';
+    if(label) label.textContent = vol;
   }
   trackEl.addEventListener('pointerdown', (e)=>{
     e.preventDefault();
@@ -175,6 +192,7 @@ function wireFader(){
     const onUp = ()=>{
       trackEl.removeEventListener('pointermove', onMove);
       trackEl.removeEventListener('pointerup', onUp);
+      if(typeof saveProjectSoon==='function') saveProjectSoon();
     };
     trackEl.addEventListener('pointermove', onMove);
     trackEl.addEventListener('pointerup', onUp);
@@ -200,4 +218,5 @@ function updateVuMeter(reset){
   const level = Math.min(1, amp * 1.5) * (ta.volume || 0);
   fill.style.height = Math.round(level*100) + '%';
 }
+
 

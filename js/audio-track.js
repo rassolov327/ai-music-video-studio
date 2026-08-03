@@ -9,6 +9,30 @@ function setTimelineAudioTrack(trackId){
   if(typeof saveProjectSoon==='function') saveProjectSoon();
 }
 
+const MAX_VOICE_TRACKS = 5;
+function addVoiceTrack(){
+  state.voiceTracks = state.voiceTracks || [];
+  if(state.voiceTracks.length >= MAX_VOICE_TRACKS){
+    alert('Up to ' + MAX_VOICE_TRACKS + ' voice tracks are supported.');
+    return;
+  }
+  state.voiceTracks.push({ id: 'vt' + (voiceTrackSeq++), name: 'Voice ' + (state.voiceTracks.length + 1), volume: 1, blocks: [] });
+  renderTimeline();
+  if(typeof saveProjectSoon==='function') saveProjectSoon();
+}
+function deleteVoiceTrack(trackId){
+  state.voiceTracks = (state.voiceTracks || []).filter(t=> t.id!==trackId);
+  renderTimeline();
+  if(typeof saveProjectSoon==='function') saveProjectSoon();
+}
+function renameVoiceTrack(trackId, name){
+  const t = (state.voiceTracks || []).find(t=> t.id===trackId);
+  if(!t) return;
+  t.name = (name || '').trim() || t.name;
+  renderTimeline();
+  if(typeof saveProjectSoon==='function') saveProjectSoon();
+}
+
 function renderTimeline(){
   if(typeof markProjectDirty==='function') markProjectDirty();
   const musicCat = state.categories.find(c=>c.key==='music');
@@ -16,20 +40,30 @@ function renderTimeline(){
   if(!waveformWrap) return;
   renderMixerPanel();
 
+  // The music row keeps its own existing rendering logic entirely (real track / legacy
+  // placeholder / empty state) untouched, just redirected to write into its own
+  // sub-container instead of the whole wrap — the voice-tracks area sits below it and
+  // renders independently, every time, regardless of which music-row branch ran.
+  if(!document.getElementById('musicTrackRow')){
+    waveformWrap.innerHTML = `<div id="musicTrackRow"></div><div id="voiceTracksArea"></div>`;
+  }
+
   if(state.timelineAudio){
     const track = musicCat.items.find(t=>t.id===state.timelineAudio.trackId);
-    if(track){ renderRealAudioTrack(track); wireWaveformDropZone(); return; }
+    if(track){ renderRealAudioTrack(track); wireWaveformDropZone(); renderVoiceTracksArea(); return; }
     state.timelineAudio = null;
   }
 
   // legacy placeholder track (no real audio bytes — kept so existing projects still show something)
   const track = musicCat.items.find(it=>!it.id) || musicCat.items[0];
+  const musicRow = document.getElementById('musicTrackRow');
   if(!track){
-    waveformWrap.innerHTML = `<div class="no-track">No music track added. Add one from the Music library on the left, or drag a track here.</div>`;
+    musicRow.innerHTML = `<div class="no-track">No music track added. Add one from the Music library on the left, or drag a track here.</div>`;
     wireWaveformDropZone();
+    renderVoiceTracksArea();
     return;
   }
-  waveformWrap.innerHTML = `
+  musicRow.innerHTML = `
     <div class="waveform">
       <div class="audio-sticky-label"><div class="audio-sticky-label-inner">
         <span class="track-name"><i class="ti ti-music"></i> ${track.name}</span>
@@ -38,10 +72,38 @@ function renderTimeline(){
     </div>`;
   requestAnimationFrame(drawWave);
   wireWaveformDropZone();
+  renderVoiceTracksArea();
+}
+
+// Empty voice-track rows + the "+" button to add another one, per the agreed stage-1
+// scope — no block content, drag, or trim yet, just the tracks existing and being visible.
+function renderVoiceTracksArea(){
+  const area = document.getElementById('voiceTracksArea');
+  if(!area) return;
+  const tracks = state.voiceTracks || [];
+  const canAddMore = tracks.length < MAX_VOICE_TRACKS;
+  area.innerHTML = tracks.map(vt=> `
+    <div class="voice-track-row" data-voice-track="${vt.id}">
+      <div class="audio-sticky-label"><div class="audio-sticky-label-inner">
+        <span class="track-name"><i class="ti ti-mic"></i> ${vt.name}</span>
+        <span class="voice-track-del" data-del-voice-track="${vt.id}" title="Delete track">${trashSvg(10)}</span>
+      </div></div>
+      <div class="voice-track-blocks"></div>
+    </div>`).join('')
+    + (canAddMore ? `<div class="voice-track-add" id="addVoiceTrackBtn" title="Add voice track">${plusSvg(16)}</div>` : '');
+
+  const addBtn = document.getElementById('addVoiceTrackBtn');
+  if(addBtn) addBtn.onclick = addVoiceTrack;
+  area.querySelectorAll('[data-del-voice-track]').forEach(el=>{
+    el.onclick = (e)=>{
+      e.stopPropagation();
+      deleteVoiceTrack(el.dataset.delVoiceTrack);
+    };
+  });
 }
 
 function wireWaveformDropZone(){
-  const waveformWrap = document.getElementById('waveformWrap');
+  const waveformWrap = document.getElementById('musicTrackRow');
   if(!waveformWrap) return;
   waveformWrap.addEventListener('dragover', (e)=>{ e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
   waveformWrap.addEventListener('drop', (e)=>{
@@ -55,7 +117,7 @@ function wireWaveformDropZone(){
 }
 
 function renderRealAudioTrack(track){
-  const waveformWrap = document.getElementById('waveformWrap');
+  const waveformWrap = document.getElementById('musicTrackRow');
   if(!waveformWrap) return;
   const ta = state.timelineAudio;
   const clipWidth = Math.max(20, Math.round((ta.trimOut - ta.trimIn) * PX_PER_SEC));

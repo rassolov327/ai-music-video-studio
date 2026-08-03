@@ -140,10 +140,11 @@ async function createProject({ name, format, width, height, fps, folderHandle })
   focus = { sceneId:null, shotId:null };
   timelineMode = 'assembly';
   playheadX = 0;
-  sceneSeq = 1; shotSeq = 1; paletteSeq = 0; charSeq = 1; locSeq = 1; trackSeq = 1; lookSeq = 1; propSeq = 1; draftTaskSeq = 1; archiveSeq = 1; scriptItemSeq = 1;
+  sceneSeq = 1; shotSeq = 1; paletteSeq = 0; charSeq = 1; locSeq = 1; trackSeq = 1; lookSeq = 1; propSeq = 1; draftTaskSeq = 1; archiveSeq = 1; scriptItemSeq = 1; voiceTrackSeq = 1;
   state.taskQueue = [];
   state.archive = [];
   state.script = { text:'', proposal:null };
+  state.voiceTracks = [];
   if(typeof scriptSelectedItem!=='undefined') scriptSelectedItem = null;
   PROJECT_FPS = meta.fps;
   applyProjectFrame();
@@ -1163,13 +1164,14 @@ function serializeProject(){
     categories: categoriesOut,
     scenes: scenesOut,
     timelineAudio: state.timelineAudio ? JSON.parse(JSON.stringify(state.timelineAudio)) : null,
+    voiceTracks: JSON.parse(JSON.stringify(state.voiceTracks || [])),
     focus: Object.assign({}, focus),
     timelineMode: timelineMode,
     playheadX: playheadX,
     taskQueue: JSON.parse(JSON.stringify(state.taskQueue || [])),
     archive: archiveOut,
     script: JSON.parse(JSON.stringify(state.script || { text:'', proposal:null })),
-    seq: { sceneSeq, shotSeq, paletteSeq, charSeq, locSeq, trackSeq, lookSeq, propSeq, draftTaskSeq, archiveSeq, scriptItemSeq },
+    seq: { sceneSeq, shotSeq, paletteSeq, charSeq, locSeq, trackSeq, lookSeq, propSeq, draftTaskSeq, archiveSeq, scriptItemSeq, voiceTrackSeq },
   };
 }
 
@@ -1267,6 +1269,7 @@ async function applyProjectData(data, verbose){
   state.categories = data.categories || state.categories;
   state.scenes = data.scenes || [];
   state.timelineAudio = data.timelineAudio || null;
+  state.voiceTracks = data.voiceTracks || [];
   state.projectMeta = data.projectMeta || state.projectMeta;
   state.taskQueue = data.taskQueue || [];
   state.archive = data.archive || [];
@@ -1360,6 +1363,7 @@ async function applyProjectData(data, verbose){
     draftTaskSeq = data.seq.draftTaskSeq || 1;
     archiveSeq = data.seq.archiveSeq || 1;
     scriptItemSeq = data.seq.scriptItemSeq || 1;
+    voiceTrackSeq = data.seq.voiceTrackSeq || 1;
   }
   applyProjectFrame();
   renderAssets();
