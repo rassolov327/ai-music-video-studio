@@ -77,6 +77,31 @@ function renderTimeline(){
 
 // Empty voice-track rows + the "+" button to add another one, per the agreed stage-1
 // scope — no block content, drag, or trim yet, just the tracks existing and being visible.
+function drawVoiceBlockWaveform(canvas, entry, trimIn, durationSec){
+  if(!entry || !entry.peaks || !entry.duration) return;
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if(w===0 || h===0) return;
+  canvas.width = w*dpr; canvas.height = h*dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = '#cfe8ee';
+  const peaks = entry.peaks;
+  const total = peaks.length;
+  const startIdx = Math.max(0, Math.floor((trimIn / entry.duration) * total));
+  const endIdx = Math.min(total, Math.ceil(((trimIn + durationSec) / entry.duration) * total));
+  const sliceLen = Math.max(1, endIdx - startIdx);
+  const step = 3;
+  const bars = Math.floor(w/step);
+  for(let i=0; i<bars; i++){
+    const idx = startIdx + Math.floor((i/bars) * sliceLen);
+    const amp = peaks[Math.min(idx, total-1)] || 0;
+    const bh = Math.max(2, amp*h*0.8);
+    ctx.fillRect(i*step, (h-bh)/2, 2, bh);
+  }
+}
+
 function wireVoiceBlockInteractions(){
   document.querySelectorAll('[data-voice-block-drag]').forEach(el=>{
     el.addEventListener('pointerdown', (e)=>{
@@ -89,28 +114,43 @@ function wireVoiceBlockInteractions(){
       if(!track || !block) return;
       const startX = e.clientX;
       const startSec0 = block.startSec;
-      // Neighbors don't change mid-drag (we're only moving this one block), so compute
-      // the nearest blocker on each side once up front rather than re-scanning every move.
       const prevBlock = track.blocks.filter(b=> b.id!==bid && b.startSec < startSec0)
         .sort((a,b2)=> b2.startSec - a.startSec)[0];
       const nextBlock = track.blocks.filter(b=> b.id!==bid && b.startSec >= startSec0)
         .sort((a,b2)=> a.startSec - b2.startSec)[0];
-      const minStart = prevBlock ? prevBlock.startSec + prevBlock.durationSec : 0;
-      const maxStart = nextBlock ? nextBlock.startSec - block.durationSec : Infinity;
       let pendingStart = startSec0;
       document.body.style.cursor = 'grabbing';
       const onMove = (ev)=>{
         const deltaSec = (ev.clientX - startX) / PX_PER_SEC;
-        let newStart = startSec0 + deltaSec;
-        newStart = Math.max(minStart, Math.min(maxStart, newStart));
-        pendingStart = newStart;
-        el.style.left = Math.round(newStart * PX_PER_SEC) + 'px';
+        // No live clamping here on purpose — dragging visually past/into a neighbor is how
+        // a swap is signalled; the actual collide-vs-swap decision happens on drop.
+        pendingStart = Math.max(0, startSec0 + deltaSec);
+        el.style.left = Math.round(pendingStart * PX_PER_SEC) + 'px';
       };
       const onUp = ()=>{
         document.removeEventListener('pointermove', onMove);
         document.removeEventListener('pointerup', onUp);
         document.body.style.cursor = '';
-        block.startSec = Math.round(pendingStart*10)/10;
+        const finalStart = Math.round(pendingStart*10)/10;
+        const finalEnd = finalStart + block.durationSec;
+        // A neighbor the block was dragged substantially into (more than 40% of the
+        // shorter block's length) is treated as "swap with this one" rather than a mere
+        // graze — anything less is just a normal move, clamped against that same neighbor
+        // so the two still never overlap in the committed result.
+        const candidate = [prevBlock, nextBlock].filter(Boolean).find(b=>{
+          const bEnd = b.startSec + b.durationSec;
+          const overlapAmt = Math.min(finalEnd, bEnd) - Math.max(finalStart, b.startSec);
+          return overlapAmt > Math.min(block.durationSec, b.durationSec) * 0.4;
+        });
+        if(candidate){
+          const otherOldStart = candidate.startSec;
+          candidate.startSec = Math.round(startSec0*10)/10;
+          block.startSec = Math.round(otherOldStart*10)/10;
+        } else {
+          const minStart = prevBlock ? prevBlock.startSec + prevBlock.durationSec : 0;
+          const maxStart = nextBlock ? nextBlock.startSec - block.durationSec : Infinity;
+          block.startSec = Math.max(minStart, Math.min(maxStart, finalStart));
+        }
         renderTimeline();
         if(typeof saveProjectSoon==='function') saveProjectSoon();
       };
@@ -187,8 +227,9 @@ function renderVoiceTracksArea(){
   if(!area) return;
   const tracks = state.voiceTracks || [];
   const canAddMore = tracks.length < MAX_VOICE_TRACKS;
+  const totalWidth = typeof getTotalTimelinePx==='function' ? getTotalTimelinePx() : 0;
   area.innerHTML = tracks.map(vt=> `
-    <div class="voice-track-row" data-voice-track="${vt.id}">
+    <div class="voice-track-row" data-voice-track="${vt.id}" style="width:${totalWidth}px;">
       <div class="audio-sticky-label"><div class="audio-sticky-label-inner">
         <span class="track-name"><i class="ti ti-mic"></i> ${vt.name}</span>
         <span class="voice-track-del" data-del-voice-track="${vt.id}" title="Delete track">${trashSvg(10)}</span>
@@ -199,6 +240,7 @@ function renderVoiceTracksArea(){
         const x = Math.round(b.startSec * PX_PER_SEC);
         const w = Math.max(20, Math.round(b.durationSec * PX_PER_SEC));
         return `<div class="voice-block" data-voice-block-drag="${vt.id}|${b.id}" style="left:${x}px;width:${w}px;" title="${label}">
+          <canvas class="voice-block-wave" data-voice-block-wave="${vt.id}|${b.id}"></canvas>
           <span class="voice-block-label">${label}</span>
           <div class="voice-block-trim left" data-voice-block-trim="${vt.id}|${b.id}|left"></div>
           <div class="voice-block-trim right" data-voice-block-trim="${vt.id}|${b.id}|right"></div>
@@ -216,6 +258,15 @@ function renderVoiceTracksArea(){
     };
   });
   wireVoiceBlockInteractions();
+
+  area.querySelectorAll('[data-voice-block-wave]').forEach(canvas=>{
+    const [tid, bid] = canvas.dataset.voiceBlockWave.split('|');
+    const track = tracks.find(t=> t.id===tid);
+    const block = track && (track.blocks||[]).find(b=> b.id===bid);
+    if(!block) return;
+    const entry = (state.archive||[]).find(e=> e.id===block.archiveEntryId);
+    if(entry) requestAnimationFrame(()=> drawVoiceBlockWaveform(canvas, entry, block.trimIn||0, block.durationSec));
+  });
 }
 
 function wireWaveformDropZone(){

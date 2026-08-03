@@ -71,6 +71,52 @@ function startPlayback(){
   runPlayLoop();
 }
 
+// One <audio> element per voice track, reused for whichever block is currently under the
+// playhead — blocks on the same track never overlap by design, so at most one is ever
+// active per track at a time.
+const voiceTrackAudioEls = {};
+function getVoiceTrackAudioEl(trackId){
+  if(!voiceTrackAudioEls[trackId]){
+    const el = new Audio();
+    el.style.display = 'none';
+    document.body.appendChild(el);
+    voiceTrackAudioEls[trackId] = el;
+  }
+  return voiceTrackAudioEls[trackId];
+}
+function syncVoiceTracksPlayback(currentSec){
+  (state.voiceTracks||[]).forEach(track=>{
+    const el = getVoiceTrackAudioEl(track.id);
+    const activeBlock = (track.blocks||[]).find(b=> currentSec >= b.startSec && currentSec < b.startSec + b.durationSec);
+    if(!activeBlock){
+      if(!el.paused) el.pause();
+      el.dataset.blockId = '';
+      return;
+    }
+    const entry = (state.archive||[]).find(e=> e.id===activeBlock.archiveEntryId);
+    if(!entry || !entry.photo){
+      if(!el.paused) el.pause();
+      return;
+    }
+    const trackVol = track.volume!=null ? track.volume : 1;
+    const blockVol = activeBlock.volume!=null ? activeBlock.volume : 1;
+    el.volume = Math.max(0, Math.min(1, trackVol * blockVol));
+    if(el.dataset.blockId !== activeBlock.id){
+      el.src = entry.photo;
+      el.dataset.blockId = activeBlock.id;
+      const seekTarget = (activeBlock.trimIn||0) + (currentSec - activeBlock.startSec);
+      const doSeek = ()=>{ el.currentTime = seekTarget; if(isPlaying) el.play().catch(()=>{}); };
+      if(el.readyState >= 1) doSeek();
+      else el.addEventListener('loadedmetadata', doSeek, { once:true });
+    } else if(isPlaying && el.paused){
+      el.play().catch(()=>{});
+    }
+  });
+}
+function pauseAllVoiceTracks(){
+  Object.values(voiceTrackAudioEls).forEach(el=>{ if(!el.paused) el.pause(); });
+}
+
 function runPlayLoop(){
   if(!isPlaying) return;
   const maxX = getTotalTimelinePx();
@@ -86,6 +132,7 @@ function runPlayLoop(){
   if(track && audioEl && ta && !audioEl.paused && audioEl.currentTime >= ta.trimOut - 0.02){
     audioEl.pause();
   }
+  syncVoiceTracksPlayback(playheadX / PX_PER_SEC);
 
   const marker = document.getElementById('timelinePlayhead');
   if(marker) marker.style.left = playheadX + 'px';
@@ -108,6 +155,7 @@ function runPlayLoop(){
 function pausePlayback(){
   if(playRafId){ cancelAnimationFrame(playRafId); playRafId = null; }
   if(audioEl) audioEl.pause();
+  pauseAllVoiceTracks();
   const previewVideo = previewEl && previewEl.querySelector('video');
   if(previewVideo) previewVideo.pause();
   isPlaying = false;
@@ -118,6 +166,7 @@ function stopPlayback(){
   pausePlayback();
   playheadX = 0;
   if(audioEl && state.timelineAudio) audioEl.currentTime = state.timelineAudio.trimIn;
+  Object.keys(voiceTrackAudioEls).forEach(tid=>{ voiceTrackAudioEls[tid].dataset.blockId = ''; });
   syncFocusToPlayhead();
 }
 
