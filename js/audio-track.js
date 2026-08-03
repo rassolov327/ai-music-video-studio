@@ -77,6 +77,111 @@ function renderTimeline(){
 
 // Empty voice-track rows + the "+" button to add another one, per the agreed stage-1
 // scope — no block content, drag, or trim yet, just the tracks existing and being visible.
+function wireVoiceBlockInteractions(){
+  document.querySelectorAll('[data-voice-block-drag]').forEach(el=>{
+    el.addEventListener('pointerdown', (e)=>{
+      if(e.target.closest('.voice-block-trim')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const [tid, bid] = el.dataset.voiceBlockDrag.split('|');
+      const track = (state.voiceTracks||[]).find(t=> t.id===tid);
+      const block = track && (track.blocks||[]).find(b=> b.id===bid);
+      if(!track || !block) return;
+      const startX = e.clientX;
+      const startSec0 = block.startSec;
+      // Neighbors don't change mid-drag (we're only moving this one block), so compute
+      // the nearest blocker on each side once up front rather than re-scanning every move.
+      const prevBlock = track.blocks.filter(b=> b.id!==bid && b.startSec < startSec0)
+        .sort((a,b2)=> b2.startSec - a.startSec)[0];
+      const nextBlock = track.blocks.filter(b=> b.id!==bid && b.startSec >= startSec0)
+        .sort((a,b2)=> a.startSec - b2.startSec)[0];
+      const minStart = prevBlock ? prevBlock.startSec + prevBlock.durationSec : 0;
+      const maxStart = nextBlock ? nextBlock.startSec - block.durationSec : Infinity;
+      let pendingStart = startSec0;
+      document.body.style.cursor = 'grabbing';
+      const onMove = (ev)=>{
+        const deltaSec = (ev.clientX - startX) / PX_PER_SEC;
+        let newStart = startSec0 + deltaSec;
+        newStart = Math.max(minStart, Math.min(maxStart, newStart));
+        pendingStart = newStart;
+        el.style.left = Math.round(newStart * PX_PER_SEC) + 'px';
+      };
+      const onUp = ()=>{
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
+        document.body.style.cursor = '';
+        block.startSec = Math.round(pendingStart*10)/10;
+        renderTimeline();
+        if(typeof saveProjectSoon==='function') saveProjectSoon();
+      };
+      document.addEventListener('pointermove', onMove);
+      document.addEventListener('pointerup', onUp);
+    });
+  });
+
+  document.querySelectorAll('[data-voice-block-trim]').forEach(el=>{
+    el.addEventListener('pointerdown', (e)=>{
+      e.preventDefault();
+      e.stopPropagation();
+      const [tid, bid, side] = el.dataset.voiceBlockTrim.split('|');
+      const track = (state.voiceTracks||[]).find(t=> t.id===tid);
+      const block = track && (track.blocks||[]).find(b=> b.id===bid);
+      if(!track || !block) return;
+      const entry = (state.archive||[]).find(e2=> e2.id===block.archiveEntryId);
+      const fullDuration = entry && entry.duration ? entry.duration : (block.trimIn||0) + block.durationSec;
+      const startX = e.clientX;
+      const startSec0 = block.startSec, startDur0 = block.durationSec, startTrimIn0 = block.trimIn || 0;
+      const MIN_SEC = 0.5;
+      const blockEl = el.parentElement;
+      document.body.style.cursor = 'ew-resize';
+      // Same idea as the drag case — the relevant neighbor for each side never changes
+      // mid-trim, so it's found once here rather than on every pointermove.
+      const nextBlock = track.blocks.filter(b=> b.id!==bid && b.startSec >= startSec0+startDur0-0.01)
+        .sort((a,b2)=> a.startSec - b2.startSec)[0];
+      const prevBlock = track.blocks.filter(b=> b.id!==bid && (b.startSec+b.durationSec) <= startSec0+0.01)
+        .sort((a,b2)=> (b2.startSec+b2.durationSec) - (a.startSec+a.durationSec))[0];
+      let pending = { startSec: startSec0, durationSec: startDur0, trimIn: startTrimIn0 };
+      const onMove = (ev)=>{
+        const deltaSec = (ev.clientX - startX) / PX_PER_SEC;
+        if(side==='right'){
+          let newDur = startDur0 + deltaSec;
+          newDur = Math.max(MIN_SEC, Math.min(newDur, fullDuration - startTrimIn0));
+          if(nextBlock) newDur = Math.min(newDur, nextBlock.startSec - startSec0);
+          newDur = Math.max(MIN_SEC, newDur);
+          pending.durationSec = Math.round(newDur*10)/10;
+        } else {
+          let newTrimIn = startTrimIn0 + deltaSec;
+          newTrimIn = Math.max(0, Math.min(newTrimIn, startTrimIn0 + startDur0 - MIN_SEC));
+          let newStart = startSec0 + (newTrimIn - startTrimIn0);
+          const minStart = prevBlock ? prevBlock.startSec + prevBlock.durationSec : 0;
+          if(newStart < minStart){
+            newStart = minStart;
+            newTrimIn = startTrimIn0 + (newStart - startSec0);
+          }
+          const newDur = startDur0 - (newTrimIn - startTrimIn0);
+          pending.startSec = Math.round(newStart*10)/10;
+          pending.trimIn = Math.round(newTrimIn*10)/10;
+          pending.durationSec = Math.round(newDur*10)/10;
+        }
+        blockEl.style.left = Math.round(pending.startSec*PX_PER_SEC)+'px';
+        blockEl.style.width = Math.max(20, Math.round(pending.durationSec*PX_PER_SEC))+'px';
+      };
+      const onUp = ()=>{
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
+        document.body.style.cursor = '';
+        block.startSec = pending.startSec;
+        block.durationSec = pending.durationSec;
+        block.trimIn = pending.trimIn;
+        renderTimeline();
+        if(typeof saveProjectSoon==='function') saveProjectSoon();
+      };
+      document.addEventListener('pointermove', onMove);
+      document.addEventListener('pointerup', onUp);
+    });
+  });
+}
+
 function renderVoiceTracksArea(){
   const area = document.getElementById('voiceTracksArea');
   if(!area) return;
@@ -93,7 +198,11 @@ function renderVoiceTracksArea(){
         const label = entry ? (entry.sourceLabel || 'Audio') : 'Missing audio';
         const x = Math.round(b.startSec * PX_PER_SEC);
         const w = Math.max(20, Math.round(b.durationSec * PX_PER_SEC));
-        return `<div class="voice-block" data-voice-block="${vt.id}|${b.id}" style="left:${x}px;width:${w}px;" title="${label}">${label}</div>`;
+        return `<div class="voice-block" data-voice-block-drag="${vt.id}|${b.id}" style="left:${x}px;width:${w}px;" title="${label}">
+          <span class="voice-block-label">${label}</span>
+          <div class="voice-block-trim left" data-voice-block-trim="${vt.id}|${b.id}|left"></div>
+          <div class="voice-block-trim right" data-voice-block-trim="${vt.id}|${b.id}|right"></div>
+        </div>`;
       }).join('')}</div>
     </div>`).join('')
     + (canAddMore ? `<div class="voice-track-add" id="addVoiceTrackBtn" title="Add voice track">${plusSvg(16)}</div>` : '');
@@ -106,6 +215,7 @@ function renderVoiceTracksArea(){
       deleteVoiceTrack(el.dataset.delVoiceTrack);
     };
   });
+  wireVoiceBlockInteractions();
 }
 
 function wireWaveformDropZone(){

@@ -542,9 +542,14 @@
   .voice-block{
     position:absolute;top:2px;bottom:2px;border-radius:4px;
     background:#3a5a6b;border:1px solid #4f7f96;color:#eaf3f6;font-size:10px;
-    padding:2px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-    display:flex;align-items:center;
+    overflow:hidden;cursor:grab;display:flex;align-items:center;
   }
+  .voice-block:active{cursor:grabbing;}
+  .voice-block-label{padding:0 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none;}
+  .voice-block-trim{position:absolute;top:0;bottom:0;width:6px;cursor:ew-resize;z-index:2;}
+  .voice-block-trim.left{left:0;}
+  .voice-block-trim.right{right:0;}
+  .voice-block-trim:hover{background:rgba(255,255,255,.25);}
   .voice-track-add{
     display:flex;align-items:center;justify-content:center;width:32px;height:32px;margin:6px 0 6px 12px;
     border:1px dashed var(--line);border-radius:6px;color:var(--text-3);cursor:pointer;flex:0 0 auto;
