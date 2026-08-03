@@ -24,7 +24,7 @@ const state = {
   script: { text: '', proposal: null },
 };
 
-let sceneSeq = 1, shotSeq = 1, paletteSeq = 0, charSeq = 1, locSeq = 1, trackSeq = 1, lookSeq = 1, propSeq = 1, draftTaskSeq = 1, archiveSeq = 1, scriptItemSeq = 1, voiceTrackSeq = 1;
+let sceneSeq = 1, shotSeq = 1, paletteSeq = 0, charSeq = 1, locSeq = 1, trackSeq = 1, lookSeq = 1, propSeq = 1, draftTaskSeq = 1, archiveSeq = 1, scriptItemSeq = 1, voiceTrackSeq = 1, voiceBlockSeq = 1;
 let focus = { sceneId: null, shotId: null };
 let timelineMode = 'assembly'; // 'assembly' (spaced, insert-between) | 'edit' (flush clips, drag-to-reorder within scene)
 let playheadX = 0;

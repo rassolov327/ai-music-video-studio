@@ -140,7 +140,7 @@ async function createProject({ name, format, width, height, fps, folderHandle })
   focus = { sceneId:null, shotId:null };
   timelineMode = 'assembly';
   playheadX = 0;
-  sceneSeq = 1; shotSeq = 1; paletteSeq = 0; charSeq = 1; locSeq = 1; trackSeq = 1; lookSeq = 1; propSeq = 1; draftTaskSeq = 1; archiveSeq = 1; scriptItemSeq = 1; voiceTrackSeq = 1;
+  sceneSeq = 1; shotSeq = 1; paletteSeq = 0; charSeq = 1; locSeq = 1; trackSeq = 1; lookSeq = 1; propSeq = 1; draftTaskSeq = 1; archiveSeq = 1; scriptItemSeq = 1; voiceTrackSeq = 1; voiceBlockSeq = 1;
   state.taskQueue = [];
   state.archive = [];
   state.script = { text:'', proposal:null };
@@ -1171,7 +1171,7 @@ function serializeProject(){
     taskQueue: JSON.parse(JSON.stringify(state.taskQueue || [])),
     archive: archiveOut,
     script: JSON.parse(JSON.stringify(state.script || { text:'', proposal:null })),
-    seq: { sceneSeq, shotSeq, paletteSeq, charSeq, locSeq, trackSeq, lookSeq, propSeq, draftTaskSeq, archiveSeq, scriptItemSeq, voiceTrackSeq },
+    seq: { sceneSeq, shotSeq, paletteSeq, charSeq, locSeq, trackSeq, lookSeq, propSeq, draftTaskSeq, archiveSeq, scriptItemSeq, voiceTrackSeq, voiceBlockSeq },
   };
 }
 
@@ -1364,6 +1364,7 @@ async function applyProjectData(data, verbose){
     archiveSeq = data.seq.archiveSeq || 1;
     scriptItemSeq = data.seq.scriptItemSeq || 1;
     voiceTrackSeq = data.seq.voiceTrackSeq || 1;
+    voiceBlockSeq = data.seq.voiceBlockSeq || 1;
   }
   applyProjectFrame();
   renderAssets();

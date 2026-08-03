@@ -88,7 +88,13 @@ function renderVoiceTracksArea(){
         <span class="track-name"><i class="ti ti-mic"></i> ${vt.name}</span>
         <span class="voice-track-del" data-del-voice-track="${vt.id}" title="Delete track">${trashSvg(10)}</span>
       </div></div>
-      <div class="voice-track-blocks"></div>
+      <div class="voice-track-blocks">${(vt.blocks||[]).map(b=>{
+        const entry = (state.archive||[]).find(e=> e.id===b.archiveEntryId);
+        const label = entry ? (entry.sourceLabel || 'Audio') : 'Missing audio';
+        const x = Math.round(b.startSec * PX_PER_SEC);
+        const w = Math.max(20, Math.round(b.durationSec * PX_PER_SEC));
+        return `<div class="voice-block" data-voice-block="${vt.id}|${b.id}" style="left:${x}px;width:${w}px;" title="${label}">${label}</div>`;
+      }).join('')}</div>
     </div>`).join('')
     + (canAddMore ? `<div class="voice-track-add" id="addVoiceTrackBtn" title="Add voice track">${plusSvg(16)}</div>` : '');
 
