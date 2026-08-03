@@ -35,8 +35,42 @@ function wireArchivePage(){
     }
     fileInput.value = '';
   };
+
+  document.getElementById('archiveUploadAudioBtn').onclick = ()=> document.getElementById('archiveUploadAudioInput').click();
+  document.getElementById('archiveUploadAudioInput').onchange = async ()=>{
+    const fileInput = document.getElementById('archiveUploadAudioInput');
+    const file = fileInput.files[0];
+    if(!file) return;
+    try{
+      await archiveUploadedAudio(file);
+      renderArchiveGrid();
+      renderAssets();
+    } catch(err){
+      alert('Could not add that audio file: ' + err.message);
+    }
+    fileInput.value = '';
+  };
 }
 
+function drawArchiveWaveform(canvas, peaks){
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if(w===0 || h===0) return;
+  canvas.width = w*dpr; canvas.height = h*dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = '#3f6b4f';
+  const total = peaks.length;
+  const step = 3;
+  const bars = Math.floor(w/step);
+  for(let i=0; i<bars; i++){
+    const idx = Math.floor((i/bars) * total);
+    const amp = peaks[Math.min(idx, total-1)] || 0;
+    const bh = Math.max(2, amp*h*0.8);
+    ctx.fillRect(i*step, (h-bh)/2, 2, bh);
+  }
+}
 function videoModelResolution(modelId){
   if(!modelId) return null;
   return modelId.indexOf('standard')>=0 ? '720p (1280×720)' : '1080p (1920×1080)';
@@ -55,17 +89,23 @@ function renderArchiveGrid(){
     return `
       <div class="task-tile" data-archive-id="${entry.id}">
         <div class="task-tile-thumb">
-          ${entry.photo ? (entry.isVideo ? `<video src="${entry.photo}" muted loop autoplay playsinline></video>` : `<img src="${entry.photo}">`) : '<div class="task-tile-spin"></div>'}
+          ${entry.isAudio ? `<canvas class="archive-wave-canvas" data-wave-for="${entry.id}"></canvas>`
+            : entry.photo ? (entry.isVideo ? `<video src="${entry.photo}" muted loop autoplay playsinline></video>` : `<img src="${entry.photo}">`) : '<div class="task-tile-spin"></div>'}
           ${showInsert ? `<div class="task-tile-insert" title="Insert as a new shot at the playhead"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><polyline points="19 12 12 19 5 12"></polyline></svg></div>` : ''}
           ${entry.isVideo ? `<div class="archive-info-icon" title="Video info"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="11"></line><circle cx="12" cy="8" r="0.6" fill="currentColor" stroke="none"></circle></svg></div>` : ''}
           <div class="task-tile-trash" title="Remove from archive"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></div>
         </div>
         <div class="task-tile-body">
           <div class="task-tile-scene">${entry.sourceLabel || ''}</div>
-          <div class="task-tile-model">${entry.model || ''}</div>
+          <div class="task-tile-model">${entry.model || (entry.isAudio ? (entry.duration ? Math.round(entry.duration) + 's audio' : 'audio') : '')}</div>
         </div>
       </div>`;
   }).join('');
+
+  grid.querySelectorAll('[data-wave-for]').forEach(canvas=>{
+    const entry = entries.find(e=> e.id===canvas.dataset.waveFor);
+    if(entry && entry.peaks) requestAnimationFrame(()=> drawArchiveWaveform(canvas, entry.peaks));
+  });
 
   grid.querySelectorAll('.task-tile').forEach(tile=>{
     const id = tile.dataset.archiveId;
@@ -102,6 +142,10 @@ function renderArchiveGrid(){
     if(insertBtn){
       insertBtn.onclick = (e)=>{
         e.stopPropagation();
+        if(entry && entry.isAudio){
+          alert('Inserting onto a voice track — coming in the next stage.');
+          return;
+        }
         insertArchiveEntryAtPlayhead(id);
       };
     }
@@ -121,6 +165,7 @@ async function deleteArchiveEntry(entryId){
 function openArchivePreview(entryId){
   const entry = (state.archive||[]).find(a=> a.id===entryId);
   if(!entry || !entry.photo) return;
+  if(entry.isAudio) return; // preview modal is image/video-only for now; audio has no preview yet
   archiveOpenEntryId = entryId;
   const imgEl = document.getElementById('archivePreviewImg');
   const videoEl = document.getElementById('archivePreviewVideo');

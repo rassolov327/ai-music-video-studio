@@ -729,6 +729,28 @@ async function archiveUploadedImage(dataUrl, label){
   return entry;
 }
 
+// New archive tile type (stage 2 of multi-track audio): a real uploaded audio file, shown
+// as a waveform thumbnail instead of a picture. Reuses buildMusicTrack's decode+peaks logic
+// (same one the Music library uses) rather than reinventing waveform generation, and the
+// same generic archive-asset persistence images already go through — it's MIME-agnostic,
+// so an audio blob: URL works the same way a photo data: URL does.
+async function archiveUploadedAudio(file){
+  state.archive = state.archive || [];
+  const track = await buildMusicTrack(file);
+  const entry = {
+    id: 'arc' + (archiveSeq++),
+    kind: 'upload', sourceLabel: 'Uploaded — ' + (file.name || 'audio'),
+    model: '', prompt: '',
+    isAudio: true, duration: track.fullDuration, peaks: track.peaks,
+    photo: null, createdAt: Date.now(),
+  };
+  state.archive.push(entry);
+  if(typeof persistGeneratedAssetImage==='function') await persistGeneratedAssetImage(entry, 'archive', 'photo', track.audioUrl);
+  else entry.photo = track.audioUrl;
+  if(typeof saveProjectSoon==='function') saveProjectSoon();
+  return entry;
+}
+
 // ---------- AI Generator (Tools menu) — a standalone prompt+model generator, not tied to
 // any asset. Sends straight to the shared generation pipeline, same as everything else, so
 // it shows up live in TASKS and lands in ARCHIVE automatically once it succeeds. ----------
