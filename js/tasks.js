@@ -75,34 +75,22 @@ function formatCost(usd){
   return '≈' + credits + ' cr';
 }
 
-let refreshTasksInFlight = false;
 async function refreshTasks(){
   if(!currentProjectId) return;
-  // The 4s and 6s polling timers are independent and neither waits for the other — without
-  // this guard, a slow disk write still in progress from one tick (a large lip-sync video
-  // in particular) could overlap with the next tick's own writes to the same assets folder,
-  // corrupting/losing one of them. Image-only workloads were fast enough that this never
-  // surfaced before; large video files are.
-  if(refreshTasksInFlight) return;
-  refreshTasksInFlight = true;
   try{
-    try{
-      const res = await fetch('/api/tasks?projectId=' + encodeURIComponent(currentProjectId));
-      const data = await res.json();
-      liveTasks = (data && data.tasks) || [];
-    } catch(err){
-      liveTasks = [];
-    }
-    // drop selections for drafts that no longer exist (sent or deleted elsewhere)
-    const draftIds = new Set((state.taskQueue||[]).map(t=> t.id));
-    selectedDraftIds.forEach(id=>{ if(!draftIds.has(id)) selectedDraftIds.delete(id); });
-
-    renderTasksGrid();
-    await applyFinishedTasks(liveTasks);
-    updateTasksBadge();
-  } finally {
-    refreshTasksInFlight = false;
+    const res = await fetch('/api/tasks?projectId=' + encodeURIComponent(currentProjectId));
+    const data = await res.json();
+    liveTasks = (data && data.tasks) || [];
+  } catch(err){
+    liveTasks = [];
   }
+  // drop selections for drafts that no longer exist (sent or deleted elsewhere)
+  const draftIds = new Set((state.taskQueue||[]).map(t=> t.id));
+  selectedDraftIds.forEach(id=>{ if(!draftIds.has(id)) selectedDraftIds.delete(id); });
+
+  renderTasksGrid();
+  await applyFinishedTasks(liveTasks);
+  updateTasksBadge();
 }
 
 function updateTasksBadge(){
