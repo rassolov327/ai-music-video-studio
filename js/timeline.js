@@ -275,6 +275,15 @@ function wireTimelineZoomControl(){
   outBtn.addEventListener('click', ()=> zoomTimelineBy(-10));
   inBtn.addEventListener('click', ()=> zoomTimelineBy(10));
 
+  const magnetBtn = document.getElementById('magnetToggleBtn');
+  if(magnetBtn){
+    magnetBtn.classList.toggle('active', magnetEnabled);
+    magnetBtn.addEventListener('click', ()=>{
+      magnetEnabled = !magnetEnabled;
+      magnetBtn.classList.toggle('active', magnetEnabled);
+    });
+  }
+
   // Redirects a normal (vertical) mouse-wheel gesture into horizontal scrolling of the
   // timeline — browsers don't do this by default, only Shift+wheel does natively.
   const scenesEl = document.getElementById('timelineScenes');

@@ -102,46 +102,87 @@ function drawVoiceBlockWaveform(canvas, entry, trimIn, durationSec){
   }
 }
 
+// Magnet: finds the nearest snap-worthy point to targetSec (shot boundaries, the playhead,
+// or another voice block's edge on any track), within a small pixel tolerance that scales
+// with zoom. Returns null if magnet is off or nothing is close enough.
+function findSnapPoint(targetSec, excludeTrackId, excludeBlockId){
+  if(!magnetEnabled) return null;
+  const toleranceSec = 8 / PX_PER_SEC;
+  const candidates = [];
+  let t = 0;
+  state.scenes.forEach(scene=> scene.shots.forEach(shot=>{
+    candidates.push(t);
+    t += shot.duration;
+    candidates.push(t);
+  }));
+  candidates.push(playheadX / PX_PER_SEC);
+  (state.voiceTracks||[]).forEach(track=>{
+    (track.blocks||[]).forEach(b=>{
+      if(track.id===excludeTrackId && b.id===excludeBlockId) return;
+      candidates.push(b.startSec);
+      candidates.push(b.startSec + b.durationSec);
+    });
+  });
+  let best = null, bestDist = toleranceSec;
+  candidates.forEach(c=>{
+    const dist = Math.abs(c - targetSec);
+    if(dist < bestDist){ bestDist = dist; best = c; }
+  });
+  return best;
+}
+
 function wireVoiceBlockInteractions(){
   document.querySelectorAll('[data-voice-block-drag]').forEach(el=>{
     el.addEventListener('pointerdown', (e)=>{
-      if(e.target.closest('.voice-block-trim')) return;
+      if(e.target.closest('.voice-block-trim') || e.target.closest('.voice-block-volume-line')) return;
       e.preventDefault();
       e.stopPropagation();
       const [tid, bid] = el.dataset.voiceBlockDrag.split('|');
-      const track = (state.voiceTracks||[]).find(t=> t.id===tid);
-      const block = track && (track.blocks||[]).find(b=> b.id===bid);
-      if(!track || !block) return;
+      const originTrack = (state.voiceTracks||[]).find(t=> t.id===tid);
+      const block = originTrack && (originTrack.blocks||[]).find(b=> b.id===bid);
+      if(!originTrack || !block) return;
       const startX = e.clientX;
       const startSec0 = block.startSec;
-      const prevBlock = track.blocks.filter(b=> b.id!==bid && b.startSec < startSec0)
-        .sort((a,b2)=> b2.startSec - a.startSec)[0];
-      const nextBlock = track.blocks.filter(b=> b.id!==bid && b.startSec >= startSec0)
-        .sort((a,b2)=> a.startSec - b2.startSec)[0];
       let pendingStart = startSec0;
+      let targetTrackId = tid; // may change mid-drag if the pointer moves over a different track row
       document.body.style.cursor = 'grabbing';
       const onMove = (ev)=>{
         const deltaSec = (ev.clientX - startX) / PX_PER_SEC;
-        // No live clamping here on purpose — dragging visually past/into a neighbor is how
-        // a swap is signalled; the actual collide-vs-swap decision happens on drop.
-        pendingStart = Math.max(0, startSec0 + deltaSec);
+        let newStart = Math.max(0, startSec0 + deltaSec);
+        // No live clamping against neighbors here on purpose — dragging visually past/into
+        // one is how a swap is signalled; the actual collide-vs-swap decision happens on drop.
+        if(magnetEnabled){
+          const snapStart = findSnapPoint(newStart, tid, bid);
+          const snapEnd = findSnapPoint(newStart + block.durationSec, tid, bid);
+          if(snapStart !== null) newStart = snapStart;
+          else if(snapEnd !== null) newStart = snapEnd - block.durationSec;
+        }
+        const rowEl = document.elementFromPoint(ev.clientX, ev.clientY);
+        const trackRow = rowEl && rowEl.closest('.voice-track-row');
+        if(trackRow && trackRow.dataset.voiceTrack) targetTrackId = trackRow.dataset.voiceTrack;
+        pendingStart = Math.max(0, newStart);
         el.style.left = Math.round(pendingStart * PX_PER_SEC) + 'px';
       };
       const onUp = ()=>{
         document.removeEventListener('pointermove', onMove);
         document.removeEventListener('pointerup', onUp);
         document.body.style.cursor = '';
+        const targetTrack = (state.voiceTracks||[]).find(t=> t.id===targetTrackId) || originTrack;
         const finalStart = Math.round(pendingStart*10)/10;
         const finalEnd = finalStart + block.durationSec;
+        const siblings = targetTrack.blocks.filter(b=> b.id!==bid);
+        const prevBlock = siblings.filter(b=> b.startSec < finalStart).sort((a,b2)=> b2.startSec - a.startSec)[0];
+        const nextBlock = siblings.filter(b=> b.startSec >= finalStart).sort((a,b2)=> a.startSec - b2.startSec)[0];
         // A neighbor the block was dragged substantially into (more than 40% of the
         // shorter block's length) is treated as "swap with this one" rather than a mere
         // graze — anything less is just a normal move, clamped against that same neighbor
-        // so the two still never overlap in the committed result.
-        const candidate = [prevBlock, nextBlock].filter(Boolean).find(b=>{
+        // so the two still never overlap in the committed result. Swapping only makes
+        // sense within the same track — a cross-track drop always just clamps.
+        const candidate = targetTrack===originTrack ? [prevBlock, nextBlock].filter(Boolean).find(b=>{
           const bEnd = b.startSec + b.durationSec;
           const overlapAmt = Math.min(finalEnd, bEnd) - Math.max(finalStart, b.startSec);
           return overlapAmt > Math.min(block.durationSec, b.durationSec) * 0.4;
-        });
+        }) : null;
         if(candidate){
           const otherOldStart = candidate.startSec;
           candidate.startSec = Math.round(startSec0*10)/10;
@@ -150,6 +191,11 @@ function wireVoiceBlockInteractions(){
           const minStart = prevBlock ? prevBlock.startSec + prevBlock.durationSec : 0;
           const maxStart = nextBlock ? nextBlock.startSec - block.durationSec : Infinity;
           block.startSec = Math.max(minStart, Math.min(maxStart, finalStart));
+          if(targetTrack !== originTrack){
+            originTrack.blocks = originTrack.blocks.filter(b=> b.id!==bid);
+            targetTrack.blocks = targetTrack.blocks || [];
+            targetTrack.blocks.push(block);
+          }
         }
         renderTimeline();
         if(typeof saveProjectSoon==='function') saveProjectSoon();
@@ -185,6 +231,12 @@ function wireVoiceBlockInteractions(){
         const deltaSec = (ev.clientX - startX) / PX_PER_SEC;
         if(side==='right'){
           let newDur = startDur0 + deltaSec;
+          let newEnd = startSec0 + newDur;
+          if(magnetEnabled){
+            const snapEnd = findSnapPoint(newEnd, tid, bid);
+            if(snapEnd !== null) newEnd = snapEnd;
+          }
+          newDur = newEnd - startSec0;
           newDur = Math.max(MIN_SEC, Math.min(newDur, fullDuration - startTrimIn0));
           if(nextBlock) newDur = Math.min(newDur, nextBlock.startSec - startSec0);
           newDur = Math.max(MIN_SEC, newDur);
@@ -193,6 +245,15 @@ function wireVoiceBlockInteractions(){
           let newTrimIn = startTrimIn0 + deltaSec;
           newTrimIn = Math.max(0, Math.min(newTrimIn, startTrimIn0 + startDur0 - MIN_SEC));
           let newStart = startSec0 + (newTrimIn - startTrimIn0);
+          if(magnetEnabled){
+            const snapStart = findSnapPoint(newStart, tid, bid);
+            if(snapStart !== null){
+              newStart = snapStart;
+              newTrimIn = startTrimIn0 + (newStart - startSec0);
+              newTrimIn = Math.max(0, Math.min(newTrimIn, startTrimIn0 + startDur0 - MIN_SEC));
+              newStart = startSec0 + (newTrimIn - startTrimIn0);
+            }
+          }
           const minStart = prevBlock ? prevBlock.startSec + prevBlock.durationSec : 0;
           if(newStart < minStart){
             newStart = minStart;
@@ -220,6 +281,36 @@ function wireVoiceBlockInteractions(){
       document.addEventListener('pointerup', onUp);
     });
   });
+
+  document.querySelectorAll('[data-voice-block-volume]').forEach(el=>{
+    el.addEventListener('pointerdown', (e)=>{
+      e.preventDefault();
+      e.stopPropagation();
+      const [tid, bid] = el.dataset.voiceBlockVolume.split('|');
+      const track = (state.voiceTracks||[]).find(t=> t.id===tid);
+      const block = track && (track.blocks||[]).find(b=> b.id===bid);
+      if(!block) return;
+      const blockEl = el.parentElement;
+      const rect = blockEl.getBoundingClientRect();
+      document.body.style.cursor = 'ns-resize';
+      const setFromClientY = (clientY)=>{
+        let ratio = 1 - (clientY - rect.top) / rect.height;
+        ratio = Math.max(0, Math.min(1, ratio));
+        block.volume = Math.round(ratio*100)/100;
+        el.style.top = Math.round((1-ratio)*100) + '%';
+      };
+      setFromClientY(e.clientY);
+      const onMove = (ev)=> setFromClientY(ev.clientY);
+      const onUp = ()=>{
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
+        document.body.style.cursor = '';
+        if(typeof saveProjectSoon==='function') saveProjectSoon();
+      };
+      document.addEventListener('pointermove', onMove);
+      document.addEventListener('pointerup', onUp);
+    });
+  });
 }
 
 function renderVoiceTracksArea(){
@@ -239,9 +330,12 @@ function renderVoiceTracksArea(){
         const label = entry ? (entry.sourceLabel || 'Audio') : 'Missing audio';
         const x = Math.round(b.startSec * PX_PER_SEC);
         const w = Math.max(20, Math.round(b.durationSec * PX_PER_SEC));
+        const vol = b.volume!=null ? b.volume : 1;
+        const lineTopPct = Math.round((1-vol)*100);
         return `<div class="voice-block" data-voice-block-drag="${vt.id}|${b.id}" style="left:${x}px;width:${w}px;" title="${label}">
           <canvas class="voice-block-wave" data-voice-block-wave="${vt.id}|${b.id}"></canvas>
           <span class="voice-block-label">${label}</span>
+          <div class="voice-block-volume-line" data-voice-block-volume="${vt.id}|${b.id}" style="top:${lineTopPct}%;" title="Drag to change this block's volume"></div>
           <div class="voice-block-trim left" data-voice-block-trim="${vt.id}|${b.id}|left"></div>
           <div class="voice-block-trim right" data-voice-block-trim="${vt.id}|${b.id}|right"></div>
         </div>`;

@@ -27,6 +27,7 @@ const state = {
 let sceneSeq = 1, shotSeq = 1, paletteSeq = 0, charSeq = 1, locSeq = 1, trackSeq = 1, lookSeq = 1, propSeq = 1, draftTaskSeq = 1, archiveSeq = 1, scriptItemSeq = 1, voiceTrackSeq = 1, voiceBlockSeq = 1;
 let focus = { sceneId: null, shotId: null };
 let timelineMode = 'assembly'; // 'assembly' (spaced, insert-between) | 'edit' (flush clips, drag-to-reorder within scene)
+let magnetEnabled = false; // snapping for voice-block drag/trim: shot edges, other blocks' edges, the playhead
 let playheadX = 0;
 let PX_PER_SEC = 40; // scale of the ruler/track: 1 real second of playback = 40px — adjustable via timeline zoom
 let PROJECT_FPS = 25; // per-project — set from state.projectMeta.fps when a project is created/opened

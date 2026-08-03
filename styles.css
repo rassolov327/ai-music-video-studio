@@ -446,6 +446,8 @@
     background:var(--bg-panel-2);border:1px solid var(--line);color:var(--text-2);cursor:pointer;
     font-size:13px;line-height:1;padding:0;
   }
+  .magnet-btn{width:24px;height:24px;margin-left:4px;}
+  .magnet-btn.active{background:var(--accent);border-color:var(--accent);color:#1a1408;}
   .tz-btn:hover{color:var(--text-1);border-color:var(--accent-dim);}
   #tzZoomSlider{width:90px;accent-color:var(--accent);height:14px;}
   .mode-tab.active{color:var(--text-1);background:var(--bg-elevated);border-color:var(--line);}
@@ -551,6 +553,11 @@
   .voice-block-trim.left{left:0;}
   .voice-block-trim.right{right:0;}
   .voice-block-trim:hover{background:rgba(255,255,255,.25);}
+  .voice-block-volume-line{
+    position:absolute;left:0;right:0;height:2px;margin-top:-1px;
+    background:#ffd479;cursor:ns-resize;z-index:2;
+  }
+  .voice-block-volume-line:hover{height:3px;margin-top:-1.5px;}
   .voice-track-add{
     display:flex;align-items:center;justify-content:center;width:32px;height:32px;margin:6px 0 6px 12px;
     border:1px dashed var(--line);border-radius:6px;color:var(--text-3);cursor:pointer;flex:0 0 auto;
