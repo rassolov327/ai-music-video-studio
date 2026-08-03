@@ -331,6 +331,15 @@ const VIDEO_MODELS = [
   // earlier flat $0.30 guess, a 2.75x miss. Recalibrated from that real bill rather than
   // another guess; still an estimate (shown as "≈"), KIE's own dashboard is the real total.
   { id: 'bytedance/seedance-2-fast', label: 'Seedance 2.0 Fast', costUsd: 0.80, blurb: 'Supports first+last frame — animates a clean transition between two chosen images', supportsLastFrame: true, imageFieldName: 'first_frame_url' },
+  // Confirmed via a literal docs.kie.ai request example (model id "bytedance/seedance-2",
+  // same first_frame_url/last_frame_url convention as Fast) — the full/standard tier: up to
+  // 4K, stronger multi-shot consistency, ~5min vs Fast's ~4min. costUsd is an unconfirmed
+  // guess (no real bill yet, unlike Fast's recalibrated figure above) — flagged the same
+  // way every other unverified cost estimate has been; correct it against KIE's dashboard
+  // once a real generation runs. Deliberately NOT wiring the extra multi-reference/native
+  // audio inputs this pass (reference_image_urls/reference_video_urls/reference_audio_urls/
+  // generate_audio) — those are a bigger, separate feature to design later, not a drop-in.
+  { id: 'bytedance/seedance-2', label: 'Seedance 2.0', costUsd: 1.10, blurb: 'Full/standard tier — stronger multi-shot consistency, up to 4K, for a final polished pass rather than quick drafts', supportsLastFrame: true, imageFieldName: 'first_frame_url' },
 ];
 app.get('/api/video-models', (req, res) => {
   res.json({ models: VIDEO_MODELS.map(m => ({ id: m.id, label: m.label, costUsd: m.costUsd, blurb: m.blurb, supportsLastFrame: !!m.supportsLastFrame })) });
