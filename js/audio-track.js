@@ -32,6 +32,15 @@ function renameVoiceTrack(trackId, name){
   renderTimeline();
   if(typeof saveProjectSoon==='function') saveProjectSoon();
 }
+// Stage 7: removes a block from the timeline only — the underlying Archive audio entry it
+// was placed from is untouched and can be inserted again at any time.
+function deleteVoiceBlock(trackId, blockId){
+  const t = (state.voiceTracks || []).find(t=> t.id===trackId);
+  if(!t) return;
+  t.blocks = (t.blocks || []).filter(b=> b.id!==blockId);
+  renderTimeline();
+  if(typeof saveProjectSoon==='function') saveProjectSoon();
+}
 
 function renderTimeline(){
   if(typeof markProjectDirty==='function') markProjectDirty();
@@ -134,7 +143,7 @@ function findSnapPoint(targetSec, excludeTrackId, excludeBlockId){
 function wireVoiceBlockInteractions(){
   document.querySelectorAll('[data-voice-block-drag]').forEach(el=>{
     el.addEventListener('pointerdown', (e)=>{
-      if(e.target.closest('.voice-block-trim') || e.target.closest('.voice-block-volume-line')) return;
+      if(e.target.closest('.voice-block-trim') || e.target.closest('.voice-block-volume-line') || e.target.closest('.voice-block-del')) return;
       e.preventDefault();
       e.stopPropagation();
       const [tid, bid] = el.dataset.voiceBlockDrag.split('|');
@@ -338,6 +347,7 @@ function renderVoiceTracksArea(){
           <div class="voice-block-volume-line" data-voice-block-volume="${vt.id}|${b.id}" style="top:${lineTopPct}%;" title="Drag to change this block's volume"></div>
           <div class="voice-block-trim left" data-voice-block-trim="${vt.id}|${b.id}|left"></div>
           <div class="voice-block-trim right" data-voice-block-trim="${vt.id}|${b.id}|right"></div>
+          <div class="voice-block-del" data-voice-block-del="${vt.id}|${b.id}" title="Remove from timeline">${trashSvg(9)}</div>
         </div>`;
       }).join('')}</div>
     </div>`).join('')
@@ -349,6 +359,13 @@ function renderVoiceTracksArea(){
     el.onclick = (e)=>{
       e.stopPropagation();
       deleteVoiceTrack(el.dataset.delVoiceTrack);
+    };
+  });
+  area.querySelectorAll('[data-voice-block-del]').forEach(el=>{
+    el.onclick = (e)=>{
+      e.stopPropagation();
+      const [tid, bid] = el.dataset.voiceBlockDel.split('|');
+      deleteVoiceBlock(tid, bid);
     };
   });
   wireVoiceBlockInteractions();

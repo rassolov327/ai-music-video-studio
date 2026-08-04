@@ -546,6 +546,13 @@
     background:#3a5a6b;border:1px solid #4f7f96;color:#eaf3f6;font-size:10px;
     overflow:hidden;cursor:grab;display:flex;align-items:center;
   }
+  .voice-block-del{
+    position:absolute;top:2px;right:2px;z-index:3;color:rgba(234,243,246,.7);
+    cursor:pointer;display:flex;align-items:center;opacity:0;transition:opacity .1s;
+    background:rgba(0,0,0,.35);border-radius:3px;padding:1px;
+  }
+  .voice-block:hover .voice-block-del{opacity:1;}
+  .voice-block-del:hover{color:var(--danger);background:rgba(0,0,0,.6);}
   .voice-block:active{cursor:grabbing;}
   .voice-block-wave{position:absolute;inset:0;width:100%;height:100%;opacity:.55;}
   .voice-block-label{padding:0 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none;position:relative;z-index:1;text-shadow:0 1px 2px rgba(0,0,0,.6);}

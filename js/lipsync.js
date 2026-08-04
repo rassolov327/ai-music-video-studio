@@ -70,35 +70,104 @@ function queueLipsyncGeneration(scene, shot){
 // of how long the whole song is. The track's own trimIn (where in the SOURCE file its
 // timeline-position-0 begins) is folded in, so the result is always the correct absolute
 // offset into the actual music file, not just the timeline-relative one.
+// Gathers every audio source that's actually audible during a shot's window on the
+// timeline — the music track's segment (as before) plus any voice block, on any voice
+// track, whose own span overlaps the shot at all (even partially). This is stage 8 of the
+// multi-track audio plan: lip-sync needs the FULL mix under a shot, not just the music.
 async function extractShotAudioSegment(scene, shot, onStatus){
-  const track = typeof getActiveTrack==='function' ? getActiveTrack() : null;
-  if(!track) throw new Error('No music track on the timeline.');
-  let audioUrl = track.audioUrl;
-  if(!audioUrl && typeof loadAudioAsset==='function'){
-    const blob = await loadAudioAsset(track.id, track.diskFileName);
-    if(blob) audioUrl = URL.createObjectURL(blob);
-  }
-  if(!audioUrl) throw new Error('Could not load the music track\'s audio.');
-
   const shotStartSec = getShotStartSec(scene.id, shot.id);
-  const trimIn = (state.timelineAudio && state.timelineAudio.trimIn) || 0;
-  const sourceOffsetSec = trimIn + shotStartSec;
   const duration = shot.duration;
+  const shotEndSec = shotStartSec + duration;
+  const sources = []; // { url, sourceOffsetSec, clipDurationSec, delaySec, volume }
+
+  const track = typeof getActiveTrack==='function' ? getActiveTrack() : null;
+  if(track && state.timelineAudio){
+    let audioUrl = track.audioUrl;
+    if(!audioUrl && typeof loadAudioAsset==='function'){
+      const blob = await loadAudioAsset(track.id, track.diskFileName);
+      if(blob) audioUrl = URL.createObjectURL(blob);
+    }
+    if(audioUrl){
+      const trimIn = state.timelineAudio.trimIn || 0;
+      sources.push({
+        url: audioUrl, sourceOffsetSec: trimIn + shotStartSec, clipDurationSec: duration,
+        delaySec: 0, volume: state.timelineAudio.volume!=null ? state.timelineAudio.volume : 1,
+      });
+    }
+  }
+
+  (state.voiceTracks || []).forEach(vt=>{
+    (vt.blocks || []).forEach(b=>{
+      const bStart = b.startSec, bEnd = b.startSec + b.durationSec;
+      const overlapStart = Math.max(bStart, shotStartSec);
+      const overlapEnd = Math.min(bEnd, shotEndSec);
+      if(overlapEnd <= overlapStart) return; // this block doesn't play during this shot
+      const entry = (state.archive||[]).find(e=> e.id===b.archiveEntryId);
+      if(!entry || !entry.photo) return;
+      sources.push({
+        url: entry.photo,
+        sourceOffsetSec: (b.trimIn||0) + (overlapStart - bStart),
+        clipDurationSec: overlapEnd - overlapStart,
+        delaySec: overlapStart - shotStartSec, // where within the shot this block starts
+        volume: b.volume!=null ? b.volume : 1,
+      });
+    });
+  });
+
+  if(sources.length===0) throw new Error('No music or voice audio found under this shot.');
 
   if(onStatus) onStatus('Loading render engine…');
   const ffmpeg = await ensureFFmpegLoaded(onStatus);
-  if(onStatus) onStatus('Cutting audio segment…');
+  if(onStatus) onStatus(sources.length>1 ? 'Mixing audio for this shot…' : 'Cutting audio segment…');
 
-  await ffmpeg.writeFile('lipsync_src_audio', await ffmpegFetchFile(audioUrl));
+  // Common case — just the music track, nothing to actually mix. Same simple path as
+  // before, so this can never behave differently than it already did.
+  if(sources.length===1){
+    const s = sources[0];
+    await ffmpeg.writeFile('lipsync_src_audio', await ffmpegFetchFile(s.url));
+    try{
+      await ffmpeg.exec([
+        '-ss', String(s.sourceOffsetSec), '-i', 'lipsync_src_audio', '-t', String(s.clipDurationSec),
+        '-af', `volume=${s.volume}`,
+        '-c:a', 'libmp3lame', '-q:a', '2', 'lipsync_segment.mp3',
+      ]);
+      const data = await ffmpeg.readFile('lipsync_segment.mp3');
+      return new Blob([data.buffer], { type: 'audio/mp3' });
+    } finally {
+      try{ await ffmpeg.deleteFile('lipsync_src_audio'); } catch(err){}
+      try{ await ffmpeg.deleteFile('lipsync_segment.mp3'); } catch(err){}
+    }
+  }
+
+  // Multiple sources — build a filter graph: trim each one to its own relevant slice,
+  // apply its own volume, delay it to land at the right spot within the shot, then mix
+  // everything together into one output track.
+  const inputArgs = [];
+  const filterParts = [];
+  for(let i=0; i<sources.length; i++){
+    const s = sources[i];
+    const fname = 'lipsync_src_' + i;
+    await ffmpeg.writeFile(fname, await ffmpegFetchFile(s.url));
+    inputArgs.push('-ss', String(s.sourceOffsetSec), '-t', String(s.clipDurationSec), '-i', fname);
+    const delayMs = Math.max(0, Math.round(s.delaySec*1000));
+    filterParts.push(`[${i}:a]volume=${s.volume},adelay=${delayMs}:all=1[a${i}]`);
+  }
+  const mixInputs = sources.map((_,i)=> `[a${i}]`).join('');
+  const filterComplex = filterParts.join(';') + `;${mixInputs}amix=inputs=${sources.length}:duration=first:dropout_transition=0:normalize=0[mixed]`;
+
   try{
     await ffmpeg.exec([
-      '-ss', String(sourceOffsetSec), '-i', 'lipsync_src_audio', '-t', String(duration),
+      ...inputArgs,
+      '-filter_complex', filterComplex,
+      '-map', '[mixed]', '-t', String(duration),
       '-c:a', 'libmp3lame', '-q:a', '2', 'lipsync_segment.mp3',
     ]);
     const data = await ffmpeg.readFile('lipsync_segment.mp3');
     return new Blob([data.buffer], { type: 'audio/mp3' });
   } finally {
-    try{ await ffmpeg.deleteFile('lipsync_src_audio'); } catch(err){}
+    for(let i=0; i<sources.length; i++){
+      try{ await ffmpeg.deleteFile('lipsync_src_'+i); } catch(err){}
+    }
     try{ await ffmpeg.deleteFile('lipsync_segment.mp3'); } catch(err){}
   }
 }

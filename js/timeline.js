@@ -163,7 +163,7 @@ function renderAssemblyModeTrack(){
           <div class="shot-thumb${isFocused?' focused':''}" data-anchor data-scene="${scene.id}" data-shot="${shot.id}" style="${thumbBg}width:${wpx}px;flex-basis:${wpx}px;">
             ${shot.previewImage ? `<img src="${shot.previewImage}">` : ''}
             ${shot.videoUrl ? `<div class="shot-thumb-animated-badge" title="Animated"><svg viewBox="0 0 24 24" width="9" height="9" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg></div>` : ''}
-            ${shot.previewImage && !shot.videoUrl && typeof getActiveTrack==='function' && getActiveTrack() ? renderLipsyncControl(scene.id, shot) : ''}
+            ${shot.previewImage && !shot.videoUrl && shotHasNearbyAudio(scene.id, shot.id) ? renderLipsyncControl(scene.id, shot) : ''}
             <div class="shot-trim left" data-trim="${scene.id}|${shot.id}|left" title="Drag to trim"></div>
             <div class="shot-trim right" data-trim="${scene.id}|${shot.id}|right" title="Drag to trim"></div>
             <div class="block-rename" data-rename-btn-shot="${scene.id}|${shot.id}" title="Rename">${pencilSvg(9)}</div>
@@ -205,7 +205,7 @@ function renderEditModeTrack(){
              style="${thumbBg}border-bottom:3px solid ${col.dot};position:absolute;left:${x}px;top:0;width:${wpx}px;height:100%;">
           ${shot.previewImage ? `<img src="${shot.previewImage}">` : ''}
           ${shot.videoUrl ? `<div class="shot-thumb-animated-badge" title="Animated"><svg viewBox="0 0 24 24" width="9" height="9" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg></div>` : ''}
-          ${shot.previewImage && !shot.videoUrl && typeof getActiveTrack==='function' && getActiveTrack() ? renderLipsyncControl(scene.id, shot) : ''}
+          ${shot.previewImage && !shot.videoUrl && shotHasNearbyAudio(scene.id, shot.id) ? renderLipsyncControl(scene.id, shot) : ''}
           <div class="shot-trim left" data-trim="${scene.id}|${shot.id}|left" title="Drag to trim"></div>
           <div class="shot-trim right" data-trim="${scene.id}|${shot.id}|right" title="Drag to trim"></div>
           <div class="block-rename" data-rename-btn-shot="${scene.id}|${shot.id}" title="Rename">${pencilSvg(9)}</div>
@@ -596,6 +596,21 @@ function getShotStartSec(sceneId, shotId){
     }
   }
   return 0;
+}
+// Whether there's ANY audio a shot could actually sync to — the music track, or any voice
+// block (on any track) whose own span overlaps the shot's window at all. Gates the
+// Lip-sync control's visibility; mirrors the source-gathering logic in
+// extractShotAudioSegment (lipsync.js) without needing the full source details here.
+function shotHasNearbyAudio(sceneId, shotId){
+  if(typeof getActiveTrack==='function' && getActiveTrack() && state.timelineAudio) return true;
+  const shotStartSec = getShotStartSec(sceneId, shotId);
+  const scene = state.scenes.find(s=> s.id===sceneId);
+  const shot = scene && scene.shots.find(sh=> sh.id===shotId);
+  if(!shot) return false;
+  const shotEndSec = shotStartSec + shot.duration;
+  return (state.voiceTracks || []).some(vt=>
+    (vt.blocks || []).some(b=> Math.min(b.startSec+b.durationSec, shotEndSec) > Math.max(b.startSec, shotStartSec))
+  );
 }
 
 function getShotBoundariesPx(){

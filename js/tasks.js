@@ -413,8 +413,6 @@ async function sendGenerationTask(draft){
     const shot = scene && scene.shots.find(sh=> sh.id===draft.shotId);
     if(!scene || !shot) throw new Error('This shot no longer exists.');
     if(!shot.previewImage) throw new Error('This shot needs a generated picture first.');
-    const track = typeof getActiveTrack==='function' ? getActiveTrack() : null;
-    if(!track) throw new Error('No music track on the timeline to sync to.');
 
     const audioBlob = await extractShotAudioSegment(scene, shot, (msg)=> console.log('[photo-lipsync]', msg));
     const audioBlobUrl = URL.createObjectURL(audioBlob);
@@ -442,8 +440,6 @@ async function sendGenerationTask(draft){
     const shot = scene && scene.shots.find(sh=> sh.id===draft.shotId);
     if(!scene || !shot) throw new Error('This shot no longer exists.');
     if(!shot.videoUrl) throw new Error('This shot needs to be animated first.');
-    const track = typeof getActiveTrack==='function' ? getActiveTrack() : null;
-    if(!track) throw new Error('No music track on the timeline to sync to.');
 
     const audioBlob = await extractShotAudioSegment(scene, shot, (msg)=> console.log('[lipsync]', msg));
     const audioBlobUrl = URL.createObjectURL(audioBlob);
