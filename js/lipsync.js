@@ -54,6 +54,9 @@ async function trimVideoToDuration(videoUrl, durationSec, onStatus){
       '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', // libx264 needs even width/height
       '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'fast', '-crf', '20',
       '-c:a', 'aac', '-b:a', '128k',
+      '-movflags', '+faststart', // moves the mp4 metadata to the front — needed when a
+      // server fetches the file by URL (our case) rather than receiving a direct upload,
+      // since some backends can't read the file structure without it up front
       'motion_trimmed.mp4',
     ]);
     const data = await ffmpeg.readFile('motion_trimmed.mp4');

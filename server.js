@@ -480,8 +480,9 @@ app.post('/api/photo-lipsync/start', async (req, res) => {
 // (character image)/video_urls (performance reference)/character_orientation/mode. Both
 // list entries are the same real model, just a different mode value (720p="Standard",
 // cheaper; 1080p="Pro", pricier) — mirrors the Volcengine lite/basic pattern used earlier.
-// character_orientation is fixed to 'image' (not exposed as a choice) per the agreed
-// design — the shot's own already-composed framing should win over the reference video's.
+// character_orientation is fixed to 'video' (not exposed as a choice) — switched from an
+// initial 'image' after a live test with 'video' succeeded via the KIE playground and
+// 'image' had not been directly confirmed working.
 const MOTION_CONTROL_MODELS = [
   { id: 'kling-3.0/motion-control-standard', label: 'Kling Motion Control (Standard)', costUsd: 0.35, blurb: 'Transfers a real performance (motion, expression, timing) from your reference video onto the shot — not just lip movement', kieMode: '720p' },
   { id: 'kling-3.0/motion-control-pro', label: 'Kling Motion Control (Pro)', costUsd: 0.70, blurb: 'Same transfer, higher-resolution output', kieMode: '1080p' },
@@ -502,7 +503,7 @@ app.post('/api/motion-control/start', async (req, res) => {
     prompt: prompt || '',
     input_urls: [imageUrl],
     video_urls: [videoUrl],
-    character_orientation: 'image',
+    character_orientation: 'video',
     mode: matched.kieMode,
   };
   const callBackUrl = PUBLIC_URL ? PUBLIC_URL + '/api/webhook/kie' : undefined;
