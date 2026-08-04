@@ -21,6 +21,7 @@ function goHome(){
   loadVideoModelList();
   loadLipsyncModelList();
   loadPhotoLipsyncModelList();
+  loadMotionControlModelList();
   wireGeminiChat();
   wireScriptPage();
   wireAiGeneratorModal();

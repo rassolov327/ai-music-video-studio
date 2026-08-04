@@ -474,6 +474,70 @@ app.post('/api/photo-lipsync/start', async (req, res) => {
   }
 });
 
+// ---- photo + reference-performance-video -> new video (real "motion capture" style) ----
+// Model id and field names confirmed directly from a literal docs.kie.ai curl example for
+// this exact model (not inferred): kling-3.0/motion-control, with prompt/input_urls
+// (character image)/video_urls (performance reference)/character_orientation/mode. Both
+// list entries are the same real model, just a different mode value (720p="Standard",
+// cheaper; 1080p="Pro", pricier) — mirrors the Volcengine lite/basic pattern used earlier.
+// character_orientation is fixed to 'image' (not exposed as a choice) per the agreed
+// design — the shot's own already-composed framing should win over the reference video's.
+const MOTION_CONTROL_MODELS = [
+  { id: 'kling-3.0/motion-control-standard', label: 'Kling Motion Control (Standard)', costUsd: 0.35, blurb: 'Transfers a real performance (motion, expression, timing) from your reference video onto the shot — not just lip movement', kieMode: '720p' },
+  { id: 'kling-3.0/motion-control-pro', label: 'Kling Motion Control (Pro)', costUsd: 0.70, blurb: 'Same transfer, higher-resolution output', kieMode: '1080p' },
+];
+app.get('/api/motion-control-models', (req, res) => {
+  res.json({ models: MOTION_CONTROL_MODELS.map(m => ({ id: m.id, label: m.label, costUsd: m.costUsd, blurb: m.blurb })) });
+});
+app.post('/api/motion-control/start', async (req, res) => {
+  if (!KIE_API_KEY) {
+    return res.status(503).json({ error: 'not_configured', message: 'KIE_API_KEY is not set on the server yet.' });
+  }
+  const { imageUrl, videoUrl, prompt, model, meta } = req.body || {};
+  if (!imageUrl || !videoUrl) {
+    return res.status(400).json({ error: 'bad_request', message: 'imageUrl and videoUrl are both required.' });
+  }
+  const matched = MOTION_CONTROL_MODELS.find(m => m.id === model) || MOTION_CONTROL_MODELS[0];
+  const input = {
+    prompt: prompt || '',
+    input_urls: [imageUrl],
+    video_urls: [videoUrl],
+    character_orientation: 'image',
+    mode: matched.kieMode,
+  };
+  const callBackUrl = PUBLIC_URL ? PUBLIC_URL + '/api/webhook/kie' : undefined;
+
+  try {
+    const body = { model: 'kling-3.0/motion-control', input };
+    if (callBackUrl) body.callBackUrl = callBackUrl;
+    const createRes = await fetch(`${KIE_BASE}/api/v1/jobs/createTask`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${KIE_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const createData = await createRes.json().catch(() => null);
+    console.log('[server] create motion-control task (' + matched.id + '):', JSON.stringify(createData));
+    const taskId = createData && createData.data && createData.data.taskId;
+    if (!createRes.ok || !taskId) {
+      return res.status(502).json({
+        error: 'provider_error',
+        message: (createData && createData.msg) || ('KIE.ai rejected the request (HTTP ' + createRes.status + ').'),
+      });
+    }
+    tasks.set(taskId, {
+      status: 'pending', imageUrl: null, message: null, model: matched.id, prompt: '', isVideo: true,
+      meta: meta || {}, createdAt: Date.now(), updatedAt: Date.now(),
+    });
+    if (!callBackUrl) {
+      console.warn('[server] no PUBLIC_URL known — this task will rely entirely on the polling fallback.');
+    }
+    return res.json({ taskId });
+  } catch (err) {
+    console.error('[server] /api/motion-control/start failed:', err);
+    return res.status(500).json({ error: 'server_error', message: String(err && err.message || err) });
+  }
+});
+
 // ---- KIE.ai credit balance (for the small indicator in the corner of the UI) ----
 const KIE_CREDIT_USD = 0.005; // KIE's own published rate — see docs.kie.ai
 app.get('/api/kie-credits', async (req, res) => {

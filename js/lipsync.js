@@ -1,5 +1,60 @@
 // ---------- Lip-sync: audio segment extraction (stage 2) ----------
 
+let motionControlModelOptions = []; // [{id, label, costUsd, blurb}]
+async function loadMotionControlModelList(){
+  try{
+    const res = await fetch('/api/motion-control-models');
+    const data = await res.json();
+    motionControlModelOptions = (data && data.models) || [];
+  } catch(err){
+    motionControlModelOptions = [];
+  }
+}
+function motionControlModelSelectHtml(selectedId){
+  const fallback = motionControlModelOptions[0] && motionControlModelOptions[0].id;
+  const opts = motionControlModelOptions.map(m=>
+    `<option value="${m.id}" title="${m.blurb || ''}" ${m.id===(selectedId||fallback)?'selected':''}>${m.label}${m.costUsd?' — '+formatCost(m.costUsd):''}</option>`
+  ).join('');
+  return `<select class="task-tile-model-select">${opts || '<option>No model available</option>'}</select>`;
+}
+
+// Queues a Motion Control generation — the reference video was already added to the
+// Archive (as its own full-length entry) when the user picked it via the Capture flow; the
+// draft just needs to remember which archive entry to pull it from at send time.
+function queueMotionControlGeneration(scene, shot, archiveEntryId){
+  state.taskQueue = state.taskQueue || [];
+  state.taskQueue.push({
+    id: 'dt' + (draftTaskSeq++), kind: 'motion-control',
+    sceneId: scene.id, shotId: shot.id, sceneName: scene.name, shotName: shot.name,
+    archiveEntryId,
+    model: (motionControlModelOptions[0] && motionControlModelOptions[0].id) || null,
+    createdAt: Date.now(),
+  });
+  if(typeof saveProjectSoon==='function') saveProjectSoon();
+  if(typeof refreshTasks==='function') refreshTasks();
+}
+
+// The captured reference video is kept in Archive at its original, full length (it might
+// get reused on a different, differently-timed shot later) — this trims a copy to exactly
+// match a specific shot's duration right before sending, the same way extractShotAudioSegment
+// already trims music/voice to a shot's window rather than storing pre-cut copies.
+async function trimVideoToDuration(videoUrl, durationSec, onStatus){
+  if(onStatus) onStatus('Loading render engine…');
+  const ffmpeg = await ensureFFmpegLoaded(onStatus);
+  if(onStatus) onStatus('Trimming reference video…');
+  await ffmpeg.writeFile('motion_src_video', await ffmpegFetchFile(videoUrl));
+  try{
+    await ffmpeg.exec([
+      '-i', 'motion_src_video', '-t', String(durationSec),
+      '-c', 'copy', 'motion_trimmed.mp4',
+    ]);
+    const data = await ffmpeg.readFile('motion_trimmed.mp4');
+    return new Blob([data.buffer], { type: 'video/mp4' });
+  } finally {
+    try{ await ffmpeg.deleteFile('motion_src_video'); } catch(err){}
+    try{ await ffmpeg.deleteFile('motion_trimmed.mp4'); } catch(err){}
+  }
+}
 let photoLipsyncModelOptions = []; // [{id, label, costUsd, blurb}]
 async function loadPhotoLipsyncModelList(){
   try{

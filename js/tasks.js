@@ -123,6 +123,7 @@ function modelSelectHtml(selectedId, extraClass, onlyReferenceCapable){
 
 // Draft display labels — shots show "Scene / Shot", asset drafts show "Kind / Name".
 function draftTitleLines(t){
+  if(t.kind==='motion-control') return [t.sceneName || 'Scene', (t.shotName || 'Shot') + ' (motion capture)'];
   if(t.kind==='photo-lipsync') return [t.sceneName || 'Scene', (t.shotName || 'Shot') + ' (lip-sync)'];
   if(t.kind==='lipsync') return [t.sceneName || 'Scene', (t.shotName || 'Shot') + ' (lip-sync)'];
   if(t.kind==='shot') return [t.sceneName || 'Scene', t.shotName || 'Shot'];
@@ -196,7 +197,7 @@ function renderTasksGrid(){
       const t = entry.data;
       const selected = selectedDraftIds.has(t.id);
       const [line1, line2] = draftTitleLines(t);
-      const model = t.kind==='photo-lipsync' ? (photoLipsyncModelOptions.find(m=> m.id===t.model) || photoLipsyncModelOptions[0] || null) : t.kind==='lipsync' ? (lipsyncModelOptions.find(m=> m.id===t.model) || lipsyncModelOptions[0] || null) : modelById(t.model);
+      const model = t.kind==='motion-control' ? (motionControlModelOptions.find(m=> m.id===t.model) || motionControlModelOptions[0] || null) : t.kind==='photo-lipsync' ? (photoLipsyncModelOptions.find(m=> m.id===t.model) || photoLipsyncModelOptions[0] || null) : t.kind==='lipsync' ? (lipsyncModelOptions.find(m=> m.id===t.model) || lipsyncModelOptions[0] || null) : modelById(t.model);
       const hasPhoto = assetHasPhoto(t);
       const willUseRef = hasPhoto && model && model.supportsReferenceImage;
       const refSourceLabel = t.kind==='shot' ? 'the scene\'s assigned character (and look)' : 'the uploaded photo';
@@ -217,7 +218,7 @@ function renderTasksGrid(){
           <div class="task-tile-body">
             <div class="task-tile-scene">${line1}</div>
             <div class="task-tile-shot">${line2}</div>
-            ${t.kind==='photo-lipsync' ? photoLipsyncModelSelectHtml(t.model) : t.kind==='lipsync' ? lipsyncModelSelectHtml(t.model) : modelSelectHtml(t.model || (modelOptions[0] && modelOptions[0].id), 'task-tile-model-select', t.kind==='archive-derive')}
+            ${t.kind==='motion-control' ? motionControlModelSelectHtml(t.model) : t.kind==='photo-lipsync' ? photoLipsyncModelSelectHtml(t.model) : t.kind==='lipsync' ? lipsyncModelSelectHtml(t.model) : modelSelectHtml(t.model || (modelOptions[0] && modelOptions[0].id), 'task-tile-model-select', t.kind==='archive-derive')}
             ${refHint}
             ${noRefModelAvailable ? '<div class="gen-hint" style="margin-top:6px;color:var(--danger);">No connected model supports reference images yet — can\'t generate this.</div>' : ''}
             <button class="cf-btn primary task-tile-send-btn" style="width:100%;margin-top:8px;" ${noRefModelAvailable?'disabled':''}>Generate${model && model.costUsd ? ' — ' + formatCost(model.costUsd) : ''}</button>
@@ -407,6 +408,41 @@ async function generateSelectedDraftTasks(){
 async function sendGenerationTask(draft){
   const meta = state.projectMeta || { width:1920, height:1080 };
   let prompt, taskMeta, referenceImageUrl;
+
+  if(draft.kind==='motion-control'){
+    const scene = state.scenes.find(s=> s.id===draft.sceneId);
+    const shot = scene && scene.shots.find(sh=> sh.id===draft.shotId);
+    if(!scene || !shot) throw new Error('This shot no longer exists.');
+    if(!shot.previewImage) throw new Error('This shot needs a generated picture first.');
+    const entry = (state.archive||[]).find(e=> e.id===draft.archiveEntryId);
+    if(!entry || !entry.photo) throw new Error('The captured reference video is missing — try Capture again.');
+
+    if(typeof showBgStatus==='function') showBgStatus('Preparing reference video…');
+    let videoBlob;
+    try{
+      videoBlob = await trimVideoToDuration(entry.photo, shot.duration, (msg)=>{ if(typeof showBgStatus==='function') showBgStatus(msg); });
+    } finally {
+      if(typeof hideBgStatus==='function') hideBgStatus();
+    }
+    const videoBlobUrl = URL.createObjectURL(videoBlob);
+    const [imageUrl, videoUrl] = await Promise.all([
+      uploadReferencePhoto(shot.previewImage),
+      uploadReferencePhoto(videoBlobUrl),
+    ]);
+    URL.revokeObjectURL(videoBlobUrl);
+    if(!imageUrl || !videoUrl) throw new Error('Could not upload the image/video for motion control.');
+
+    const motionControlTaskMeta = { projectId: currentProjectId, kind:'motion-control', sceneId: scene.id, sceneName: scene.name, shotId: shot.id, shotName: shot.name };
+    const res = await fetch('/api/motion-control/start', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageUrl, videoUrl, prompt: shot.description || '', model: draft.model, meta: motionControlTaskMeta }),
+    });
+    const data = await res.json().catch(()=> null);
+    if(!res.ok || !data || !data.taskId){
+      throw new Error((data && data.message) || ('Request failed (HTTP ' + res.status + ')'));
+    }
+    return data.taskId;
+  }
 
   if(draft.kind==='photo-lipsync'){
     const scene = state.scenes.find(s=> s.id===draft.sceneId);
@@ -624,6 +660,18 @@ async function applyFinishedTasks(list){
       renderTimelineScenes();
       continue;
     }
+    if(meta.kind==='motion-control'){
+      const scene = state.scenes.find(s=> s.id===meta.sceneId);
+      const shot = scene && scene.shots.find(sh=> sh.id===meta.shotId);
+      if(scene && shot){
+        if(typeof persistShotVideo==='function') await persistShotVideo(shot, t.imageUrl);
+        else shot.videoUrl = t.imageUrl;
+        shot.lipsyncReserved = false;
+        if(focus.sceneId===scene.id && focus.shotId===shot.id) touchedCurrentView = true;
+      }
+      renderTimelineScenes();
+      continue;
+    }
     if(meta.kind==='photo-lipsync'){
       const scene = state.scenes.find(s=> s.id===meta.sceneId);
       const shot = scene && scene.shots.find(sh=> sh.id===meta.shotId);
@@ -701,7 +749,9 @@ async function archiveGeneration(t){
         ? ((meta.sceneName || 'Scene') + ' / ' + (meta.shotName || 'Shot') + ' (lip-sync)')
         : kind==='photo-lipsync'
           ? ((meta.sceneName || 'Scene') + ' / ' + (meta.shotName || 'Shot') + ' (lip-sync)')
-          : kind==='archive-derive'
+          : kind==='motion-control'
+            ? ((meta.sceneName || 'Scene') + ' / ' + (meta.shotName || 'Shot') + ' (motion capture)')
+            : kind==='archive-derive'
         ? 'New idea from archive'
         : kind==='character-card'
           ? ('Character card / ' + (meta.characterName || '') + ' — ' + (meta.outputKey || ''))
@@ -746,6 +796,27 @@ async function archiveUploadedImage(dataUrl, label){
 // (same one the Music library uses) rather than reinventing waveform generation, and the
 // same generic archive-asset persistence images already go through — it's MIME-agnostic,
 // so an audio blob: URL works the same way a photo data: URL does.
+// Motion Control's "Capture" flow: a locally-picked video of a real performer, kept in
+// Archive at its full original length (not pre-trimmed — trimVideoToDuration in lipsync.js
+// does that per-shot, right before sending, the same way audio segments are cut fresh
+// rather than stored pre-cut).
+async function archiveCapturedVideo(file, scene, shot){
+  state.archive = state.archive || [];
+  const entry = {
+    id: 'arc' + (archiveSeq++),
+    kind: 'upload', sourceLabel: 'Captured — ' + (scene.name||'Scene') + ' / ' + (shot.name||'Shot'),
+    model: '', prompt: '',
+    isVideo: true, photo: null, createdAt: Date.now(),
+  };
+  state.archive.push(entry);
+  const blobUrl = URL.createObjectURL(file);
+  if(typeof persistGeneratedAssetImage==='function') await persistGeneratedAssetImage(entry, 'archive', 'photo', blobUrl);
+  else entry.photo = blobUrl;
+  if(typeof saveProjectSoon==='function') saveProjectSoon();
+  if(typeof renderArchiveGrid==='function') renderArchiveGrid();
+  return entry;
+}
+
 async function archiveUploadedAudio(file){
   state.archive = state.archive || [];
   const track = await buildMusicTrack(file);

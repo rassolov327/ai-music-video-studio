@@ -12,20 +12,78 @@ function renderLipsyncControl(sceneId, shot){
   const reserved = !!shot.lipsyncReserved;
   return `
     <div class="shot-lipsync-wrap">
-      <button class="shot-lipsync-btn${reserved ? ' on' : ''}" data-lipsync-toggle="${sceneId}|${shot.id}" title="${reserved ? 'Reserved for lip-sync — click the switch to release it' : 'Reserve this shot for lip-sync (sends to TASKS)'}">Lip-sync</button>
+      <button class="shot-lipsync-btn${reserved ? ' on' : ''}" data-lipsync-menu="${sceneId}|${shot.id}" title="${reserved ? 'Reserved for lip-sync' : 'Choose how to sync this shot'}">Lip-sync</button>
       <button class="shot-lipsync-arrow" data-lipsync-toggle="${sceneId}|${shot.id}" title="${reserved ? 'Release — allow sending to Animatic again' : 'Reserve for lip-sync'}"><svg viewBox="0 0 20 12" width="14" height="9" fill="none"><rect x="0.5" y="0.5" width="19" height="11" rx="5.5" fill="currentColor" fill-opacity="${reserved?0.9:0.35}" stroke="currentColor" stroke-opacity="0.6"></rect><circle cx="${reserved?14:6}" cy="6" r="4" fill="#12141a"></circle></svg></button>
     </div>`;
+}
+// Left-click menu on the main "Lip-sync" button — AI Lip-sync (the existing photo+audio
+// flow) or Capture (pick a local video of a real performer for Motion Control). Either
+// choice reserves the shot immediately, same as the button's old single-click behavior
+// did; cancelling the file picker naturally leaves nothing reserved.
+function openLipsyncMenu(sceneId, shotId, btnEl){
+  closeLipsyncMenu();
+  const rect = btnEl.getBoundingClientRect();
+  const menu = document.createElement('div');
+  menu.className = 'lipsync-menu';
+  menu.id = 'lipsyncMenu';
+  menu.style.left = rect.left + 'px';
+  menu.style.top = (rect.bottom + 4) + 'px';
+  menu.innerHTML = `
+    <div class="lipsync-menu-item" data-action="ai">AI Lip-sync</div>
+    <div class="lipsync-menu-item" data-action="capture">Capture…</div>`;
+  document.body.appendChild(menu);
+  menu.querySelector('[data-action="ai"]').onclick = (e)=>{
+    e.stopPropagation();
+    closeLipsyncMenu();
+    startAiLipsyncFlow(sceneId, shotId);
+  };
+  menu.querySelector('[data-action="capture"]').onclick = (e)=>{
+    e.stopPropagation();
+    closeLipsyncMenu();
+    startCaptureLipsyncFlow(sceneId, shotId);
+  };
+  setTimeout(()=> document.addEventListener('click', closeLipsyncMenu, { once:true }), 0);
+}
+function closeLipsyncMenu(){
+  const existing = document.getElementById('lipsyncMenu');
+  if(existing) existing.remove();
+}
+function startAiLipsyncFlow(sceneId, shotId){
+  const scene = state.scenes.find(s=> s.id===sceneId);
+  const shot = scene && scene.shots.find(sh=> sh.id===shotId);
+  if(!scene || !shot) return;
+  shot.lipsyncReserved = true;
+  if(typeof queuePhotoLipsyncGeneration==='function') queuePhotoLipsyncGeneration(scene, shot);
+  renderTimelineScenes();
+  if(typeof saveProjectSoon==='function') saveProjectSoon();
+}
+function startCaptureLipsyncFlow(sceneId, shotId){
+  const scene = state.scenes.find(s=> s.id===sceneId);
+  const shot = scene && scene.shots.find(sh=> sh.id===shotId);
+  if(!scene || !shot) return;
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'video/*';
+  input.onchange = async ()=>{
+    const file = input.files[0];
+    if(!file) return;
+    try{
+      const entry = await archiveCapturedVideo(file, scene, shot);
+      shot.lipsyncReserved = true;
+      if(typeof queueMotionControlGeneration==='function') queueMotionControlGeneration(scene, shot, entry.id);
+      renderTimelineScenes();
+      if(typeof saveProjectSoon==='function') saveProjectSoon();
+    } catch(err){
+      alert('Could not add that video: ' + err.message);
+    }
+  };
+  input.click();
 }
 function toggleLipsyncReservation(sceneId, shotId){
   const scene = state.scenes.find(s=> s.id===sceneId);
   const shot = scene && scene.shots.find(sh=> sh.id===shotId);
   if(!scene || !shot) return;
-  if(shot.lipsyncReserved){
-    shot.lipsyncReserved = false;
-  } else {
-    shot.lipsyncReserved = true;
-    if(typeof queuePhotoLipsyncGeneration==='function') queuePhotoLipsyncGeneration(scene, shot);
-  }
+  shot.lipsyncReserved = !shot.lipsyncReserved;
   renderTimelineScenes();
   if(typeof saveProjectSoon==='function') saveProjectSoon();
 }
@@ -332,6 +390,13 @@ function wireCommonTimelineHandlers(){
       e.stopPropagation();
       const [sid, shid] = el.dataset.lipsyncToggle.split('|');
       toggleLipsyncReservation(sid, shid);
+    };
+  });
+  timelineScenesEl.querySelectorAll('[data-lipsync-menu]').forEach(el=>{
+    el.onclick = (e)=>{
+      e.stopPropagation();
+      const [sid, shid] = el.dataset.lipsyncMenu.split('|');
+      openLipsyncMenu(sid, shid, el);
     };
   });
   timelineScenesEl.querySelectorAll('.shot-thumb').forEach(el=>{

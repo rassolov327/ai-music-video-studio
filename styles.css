@@ -1082,6 +1082,12 @@
     display:flex;align-items:center;justify-content:center;
   }
   .shot-lipsync-arrow:hover{background:rgba(0,0,0,.75);color:#fff;}
+  .lipsync-menu{
+    position:fixed;z-index:200;background:var(--bg-panel);border:1px solid var(--line);
+    border-radius:6px;box-shadow:0 6px 20px rgba(0,0,0,.4);min-width:130px;overflow:hidden;
+  }
+  .lipsync-menu-item{padding:8px 12px;font-size:12px;color:var(--text-1);cursor:pointer;}
+  .lipsync-menu-item:hover{background:var(--bg-elevated);}
 
   /* ---- Gemini quick-assistant button + chat popup ---- */
   .gemini-assist-btn{
