@@ -44,9 +44,17 @@ async function trimVideoToDuration(videoUrl, durationSec, onStatus){
   if(onStatus) onStatus('Trimming reference video…');
   await ffmpeg.writeFile('motion_src_video', await ffmpegFetchFile(videoUrl));
   try{
+    // Real re-encoding, not a stream copy — the source could be almost any format the
+    // user's camera/phone produced (.mov, .webm, odd codecs), and stream-copying that
+    // straight into an .mp4 container can produce a file that LOOKS like an mp4 but has a
+    // codec inside the provider can't actually decode ("file format not support"). Also
+    // gives frame-accurate trimming, unlike stream-copy which can only cut at keyframes.
     await ffmpeg.exec([
       '-i', 'motion_src_video', '-t', String(durationSec),
-      '-c', 'copy', 'motion_trimmed.mp4',
+      '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', // libx264 needs even width/height
+      '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'fast', '-crf', '20',
+      '-c:a', 'aac', '-b:a', '128k',
+      'motion_trimmed.mp4',
     ]);
     const data = await ffmpeg.readFile('motion_trimmed.mp4');
     return new Blob([data.buffer], { type: 'video/mp4' });
