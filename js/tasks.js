@@ -8,6 +8,13 @@ let appliedTaskIds = new Set(); // avoid re-applying the same finished result re
 // like a checkbox's checked attribute gets wiped out on every rebuild. Keeping it in a
 // plain Set means selection survives re-renders untouched.
 let selectedDraftIds = new Set();
+// Tracks drafts whose Generate click is currently in flight. A plain disabled attribute on
+// the clicked button isn't enough — if a re-render replaces the tile's DOM (the periodic
+// poll, or the model-select's own forced update) while sendGenerationTask is still
+// awaiting, the fresh button it creates isn't disabled, and a second click on IT would fire
+// a real second (double-charged) generation for the same draft. This set is checked before
+// the button is even drawn, so any re-render mid-send still renders it correctly disabled.
+let sendingDraftIds = new Set();
 let tasksSortMode = 'status'; // 'status' | 'newest'
 
 function wirePageTabs(){
@@ -175,14 +182,18 @@ function assetHasPhoto(t){
   return !!(item && item[field]);
 }
 
-function renderTasksGrid(){
+function renderTasksGrid(force){
   const grid = document.getElementById('tasksGrid');
   if(!grid) return;
   // A native <select> closes itself the instant its underlying DOM node is torn down and
   // rebuilt — which is exactly what a full innerHTML rebuild does. Since this runs on a
   // periodic timer (every few seconds) as well as on-demand, rebuilding while the user has
   // one of this grid's dropdowns open/focused would close it out from under them mid-pick.
-  if(document.activeElement && grid.contains(document.activeElement) && document.activeElement.tagName==='SELECT'){
+  // force=true bypasses this for renders that must go through right away regardless (e.g.
+  // right after picking a new model, so its price updates immediately) — the select stays
+  // focused right after a pick, so without this the update would silently wait for the
+  // next periodic tick instead of showing immediately.
+  if(!force && document.activeElement && grid.contains(document.activeElement) && document.activeElement.tagName==='SELECT'){
     return;
   }
   const entries = getSortedEntries();
@@ -221,7 +232,7 @@ function renderTasksGrid(){
             ${t.kind==='motion-control' ? motionControlModelSelectHtml(t.model) : t.kind==='photo-lipsync' ? photoLipsyncModelSelectHtml(t.model) : t.kind==='lipsync' ? lipsyncModelSelectHtml(t.model) : modelSelectHtml(t.model || (modelOptions[0] && modelOptions[0].id), 'task-tile-model-select', t.kind==='archive-derive')}
             ${refHint}
             ${noRefModelAvailable ? '<div class="gen-hint" style="margin-top:6px;color:var(--danger);">No connected model supports reference images yet — can\'t generate this.</div>' : ''}
-            <button class="cf-btn primary task-tile-send-btn" style="width:100%;margin-top:8px;" ${noRefModelAvailable?'disabled':''}>Generate${model && model.costUsd ? ' — ' + formatCost(model.costUsd) : ''}</button>
+            <button class="cf-btn primary task-tile-send-btn" style="width:100%;margin-top:8px;" ${(noRefModelAvailable||sendingDraftIds.has(t.id))?'disabled':''}>${sendingDraftIds.has(t.id) ? 'Sending…' : 'Generate' + (model && model.costUsd ? ' — ' + formatCost(model.costUsd) : '')}</button>
           </div>
         </div>`;
     } else {
@@ -266,7 +277,7 @@ function wireDraftTiles(){
     tile.querySelector('.task-tile-model-select').onchange = (e)=>{
       draft.model = e.target.value;
       if(typeof saveProjectSoon==='function') saveProjectSoon();
-      renderTasksGrid();
+      renderTasksGrid(true);
     };
     tile.querySelector('.task-tile-thumb').onclick = (e)=>{
       if(e.target.closest('select')) return;
@@ -380,9 +391,9 @@ function updateGenerateSelectedButton(){
 async function sendDraftTask(draftId){
   const draft = (state.taskQueue||[]).find(t=> t.id===draftId);
   if(!draft) return;
-  const tile = document.querySelector('.task-tile[data-draft-id="' + draftId + '"]');
-  const btn = tile ? tile.querySelector('.task-tile-send-btn') : null;
-  if(btn){ btn.disabled = true; btn.textContent = 'Sending…'; }
+  if(sendingDraftIds.has(draftId)) return; // already sending — ignore a second click/render
+  sendingDraftIds.add(draftId);
+  renderTasksGrid(true);
   try{
     await sendGenerationTask(draft);
     state.taskQueue = (state.taskQueue||[]).filter(t=> t.id!==draftId);
@@ -390,8 +401,10 @@ async function sendDraftTask(draftId){
     if(typeof saveProjectSoon==='function') saveProjectSoon();
     await refreshTasks();
   } catch(err){
-    if(btn){ btn.disabled = false; btn.textContent = 'Try again'; }
     alert('Could not start generation: ' + err.message);
+  } finally {
+    sendingDraftIds.delete(draftId);
+    renderTasksGrid(true);
   }
 }
 

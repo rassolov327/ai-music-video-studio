@@ -23,11 +23,16 @@ function renderLipsyncControl(sceneId, shot){
 function openLipsyncMenu(sceneId, shotId, btnEl){
   closeLipsyncMenu();
   const rect = btnEl.getBoundingClientRect();
+  // getBoundingClientRect() returns the already-zoomed (actual rendered) position, but this
+  // new element is ALSO a descendant of the zoomed <body> — assigning that same number to
+  // its style.left/top would get it scaled by zoom a second time, landing well below/right
+  // of where it should be. Dividing by the zoom factor first cancels that out.
+  const zoom = parseFloat(getComputedStyle(document.body).zoom) || 1;
   const menu = document.createElement('div');
   menu.className = 'lipsync-menu';
   menu.id = 'lipsyncMenu';
-  menu.style.left = rect.left + 'px';
-  menu.style.top = (rect.bottom + 4) + 'px';
+  menu.style.left = (rect.left / zoom) + 'px';
+  menu.style.top = ((rect.bottom + 4) / zoom) + 'px';
   menu.innerHTML = `
     <div class="lipsync-menu-item" data-action="ai">AI Lip-sync</div>
     <div class="lipsync-menu-item" data-action="capture">Capture…</div>`;
