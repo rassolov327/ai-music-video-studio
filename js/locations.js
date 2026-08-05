@@ -101,23 +101,27 @@ function showLocationCard(cat, idx){
        <div class="char-card-angles">${it.angles.map(a=>`<div class="char-card-angle"><img src="${a}"></div>`).join('')}</div>`
     : '';
 
-  const hasObjCard = !!(it.card && it.card.images && it.card.images.sheet && it.card.images.sheet.url);
-  const objCardStatusHtml = hasObjCard
-    ? `<div class="char-card-section-title">Location Card</div>
-       <div class="char-card-angles"><div class="char-card-angle" style="width:100%;height:90px;" title="Reference sheet"><img src="${it.card.images.sheet.url}"></div></div>`
-    : `<div class="char-card-section-title">Location Card</div>
-       <div class="gen-hint" style="margin-top:0;">Not built yet — generations of this location rely on this card once it exists.</div>`;
+  // Photo carousel — cycles through whichever named angles actually exist for this
+  // location (not always all 5). Starts on "wide" if it exists, otherwise whatever's
+  // first available; arrows only show up when there's more than one to page through.
+  const angleLabel = { wide:'General / wide shot', front:'Front', reverse:'Reverse', left:'Left', right:'Right' };
+  const availableAngles = LOCATION_ANGLE_KEYS.filter(k=> !!getLocationAngle(it, k));
+  let angleViewIdx = Math.max(0, availableAngles.indexOf('wide'));
 
   previewEl.innerHTML = `
     <div class="char-card" id="locCard">
       <div class="char-card-photo" id="locCardPhoto">
-        ${it.photo ? `<img src="${it.photo}">` : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 21s7-6.5 7-12a7 7 0 0 0-14 0c0 5.5 7 12 7 12z"></path><circle cx="12" cy="9" r="2.5"></circle></svg>'}
+        ${it.photo ? `<img src="${it.photo}" id="locCardPhotoImg">` : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 21s7-6.5 7-12a7 7 0 0 0-14 0c0 5.5 7 12 7 12z"></path><circle cx="12" cy="9" r="2.5"></circle></svg>'}
+        ${availableAngles.length > 1 ? `
+          <div class="loc-card-photo-arrow left" id="locCardPhotoPrev" title="Previous angle"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg></div>
+          <div class="loc-card-photo-arrow right" id="locCardPhotoNext" title="Next angle"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></div>
+          <div class="loc-card-photo-label" id="locCardPhotoLabel">${angleLabel[availableAngles[angleViewIdx]]}</div>
+        ` : (availableAngles.length===1 ? `<div class="loc-card-photo-label">${angleLabel[availableAngles[0]]}</div>` : '')}
       </div>
       <div class="char-card-body">
         <p class="char-card-name">${it.name}</p>
         ${it.description ? `<p class="char-card-desc">${it.description}</p>` : ''}
         ${anglesHtml}
-        ${objCardStatusHtml}
         <div class="char-card-actions">
           <button class="cf-btn" id="locCardBack">Back to locations</button>
           <div style="display:flex;gap:8px;">
@@ -125,16 +129,25 @@ function showLocationCard(cat, idx){
             <button class="cf-btn" id="locCardDelete" style="color:var(--danger);">Delete</button>
           </div>
         </div>
-        <button class="cf-btn primary" id="locCardBuildBtn" style="width:100%;margin-top:12px;">${hasObjCard ? 'Edit Location Card' : 'Create Location Card'}</button>
-        <div id="locTaskSlot"></div>
       </div>
     </div>`;
 
-  renderLocTaskSlot(it);
+  if(availableAngles.length > 1){
+    const imgEl = document.getElementById('locCardPhotoImg');
+    const labelEl = document.getElementById('locCardPhotoLabel');
+    function showAngle(i){
+      angleViewIdx = (i + availableAngles.length) % availableAngles.length;
+      const key = availableAngles[angleViewIdx];
+      const angle = getLocationAngle(it, key);
+      if(imgEl && angle) imgEl.src = angle.photo;
+      if(labelEl) labelEl.textContent = angleLabel[key];
+    }
+    document.getElementById('locCardPhotoPrev').onclick = (e)=>{ e.stopPropagation(); showAngle(angleViewIdx - 1); };
+    document.getElementById('locCardPhotoNext').onclick = (e)=>{ e.stopPropagation(); showAngle(angleViewIdx + 1); };
+  }
 
   document.getElementById('locCardBack').onclick = ()=> showLocationGallery(cat);
   document.getElementById('locCardEdit').onclick = ()=> showLocationForm(cat, idx);
-  document.getElementById('locCardBuildBtn').onclick = ()=> showObjectCardBuilder('locations', cat, idx);
   document.getElementById('locCardDelete').onclick = ()=>{
     if(typeof deleteLocationImages==='function') deleteLocationImages(it);
     if(typeof deleteObjectCardAssets==='function') deleteObjectCardAssets('locations', it);
@@ -145,23 +158,6 @@ function showLocationCard(cat, idx){
   };
   previewEl.onclick = (e)=>{
     if(e.target === previewEl) showLocationGallery(cat);
-  };
-}
-
-async function renderLocTaskSlot(it){
-  const slot = document.getElementById('locTaskSlot');
-  if(!slot || !it.id) return;
-  const available = await checkPaidGenerationAvailable();
-  const freshSlot = document.getElementById('locTaskSlot');
-  if(!freshSlot) return;
-  if(!available) return;
-  const hasPhoto = !!it.photo;
-  freshSlot.innerHTML = `
-    <button class="cf-btn" id="locAddToTasksBtn" style="width:100%;margin-top:8px;">Add to Tasks (real AI)</button>
-    ${hasPhoto ? '<div class="gen-hint" style="margin-top:6px;">Has a photo — pick a model marked (ref) in Tasks to generate from it, like a real location you photographed yourself.</div>' : ''}`;
-  document.getElementById('locAddToTasksBtn').onclick = ()=>{
-    queueAssetGeneration('locations', it);
-    freshSlot.innerHTML = `<div class="gen-hint" style="margin-top:8px;color:#5fae7a;">Added to the TASKS queue.</div>`;
   };
 }
 
