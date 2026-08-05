@@ -18,12 +18,21 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import ffmpegPath from 'ffmpeg-static';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs/promises';
 import os from 'os';
 const execFileAsync = promisify(execFile);
+// Loaded defensively — this is only needed for one optional step (video faststart remux
+// for Motion Control), and a failed/missing install of this package must never be able to
+// take down the whole server. If it's unavailable, remuxFaststart below just throws and
+// the caller already falls back to using the original, un-remuxed file.
+let ffmpegPath = null;
+try{
+  ffmpegPath = (await import('ffmpeg-static')).default;
+} catch(err){
+  console.warn('[server] ffmpeg-static not available — video faststart remux will be skipped:', err && err.message);
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -629,6 +638,7 @@ setInterval(pruneOldReferenceImages, 15 * 60 * 1000).unref();
 // ("Aborted()") in its own internal two-pass moov-relocation mechanism, regardless of file
 // size or how the command is structured, so this step was moved server-side entirely.
 async function remuxFaststart(buffer){
+  if(!ffmpegPath) throw new Error('ffmpeg-static is not available on this deployment.');
   const tmpDir = os.tmpdir();
   const tag = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const inputPath = path.join(tmpDir, 'faststart_in_' + tag + '.mp4');
