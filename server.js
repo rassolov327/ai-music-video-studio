@@ -505,6 +505,29 @@ const MOTION_CONTROL_MODELS = [
 app.get('/api/motion-control-models', (req, res) => {
   res.json({ models: MOTION_CONTROL_MODELS.map(m => ({ id: m.id, label: m.label, costUsd: m.costUsd, blurb: m.blurb })) });
 });
+// Re-hosts a file we already have in memory directly on KIE's OWN storage (their File
+// Stream Upload API), instead of giving KIE's model backends a URL pointing back at our
+// own server. This is the real fix for Motion Control's persistent failures — comparing
+// the user's own successful KIE-playground upload against ours showed THEIR flow uploads
+// straight to KIE's storage first, while ours made KIE fetch from an arbitrary third-party
+// (our) server — which their own docs note has a 30s fetch timeout and is apparently
+// unreliable for at least this model's backend, even though the file itself was always fine.
+async function uploadToKieFileHost(buffer, mime, fileName){
+  if (!KIE_API_KEY) throw new Error('KIE_API_KEY is not set.');
+  const form = new FormData();
+  form.append('file', new Blob([buffer], { type: mime }), fileName);
+  form.append('uploadPath', 'motion-control');
+  const res = await fetch('https://kieai.redpandaai.co/api/file-stream-upload', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${KIE_API_KEY}` },
+    body: form,
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data || !data.success || !data.data || !data.data.downloadUrl) {
+    throw new Error((data && data.msg) || ('KIE file upload failed (HTTP ' + res.status + ').'));
+  }
+  return data.data.downloadUrl;
+}
 app.post('/api/motion-control/start', async (req, res) => {
   if (!KIE_API_KEY) {
     return res.status(503).json({ error: 'not_configured', message: 'KIE_API_KEY is not set on the server yet.' });
@@ -514,10 +537,29 @@ app.post('/api/motion-control/start', async (req, res) => {
     return res.status(400).json({ error: 'bad_request', message: 'imageUrl and videoUrl are both required.' });
   }
   const matched = MOTION_CONTROL_MODELS.find(m => m.id === model) || MOTION_CONTROL_MODELS[0];
+
+  let kieImageUrl, kieVideoUrl;
+  try {
+    // Both incoming URLs point at our own /api/reference-image/:id — pull the id out and
+    // grab the buffer straight from memory rather than doing an HTTP round-trip to ourselves.
+    const imgId = imageUrl.split('/api/reference-image/')[1];
+    const vidId = videoUrl.split('/api/reference-image/')[1];
+    const imgEntry = imgId && referenceImages.get(imgId);
+    const vidEntry = vidId && referenceImages.get(vidId);
+    if (!imgEntry || !vidEntry) throw new Error('Could not find the uploaded image/video to re-host on KIE.');
+    [kieImageUrl, kieVideoUrl] = await Promise.all([
+      uploadToKieFileHost(imgEntry.buffer, imgEntry.mime, 'shot.png'),
+      uploadToKieFileHost(vidEntry.buffer, vidEntry.mime, 'reference.mp4'),
+    ]);
+  } catch (err) {
+    console.error('[server] could not re-host files on KIE for motion-control:', err);
+    return res.status(502).json({ error: 'provider_error', message: 'Could not upload the image/video to KIE: ' + String(err && err.message || err) });
+  }
+
   const input = {
     prompt: prompt || '',
-    input_urls: [imageUrl],
-    video_urls: [videoUrl],
+    input_urls: [kieImageUrl],
+    video_urls: [kieVideoUrl],
     character_orientation: 'video',
     mode: matched.kieMode,
   };
