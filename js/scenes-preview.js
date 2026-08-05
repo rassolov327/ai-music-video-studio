@@ -441,6 +441,23 @@ function renderInspectorPanel(){
           ${CAMERA_MOVES.map(s=>`<option ${shot.cameraMove===s?'selected':''}>${s}</option>`).join('')}
         </select>
       </div>
+      ${(()=>{
+        // Only offered when the scene's location actually has at least one angle filled —
+        // and only THOSE angles are listed, never all 5 regardless of what exists.
+        if(!scene.location) return '';
+        const locCat = state.categories.find(c=>c.key==='locations');
+        const loc = locCat && locCat.items.find(l=>l.name===scene.location);
+        if(!loc || typeof getLocationAngle!=='function') return '';
+        const available = LOCATION_ANGLE_KEYS.filter(k=> !!getLocationAngle(loc, k));
+        if(!available.length) return '';
+        const angleLabel = { wide:'Wide', front:'Front', reverse:'Reverse', left:'Left', right:'Right' };
+        return `<div class="cf-field"><label>Location angle</label>
+          <select id="shotLocationAngleInput">
+            <option value="">Not selected</option>
+            ${available.map(k=>`<option value="${k}" ${shot.locationAngle===k?'selected':''}>${angleLabel[k]}</option>`).join('')}
+          </select>
+        </div>`;
+      })()}
       <div class="cf-field"><label>Lighting</label>
         <label class="char-row" style="margin-bottom:6px;font-size:11.5px;font-weight:400;">
           <input type="checkbox" id="shotLightSameChk" ${sameAsScene ? 'checked' : ''}> Same as scene
@@ -496,6 +513,13 @@ function renderInspectorPanel(){
   });
   document.getElementById('shotSizeInput').addEventListener('change', (e)=>{ shot.shotSize = e.target.value; });
   document.getElementById('shotMoveInput').addEventListener('change', (e)=>{ shot.cameraMove = e.target.value; });
+  const shotLocationAngleInput = document.getElementById('shotLocationAngleInput');
+  if(shotLocationAngleInput){
+    shotLocationAngleInput.addEventListener('change', (e)=>{
+      shot.locationAngle = e.target.value || null;
+      if(typeof saveProjectSoon==='function') saveProjectSoon();
+    });
+  }
   document.getElementById('shotLightSameChk').addEventListener('change', (e)=>{
     shot.lightingSameAsScene = e.target.checked;
     renderInspectorPanel();

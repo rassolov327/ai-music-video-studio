@@ -579,7 +579,7 @@ async function sendGenerationTask(draft){
       // Same "set once in the scene, every shot inherits it" pattern, now for the
       // location and any assigned props — uses the full Object Card if one's been built,
       // otherwise falls back to whatever simple photo the location/prop already has.
-      const objRefs = await gatherSceneLocationPropReferences(scene);
+      const objRefs = await gatherSceneLocationPropReferences(scene, shot);
       for(const localUrl of objRefs){
         try{
           const url = await uploadReferencePhoto(localUrl);

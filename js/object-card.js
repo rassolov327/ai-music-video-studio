@@ -301,14 +301,19 @@ async function regenerateObjectCardFromModal(modal){
 // sheet if one's been built; falls back to whatever simple photo the item already has
 // (uploaded or freely generated) so there's still SOME visual grounding even before anyone
 // builds a full card.
-async function gatherSceneLocationPropReferences(scene){
+async function gatherSceneLocationPropReferences(scene, shot){
   const localUrls = [];
   if(!scene) return localUrls;
   if(scene.location){
     const locCat = state.categories.find(c=> c.key==='locations');
     const loc = locCat && locCat.items.find(l=> l.name===scene.location);
     if(loc){
-      const img = (loc.card && loc.card.images && loc.card.images.sheet && loc.card.images.sheet.url) || loc.photo;
+      let img = null;
+      if(shot && shot.locationAngle && typeof getLocationAngle==='function'){
+        const angle = getLocationAngle(loc, shot.locationAngle);
+        if(angle && angle.photo) img = angle.photo;
+      }
+      if(!img) img = (loc.card && loc.card.images && loc.card.images.sheet && loc.card.images.sheet.url) || loc.photo;
       if(img) localUrls.push(img);
     }
   }
