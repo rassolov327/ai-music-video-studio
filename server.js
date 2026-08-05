@@ -18,6 +18,12 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import ffmpegPath from 'ffmpeg-static';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import fs from 'fs/promises';
+import os from 'os';
+const execFileAsync = promisify(execFile);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -616,11 +622,31 @@ function pruneOldReferenceImages(){
 }
 setInterval(pruneOldReferenceImages, 15 * 60 * 1000).unref();
 
-app.post('/api/upload-reference-image', (req, res) => {
+// Moves a video's mp4 metadata (moov atom) to the front of the file — needed for a backend
+// that fetches the file BY URL (our case) rather than receiving a direct upload, since some
+// can't parse the file structure without it up front. Done here with a REAL ffmpeg binary,
+// not the browser's ffmpeg.wasm build — that build has a confirmed, reproducible crash
+// ("Aborted()") in its own internal two-pass moov-relocation mechanism, regardless of file
+// size or how the command is structured, so this step was moved server-side entirely.
+async function remuxFaststart(buffer){
+  const tmpDir = os.tmpdir();
+  const tag = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  const inputPath = path.join(tmpDir, 'faststart_in_' + tag + '.mp4');
+  const outputPath = path.join(tmpDir, 'faststart_out_' + tag + '.mp4');
+  try{
+    await fs.writeFile(inputPath, buffer);
+    await execFileAsync(ffmpegPath, ['-y', '-i', inputPath, '-c', 'copy', '-movflags', '+faststart', outputPath]);
+    return await fs.readFile(outputPath);
+  } finally {
+    fs.unlink(inputPath).catch(()=>{});
+    fs.unlink(outputPath).catch(()=>{});
+  }
+}
+app.post('/api/upload-reference-image', async (req, res) => {
   if(!PUBLIC_URL){
     return res.status(503).json({ error: 'not_configured', message: 'No public URL detected for this deployment — KIE can\'t fetch a reference image without one.' });
   }
-  const { dataUrl } = req.body || {};
+  const { dataUrl, skipRemux } = req.body || {};
   if(!dataUrl || typeof dataUrl !== 'string' || dataUrl.indexOf('data:')!==0){
     return res.status(400).json({ error: 'bad_request', message: 'dataUrl is required.' });
   }
@@ -629,7 +655,14 @@ app.post('/api/upload-reference-image', (req, res) => {
     const header = dataUrl.slice(0, commaIdx);
     const mimeMatch = header.match(/data:(.*?);base64/);
     const mime = mimeMatch ? mimeMatch[1] : 'image/png';
-    const buffer = Buffer.from(dataUrl.slice(commaIdx + 1), 'base64');
+    let buffer = Buffer.from(dataUrl.slice(commaIdx + 1), 'base64');
+    if(mime.indexOf('video/')===0 && !skipRemux){
+      try{
+        buffer = await remuxFaststart(buffer);
+      } catch(remuxErr){
+        console.warn('[server] faststart remux failed, uploading the original file as-is:', remuxErr);
+      }
+    }
     const id = 'ref_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
     referenceImages.set(id, { buffer, mime, createdAt: Date.now() });
     res.json({ url: PUBLIC_URL + '/api/reference-image/' + id });

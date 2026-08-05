@@ -417,19 +417,17 @@ async function sendGenerationTask(draft){
     const entry = (state.archive||[]).find(e=> e.id===draft.archiveEntryId);
     if(!entry || !entry.photo) throw new Error('The captured reference video is missing — try Capture again.');
 
-    if(typeof showBgStatus==='function') showBgStatus('Preparing reference video…');
-    let videoBlob;
-    try{
-      videoBlob = await trimVideoToDuration(entry.photo, shot.duration, (msg)=>{ if(typeof showBgStatus==='function') showBgStatus(msg); });
-    } finally {
-      if(typeof hideBgStatus==='function') hideBgStatus();
-    }
-    const videoBlobUrl = URL.createObjectURL(videoBlob);
+    // TEMPORARY DIAGNOSTIC BYPASS — skips ffmpeg entirely (no client trim, and the
+    // server's own faststart remux is also skipped via skipRemux below) and uploads the
+    // captured video exactly as picked. Isolates whether the dispatch/upload path itself
+    // works with a file already confirmed good via KIE's own playground, or whether
+    // something in our processing is still the problem. Revert once the test result is in
+    // — restore the trimVideoToDuration call below and drop skipRemux from the request.
+    const videoBlobUrl = entry.photo;
     const [imageUrl, videoUrl] = await Promise.all([
       uploadReferencePhoto(shot.previewImage),
-      uploadReferencePhoto(videoBlobUrl),
+      uploadReferencePhoto(videoBlobUrl, true),
     ]);
-    URL.revokeObjectURL(videoBlobUrl);
     if(!imageUrl || !videoUrl) throw new Error('Could not upload the image/video for motion control.');
 
     const motionControlTaskMeta = { projectId: currentProjectId, kind:'motion-control', sceneId: scene.id, sceneName: scene.name, shotId: shot.id, shotName: shot.name };
@@ -582,7 +580,7 @@ async function sendGenerationTask(draft){
 // The reference photo lives as a local blob:/data: URL — KIE needs a fetchable link, so
 // hand it to our own server first (see /api/upload-reference-image), which hands back a
 // short-lived public URL.
-async function uploadReferencePhoto(photoUrl){
+async function uploadReferencePhoto(photoUrl, skipRemux){
   let dataUrl = photoUrl;
   if(photoUrl.indexOf('blob:')===0){
     const blob = await (await fetch(photoUrl)).blob();
@@ -596,7 +594,7 @@ async function uploadReferencePhoto(photoUrl){
   const res = await fetch('/api/upload-reference-image', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ dataUrl }),
+    body: JSON.stringify({ dataUrl, skipRemux: !!skipRemux }),
   });
   const data = await res.json().catch(()=> null);
   if(!res.ok || !data || !data.url){

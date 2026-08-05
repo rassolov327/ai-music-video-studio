@@ -49,35 +49,28 @@ async function trimVideoToDuration(videoUrl, durationSec, onStatus){
     // straight into an .mp4 container can produce a file that LOOKS like an mp4 but has a
     // codec inside the provider can't actually decode ("file format not support"). Also
     // gives frame-accurate trimming, unlike stream-copy which can only cut at keyframes.
-    // Two separate, simpler ffmpeg calls rather than one combined encode+faststart command.
-    // ffmpeg.wasm has a known, documented issue where combined two-pass-style operations
-    // (which +faststart triggers internally — see the "second pass: moving moov atom" log
-    // line) can abort partway through regardless of file size. Splitting into a plain
-    // encode, then a separate lightweight stream-copy remux just to relocate the metadata,
-    // avoids that specific combined-operation path.
+    // Note: the faststart step (moving the moov metadata atom to the front, needed since
+    // the file gets fetched by URL rather than uploaded directly) does NOT happen here —
+    // ffmpeg.wasm's own internal mechanism for that ("second pass: moving moov atom", which
+    // +faststart triggers) has a confirmed, reproducible crash regardless of file size or
+    // how the command is split up. That step now happens server-side with a real ffmpeg
+    // binary instead (see remuxFaststart in server.js), which doesn't have this bug.
     await ffmpeg.exec([
       '-i', 'motion_src_video', '-t', String(durationSec),
       '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', // libx264 needs even width/height
       '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'fast', '-crf', '23',
       '-c:a', 'aac', '-b:a', '128k',
-      'motion_encoded.mp4',
-    ]);
-    await ffmpeg.exec([
-      '-i', 'motion_encoded.mp4', '-c', 'copy', '-movflags', '+faststart',
       'motion_trimmed.mp4',
     ]);
     const data = await ffmpeg.readFile('motion_trimmed.mp4');
     if(!data || !data.buffer || data.buffer.byteLength < 1000){
-      // Safety net for any ffmpeg.wasm crash mid-process (this exact class of bug is why
-      // the encode was split into two calls above, but keeping this guard in case
-      // something else goes wrong) — surfaces a clear error instead of silently
-      // continuing with broken data that fails confusingly further downstream.
+      // Safety net for any ffmpeg.wasm crash mid-process — surfaces a clear error instead
+      // of silently continuing with broken data that fails confusingly further downstream.
       throw new Error('Could not process the reference video — the render engine failed partway through. Try a different source clip.');
     }
     return new Blob([data.buffer], { type: 'video/mp4' });
   } finally {
     try{ await ffmpeg.deleteFile('motion_src_video'); } catch(err){}
-    try{ await ffmpeg.deleteFile('motion_encoded.mp4'); } catch(err){}
     try{ await ffmpeg.deleteFile('motion_trimmed.mp4'); } catch(err){}
   }
 }
