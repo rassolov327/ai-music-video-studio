@@ -142,6 +142,13 @@ function showLocationForm(cat, editIdx){
         <input type="text" id="lfName" placeholder="e.g. Route 66 Bar" value="${existing ? existing.name : ''}">
       </div>
 
+      <div class="form-tabs" style="margin-top:4px;">
+        <div class="form-tab active" data-outer-tab="standard">Standard</div>
+        <div class="form-tab" data-outer-tab="advanced">Advanced</div>
+      </div>
+
+      <div class="form-tab-panel" id="outerPanelStandard">
+
       <div class="form-tabs">
         <div class="form-tab active" data-tab="details">Details</div>
         <div class="form-tab" data-tab="ai">AI Generator</div>
@@ -177,6 +184,21 @@ function showLocationForm(cat, editIdx){
         <div id="aiPaidGenSlot"></div>
       </div>
 
+      </div>
+
+      <div class="form-tab-panel" id="outerPanelAdvanced" style="display:none;">
+        <div class="cf-field">
+          <label>Angles</label>
+          <div class="location-angle-grid">
+            <div class="location-angle-tile" data-angle-key="wide"><div class="location-angle-tile-label">General / wide shot</div></div>
+            <div class="location-angle-tile" data-angle-key="front"><div class="location-angle-tile-label">Front</div></div>
+            <div class="location-angle-tile" data-angle-key="reverse"><div class="location-angle-tile-label">Reverse</div></div>
+            <div class="location-angle-tile" data-angle-key="left"><div class="location-angle-tile-label">Left</div></div>
+            <div class="location-angle-tile" data-angle-key="right"><div class="location-angle-tile-label">Right</div></div>
+          </div>
+        </div>
+      </div>
+
       <div class="cf-actions">
         <button class="cf-btn" id="lfCancel">Cancel</button>
         <button class="cf-btn primary" id="lfSave" ${existing && existing.name ? '' : 'disabled'}>${isEdit ? 'Save changes' : 'Add location'}</button>
@@ -184,7 +206,16 @@ function showLocationForm(cat, editIdx){
     </div>
   `;
 
-  previewEl.querySelectorAll('.form-tab').forEach(tabEl=>{
+  previewEl.querySelectorAll('[data-outer-tab]').forEach(tabEl=>{
+    tabEl.onclick = ()=>{
+      previewEl.querySelectorAll('[data-outer-tab]').forEach(t=>t.classList.remove('active'));
+      tabEl.classList.add('active');
+      document.getElementById('outerPanelStandard').style.display = tabEl.dataset.outerTab==='standard' ? '' : 'none';
+      document.getElementById('outerPanelAdvanced').style.display = tabEl.dataset.outerTab==='advanced' ? '' : 'none';
+    };
+  });
+
+  previewEl.querySelectorAll('.form-tab[data-tab]').forEach(tabEl=>{
     tabEl.onclick = ()=>{
       previewEl.querySelectorAll('.form-tab').forEach(t=>t.classList.remove('active'));
       tabEl.classList.add('active');
