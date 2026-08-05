@@ -1,3 +1,27 @@
+// ---------- location "angles" (stage 2: data model) ----------
+// A separate field from the existing `angles` array (that one is the free-form "Additional
+// views" thumbnail list in the Manual tab — unrelated). angleShots is an object keyed by
+// the five named slots, each either null or { photo, description }.
+const LOCATION_ANGLE_KEYS = ['wide', 'front', 'reverse', 'left', 'right'];
+function getLocationAngle(location, key){
+  if(!location) return null;
+  if(location.angleShots && location.angleShots[key]) return location.angleShots[key];
+  // Backward compatibility: an existing location saved before this feature only has the
+  // plain `photo` field — treat that as its "wide" angle without migrating/duplicating
+  // any data, so nothing about how existing locations are stored actually changes.
+  if(key==='wide' && location.photo) return { photo: location.photo };
+  return null;
+}
+function setLocationAngle(location, key, photo, description){
+  if(!location) return;
+  location.angleShots = location.angleShots || {};
+  location.angleShots[key] = { photo, description: description || '' };
+}
+function hasAnyLocationAngle(location){
+  if(!location) return false;
+  return LOCATION_ANGLE_KEYS.some(k=> !!getLocationAngle(location, k));
+}
+
 // ---------- preview: locations gallery (tile grid) ----------
 function showLocationGallery(cat){
   pausePlayback();
@@ -150,7 +174,7 @@ function showLocationForm(cat, editIdx){
       <div class="form-tab-panel" id="outerPanelStandard">
 
       <div class="form-tabs">
-        <div class="form-tab active" data-tab="details">Details</div>
+        <div class="form-tab active" data-tab="details">Manual</div>
         <div class="form-tab" data-tab="ai">AI Generator</div>
       </div>
 
@@ -217,7 +241,7 @@ function showLocationForm(cat, editIdx){
 
   previewEl.querySelectorAll('.form-tab[data-tab]').forEach(tabEl=>{
     tabEl.onclick = ()=>{
-      previewEl.querySelectorAll('.form-tab').forEach(t=>t.classList.remove('active'));
+      previewEl.querySelectorAll('.form-tab[data-tab]').forEach(t=>t.classList.remove('active'));
       tabEl.classList.add('active');
       document.getElementById('tabDetails').style.display = tabEl.dataset.tab==='details' ? '' : 'none';
       document.getElementById('tabAI').style.display = tabEl.dataset.tab==='ai' ? '' : 'none';
