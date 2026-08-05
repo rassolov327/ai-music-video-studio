@@ -213,13 +213,14 @@ function showLocationForm(cat, editIdx){
       <div class="form-tab-panel" id="outerPanelAdvanced" style="display:none;">
         <div class="cf-field">
           <label>Angles</label>
-          <div class="location-angle-grid">
+          <div class="location-angle-grid" id="locAngleShotGrid">
             <div class="location-angle-tile" data-angle-key="wide"><div class="location-angle-tile-label">General / wide shot</div></div>
             <div class="location-angle-tile" data-angle-key="front"><div class="location-angle-tile-label">Front</div></div>
             <div class="location-angle-tile" data-angle-key="reverse"><div class="location-angle-tile-label">Reverse</div></div>
             <div class="location-angle-tile" data-angle-key="left"><div class="location-angle-tile-label">Left</div></div>
             <div class="location-angle-tile" data-angle-key="right"><div class="location-angle-tile-label">Right</div></div>
           </div>
+          <input type="file" id="locAngleShotInput" accept="image/*,.heic,.heif,.tiff,.tif,.bmp,.svg,.avif,.webp" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;">
         </div>
       </div>
 
@@ -311,6 +312,72 @@ function showLocationForm(cat, editIdx){
     img.src = url;
   }
 
+  // ---- named angle-shot tiles (stage 3: local upload) ----
+  // Local to this form session, same pattern as anglePhotos above — only written into the
+  // real location object on Save. Deep-copied so nothing about the tile grid can mutate
+  // the original location's data before the user actually saves.
+  const angleShotsData = {};
+  LOCATION_ANGLE_KEYS.forEach(k=>{
+    const existingAngle = existing ? getLocationAngle(existing, k) : null;
+    if(existingAngle) angleShotsData[k] = { photo: existingAngle.photo, description: existingAngle.description || '' };
+  });
+  const angleShotGrid = document.getElementById('locAngleShotGrid');
+  const angleShotInput = document.getElementById('locAngleShotInput');
+  let angleShotTargetKey = null;
+
+  function renderAngleShotTiles(){
+    LOCATION_ANGLE_KEYS.forEach(key=>{
+      const tile = angleShotGrid.querySelector(`[data-angle-key="${key}"]`);
+      if(!tile) return;
+      // The "wide" tile is the same picture as Standard's own "Add photo" — always reflect
+      // whichever was set most recently, rather than tracking it twice.
+      const photo = key==='wide' ? (photoDataUrl || (angleShotsData.wide && angleShotsData.wide.photo)) : (angleShotsData[key] && angleShotsData[key].photo);
+      const label = tile.querySelector('.location-angle-tile-label').outerHTML;
+      tile.innerHTML = photo
+        ? `<img src="${photo}">${label}<div class="location-angle-tile-del" data-angle-key="${key}" title="Remove"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>`
+        : `<div class="location-angle-tile-add"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg></div>${label}`;
+      tile.onclick = (e)=>{
+        if(e.target.closest('.location-angle-tile-del')) return;
+        angleShotTargetKey = key;
+        angleShotInput.click();
+      };
+      const delBtn = tile.querySelector('.location-angle-tile-del');
+      if(delBtn){
+        delBtn.onclick = (e)=>{
+          e.stopPropagation();
+          if(key==='wide'){
+            photoDataUrl = null;
+            photoDrop.classList.remove('has-photo');
+            const img = document.getElementById('locPhotoDropImg');
+            if(img) img.remove();
+          }
+          delete angleShotsData[key];
+          renderAngleShotTiles();
+        };
+      }
+    });
+  }
+  angleShotInput.onchange = async ()=>{
+    const file = angleShotInput.files[0];
+    if(!file || !angleShotTargetKey) return;
+    try{
+      const dataUrl = await loadImageAsDataURL(file);
+      if(angleShotTargetKey==='wide'){
+        // Same picture as Standard's "Add photo" — keep that tab's own preview in sync too.
+        photoDataUrl = dataUrl;
+        photoDrop.classList.add('has-photo');
+        setPhotoDropImage(dataUrl);
+        applyNaturalAspect(photoDrop, dataUrl);
+        refreshSaveState();
+      } else {
+        angleShotsData[angleShotTargetKey] = { photo: dataUrl, description: '' };
+      }
+      renderAngleShotTiles();
+    } catch(err){}
+    angleShotInput.value = '';
+  };
+  renderAngleShotTiles();
+
   photoInput.onchange = async ()=>{
     const file = photoInput.files[0];
     if(!file) return;
@@ -320,6 +387,7 @@ function showLocationForm(cat, editIdx){
       setPhotoDropImage(photoDataUrl);
       applyNaturalAspect(photoDrop, photoDataUrl);
       refreshFormGen();
+      renderAngleShotTiles();
     } catch(err){}
   };
   photoRemove.onclick = (e)=>{
@@ -332,6 +400,7 @@ function showLocationForm(cat, editIdx){
     photoDrop.style.aspectRatio='';
     photoInput.value='';
     refreshFormGen();
+    renderAngleShotTiles();
   };
 
   const aiPromptInput = document.getElementById('aiPromptInput');
@@ -380,6 +449,11 @@ function showLocationForm(cat, editIdx){
   };
   async function doSave(stayOnForm){
     if(nameInput.value.trim().length===0) return null;
+    const angleShotsToSave = {};
+    LOCATION_ANGLE_KEYS.forEach(k=>{
+      if(k==='wide') return; // covered by the plain `photo` field already — see getLocationAngle's fallback
+      if(angleShotsData[k]) angleShotsToSave[k] = angleShotsData[k];
+    });
     const data = {
       id: existing && existing.id ? existing.id : 'l' + (locSeq++),
       name: nameInput.value.trim(),
@@ -388,6 +462,7 @@ function showLocationForm(cat, editIdx){
       photo: photoDataUrl,
       description: notesInput.value.trim(),
       angles: anglePhotos.slice(),
+      angleShots: Object.keys(angleShotsToSave).length ? angleShotsToSave : undefined,
       referenceCard: formRefText,
       _assetFiles: existing ? existing._assetFiles : undefined,
     };

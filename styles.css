@@ -349,12 +349,24 @@
   }
   .location-angle-tile{
     position:relative;aspect-ratio:16/9;border-radius:8px;border:1px dashed var(--line);
-    background:var(--bg-panel-2);overflow:hidden;
+    background:var(--bg-panel-2);overflow:hidden;cursor:pointer;
   }
+  .location-angle-tile:hover{border-color:var(--accent);}
+  .location-angle-tile img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
   .location-angle-tile-label{
     position:absolute;bottom:0;left:0;right:0;padding:4px 6px;font-size:10px;color:var(--text-2);
     background:linear-gradient(0deg, rgba(0,0,0,.6), transparent);
   }
+  .location-angle-tile-add{
+    position:absolute;top:0;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;
+    color:var(--text-3);
+  }
+  .location-angle-tile:hover .location-angle-tile-add{color:var(--accent);}
+  .location-angle-tile-del{
+    position:absolute;top:4px;right:4px;width:18px;height:18px;border-radius:4px;z-index:2;
+    background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;color:#fff;opacity:.7;
+  }
+  .location-angle-tile-del:hover{background:rgba(217,105,95,.85);opacity:1;}
   .angle-tile-del{
     position:absolute;top:2px;right:2px;width:16px;height:16px;border-radius:4px;
     background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;color:#fff;
