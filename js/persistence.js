@@ -766,6 +766,11 @@ async function restoreLocationImages(location){
       if(!location.angles) location.angles = [];
       location.angles[idx] = url;
     }
+    else if(fieldKey.indexOf('angle_')===0){
+      const key = fieldKey.slice(6);
+      location.angleShots = location.angleShots || {};
+      location.angleShots[key] = { photo: url, description: (location.angleShots[key] && location.angleShots[key].description) || '' };
+    }
     if(url) found++;
     else missing.push(fieldKey + ' (expected "' + fileName + '")');
   });
@@ -1021,6 +1026,40 @@ async function restoreGeneratedAssetImage(item, catKey, fieldKey, assetsDirHandl
   if(url){ item[fieldKey] = url; return true; }
   return false;
 }
+// Location angle shots (stage 4) — same underlying mechanism as persistGeneratedAssetImage
+// above, but the result lands in the nested angleShots structure instead of a flat field.
+// A synthetic flat key ("angle_<direction>") is used purely for the _assetFiles bookkeeping,
+// which needs one; the "wide" angle is the exception, since that one already IS the plain
+// `photo` field (see getLocationAngle's fallback) so it reuses persistGeneratedAssetImage
+// directly rather than needing its own path.
+async function persistLocationAngleImage(location, key, resultUrl){
+  if(!location || !location.id || !resultUrl) return;
+  if(key==='wide'){ await persistGeneratedAssetImage(location, 'locations', 'photo', resultUrl); return; }
+  const fieldKey = 'angle_' + key;
+  try{
+    const assetKey = pid() + ':locations:' + location.id + ':' + fieldKey;
+    let fileName, blob;
+    if(resultUrl.indexOf('data:')===0){
+      blob = dataUrlToBlobSync(resultUrl);
+      fileName = await persistBlobAsset(assetKey, blob, extFromDataUrl(resultUrl));
+    } else {
+      const result = await persistRemoteImageAsset(assetKey, resultUrl);
+      fileName = result.fileName;
+      blob = result.blob;
+    }
+    const url = URL.createObjectURL(blob);
+    location.angleShots = location.angleShots || {};
+    location.angleShots[key] = { photo: url, description: (location.angleShots[key] && location.angleShots[key].description) || '' };
+    location._assetFiles = location._assetFiles || {};
+    location._assetFiles[fieldKey] = fileName;
+    console.log('[ProjectStore] saved location angle "' + key + '" locally for "' + location.name + '"');
+  } catch(err){
+    console.warn('[ProjectStore] could not save location angle locally, keeping the provider link only (it may expire later):', err);
+    location.angleShots = location.angleShots || {};
+    location.angleShots[key] = { photo: resultUrl, description: (location.angleShots[key] && location.angleShots[key].description) || '' };
+  }
+  if(typeof saveProjectSoon==='function') saveProjectSoon();
+}
 async function deleteGeneratedAssetImage(item, catKey, fieldKey){
   if(!item._assetFiles || !(fieldKey in item._assetFiles)) return;
   const assetKey = pid() + ':' + catKey + ':' + item.id + ':' + fieldKey;
@@ -1120,6 +1159,13 @@ function serializeProject(){
         if(copy._assetFiles && ('photo' in copy._assetFiles)) copy.photo = null;
         else if(copy.photo && copy.photo.indexOf('data:')===0) copy.photo = null;
         if(copy.angles) copy.angles = copy.angles.map(a => (a && a.indexOf('data:')===0) ? null : a);
+        if(copy.angleShots){
+          Object.keys(copy.angleShots).forEach(k=>{
+            const fieldKey = 'angle_' + k;
+            if(copy._assetFiles && (fieldKey in copy._assetFiles)) copy.angleShots[k].photo = null;
+            else if(copy.angleShots[k].photo && copy.angleShots[k].photo.indexOf('data:')===0) copy.angleShots[k].photo = null;
+          });
+        }
         if(copy.card){
           if(copy.card.inputSlots) Object.keys(copy.card.inputSlots).forEach(k=>{ copy.card.inputSlots[k] = null; });
           if(copy.card.images && copy.card.images.sheet && copy.card.images.sheet.ok) copy.card.images.sheet.url = null;

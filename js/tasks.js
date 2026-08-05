@@ -130,6 +130,7 @@ function modelSelectHtml(selectedId, extraClass, onlyReferenceCapable){
 
 // Draft display labels — shots show "Scene / Shot", asset drafts show "Kind / Name".
 function draftTitleLines(t){
+  if(t.kind==='location-angle') return [t.sceneName || 'Location', t.shotName || 'angle'];
   if(t.kind==='motion-control') return [t.sceneName || 'Scene', (t.shotName || 'Shot') + ' (motion capture)'];
   if(t.kind==='photo-lipsync') return [t.sceneName || 'Scene', (t.shotName || 'Shot') + ' (lip-sync)'];
   if(t.kind==='lipsync') return [t.sceneName || 'Scene', (t.shotName || 'Shot') + ' (lip-sync)'];
@@ -422,6 +423,41 @@ async function sendGenerationTask(draft){
   const meta = state.projectMeta || { width:1920, height:1080 };
   let prompt, taskMeta, referenceImageUrl;
 
+  if(draft.kind==='location-angle'){
+    const locCat = state.categories.find(c=> c.key==='locations');
+    const location = locCat && locCat.items.find(l=> l.id===draft.locationId);
+    if(!location) throw new Error('This location no longer exists.');
+    const key = draft.angleKey;
+    const directionText = (typeof LOCATION_ANGLE_LABELS!=='undefined' && LOCATION_ANGLE_LABELS[key]) || key;
+    prompt = (location.description ? location.description + '. ' : '')
+      + 'The exact same location as in the reference image(s) — same architecture, materials, and lighting — but shown as ' + directionText + '. Do not invent a different place.';
+    taskMeta = { projectId: currentProjectId, kind:'location-angle', locationId: location.id, locationName: location.name, angleKey: key };
+
+    // Every OTHER already-filled angle of this SAME location, as references — this is the
+    // whole point of the feature: the model sees the place from other sides at once,
+    // instead of guessing a new one from text alone every time.
+    const otherRefs = [];
+    (typeof LOCATION_ANGLE_KEYS!=='undefined' ? LOCATION_ANGLE_KEYS : []).forEach(k=>{
+      if(k===key) return;
+      const angle = typeof getLocationAngle==='function' ? getLocationAngle(location, k) : null;
+      if(angle && angle.photo) otherRefs.push(angle.photo);
+    });
+    if(otherRefs.length){
+      referenceImageUrl = await Promise.all(otherRefs.slice(0,8).map(url=> uploadReferencePhoto(url)));
+    }
+
+    const res = await fetch('/api/generate-image/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, width: meta.width, height: meta.height, model: draft.model, meta: taskMeta, referenceImageUrl }),
+    });
+    const data = await res.json().catch(()=> null);
+    if(!res.ok || !data || !data.taskId){
+      throw new Error((data && data.message) || ('Request failed (HTTP ' + res.status + ')'));
+    }
+    return data.taskId;
+  }
+
   if(draft.kind==='motion-control'){
     const scene = state.scenes.find(s=> s.id===draft.sceneId);
     const shot = scene && scene.shots.find(sh=> sh.id===draft.shotId);
@@ -671,6 +707,19 @@ async function applyFinishedTasks(list){
       renderTimelineScenes();
       continue;
     }
+    if(meta.kind==='location-angle'){
+      const locCat = state.categories.find(c=> c.key==='locations');
+      const location = locCat && locCat.items.find(l=> l.id===meta.locationId);
+      if(location){
+        if(typeof persistLocationAngleImage==='function') await persistLocationAngleImage(location, meta.angleKey, t.imageUrl);
+        else {
+          if(meta.angleKey==='wide') location.photo = t.imageUrl;
+          else { location.angleShots = location.angleShots || {}; location.angleShots[meta.angleKey] = { photo: t.imageUrl, description: '' }; }
+        }
+      }
+      renderAssets();
+      continue;
+    }
     if(meta.kind==='motion-control'){
       const scene = state.scenes.find(s=> s.id===meta.sceneId);
       const shot = scene && scene.shots.find(sh=> sh.id===meta.shotId);
@@ -762,7 +811,9 @@ async function archiveGeneration(t){
           ? ((meta.sceneName || 'Scene') + ' / ' + (meta.shotName || 'Shot') + ' (lip-sync)')
           : kind==='motion-control'
             ? ((meta.sceneName || 'Scene') + ' / ' + (meta.shotName || 'Shot') + ' (motion capture)')
-            : kind==='archive-derive'
+            : kind==='location-angle'
+              ? ((meta.locationName || 'Location') + ' — ' + (meta.angleKey || 'angle'))
+              : kind==='archive-derive'
         ? 'New idea from archive'
         : kind==='character-card'
           ? ('Character card / ' + (meta.characterName || '') + ' — ' + (meta.outputKey || ''))

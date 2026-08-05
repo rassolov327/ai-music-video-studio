@@ -1112,6 +1112,15 @@
   .lipsync-menu-item{padding:8px 12px;font-size:12px;color:var(--text-1);cursor:pointer;}
   .lipsync-menu-item:hover{background:var(--bg-elevated);}
 
+  .angle-tile-menu{
+    position:fixed;z-index:200;background:var(--bg-panel);border:1px solid var(--line);
+    border-radius:6px;box-shadow:0 6px 20px rgba(0,0,0,.4);min-width:170px;overflow:hidden;
+  }
+  .angle-tile-menu-item{padding:8px 12px;font-size:12px;color:var(--text-1);cursor:pointer;}
+  .angle-tile-menu-item:hover{background:var(--bg-elevated);}
+  .angle-tile-menu-item.disabled{color:var(--text-3);cursor:default;}
+  .angle-tile-menu-item.disabled:hover{background:none;}
+
   /* ---- Gemini quick-assistant button + chat popup ---- */
   .gemini-assist-btn{
     position:fixed;right:110px;bottom:12px;z-index:900;width:28px;height:28px;border-radius:50%;

@@ -21,6 +21,24 @@ function hasAnyLocationAngle(location){
   if(!location) return false;
   return LOCATION_ANGLE_KEYS.some(k=> !!getLocationAngle(location, k));
 }
+const LOCATION_ANGLE_LABELS = { wide: 'a wide establishing shot', front: 'a front-facing shot', reverse: 'the reverse angle, looking back the other way', left: 'the camera turned to the left', right: 'the camera turned to the right' };
+// Stage 4 — reuses the generic image model list (modelOptions), same as shot generation:
+// this is the same underlying "text + reference images -> image" task, just for a
+// location's specific angle instead of a shot.
+function queueLocationAngleGeneration(locationId, key){
+  state.taskQueue = state.taskQueue || [];
+  const locCat = state.categories.find(c=> c.key==='locations');
+  const location = locCat && locCat.items.find(l=> l.id===locationId);
+  if(!location) return;
+  state.taskQueue.push({
+    id: 'dt' + (draftTaskSeq++), kind: 'location-angle',
+    locationId, angleKey: key, sceneName: location.name, shotName: LOCATION_ANGLE_LABELS[key] || key,
+    model: (modelOptions[0] && modelOptions[0].id) || null,
+    createdAt: Date.now(),
+  });
+  if(typeof saveProjectSoon==='function') saveProjectSoon();
+  if(typeof refreshTasks==='function') refreshTasks();
+}
 
 // ---------- preview: locations gallery (tile grid) ----------
 function showLocationGallery(cat){
@@ -338,8 +356,7 @@ function showLocationForm(cat, editIdx){
         : `<div class="location-angle-tile-add"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg></div>${label}`;
       tile.onclick = (e)=>{
         if(e.target.closest('.location-angle-tile-del')) return;
-        angleShotTargetKey = key;
-        angleShotInput.click();
+        openAngleTileMenu(key, tile, existing && existing.id);
       };
       const delBtn = tile.querySelector('.location-angle-tile-del');
       if(delBtn){
@@ -356,6 +373,42 @@ function showLocationForm(cat, editIdx){
         };
       }
     });
+  }
+  // Small popup menu on a tile click — Upload from disk (always available) or Generate
+  // with AI (only once the location has a stable id to attach the TASKS result to later,
+  // same requirement Character/Location/Prop Card generation already has).
+  function openAngleTileMenu(key, tileEl, locationId){
+    closeAngleTileMenu();
+    const rect = tileEl.getBoundingClientRect();
+    const zoom = parseFloat(getComputedStyle(document.body).zoom) || 1;
+    const menu = document.createElement('div');
+    menu.className = 'angle-tile-menu';
+    menu.id = 'angleTileMenu';
+    menu.style.left = (rect.left / zoom) + 'px';
+    menu.style.top = ((rect.bottom + 4) / zoom) + 'px';
+    menu.innerHTML = `
+      <div class="angle-tile-menu-item" data-action="upload">Upload from disk</div>
+      <div class="angle-tile-menu-item${locationId ? '' : ' disabled'}" data-action="generate">Generate with AI${locationId ? '' : ' (save first)'}</div>`;
+    document.body.appendChild(menu);
+    menu.querySelector('[data-action="upload"]').onclick = (e)=>{
+      e.stopPropagation();
+      closeAngleTileMenu();
+      angleShotTargetKey = key;
+      angleShotInput.click();
+    };
+    const genItem = menu.querySelector('[data-action="generate"]');
+    if(locationId){
+      genItem.onclick = (e)=>{
+        e.stopPropagation();
+        closeAngleTileMenu();
+        queueLocationAngleGeneration(locationId, key);
+      };
+    }
+    setTimeout(()=> document.addEventListener('click', closeAngleTileMenu, { once:true }), 0);
+  }
+  function closeAngleTileMenu(){
+    const existingMenu = document.getElementById('angleTileMenu');
+    if(existingMenu) existingMenu.remove();
   }
   angleShotInput.onchange = async ()=>{
     const file = angleShotInput.files[0];
