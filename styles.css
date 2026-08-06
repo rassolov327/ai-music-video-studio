@@ -433,6 +433,8 @@
   }
   .form-tab.active{color:var(--text-1);border-bottom-color:var(--accent);}
   .form-tab:hover{color:var(--text-1);}
+  .form-tab.disabled{color:var(--text-3);opacity:.45;cursor:not-allowed;}
+  .form-tab.disabled:hover{color:var(--text-3);}
   .ai-result-img{width:100%;border-radius:8px;border:1px solid var(--line);margin-top:12px;display:block;}
   .ai-result-actions{display:flex;gap:8px;margin-top:8px;}
   .ai-result-actions .cf-btn{flex:1 1 auto;}

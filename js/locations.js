@@ -166,6 +166,12 @@ function showLocationForm(cat, editIdx){
   pausePlayback();
   let isEdit = typeof editIdx === 'number';
   let existing = isEdit ? cat.items[editIdx] : null;
+  // Hard rule per the user: once a location has been saved with any Advanced-only angle
+  // data (anything beyond what Standard's single photo could produce), Standard becomes
+  // permanently locked for it — Advanced opens by default and Standard can't be switched
+  // back to, since editing a multi-angle location through the single-photo tab doesn't
+  // make sense.
+  const usedAdvanced = !!(existing && existing.angleShots && Object.keys(existing.angleShots).length > 0);
 
   previewEl.classList.remove('align-tl');
   previewEl.onclick = null;
@@ -181,11 +187,11 @@ function showLocationForm(cat, editIdx){
       </div>
 
       <div class="form-tabs" style="margin-top:4px;">
-        <div class="form-tab active" data-outer-tab="standard">Standard</div>
-        <div class="form-tab" data-outer-tab="advanced">Advanced</div>
+        <div class="form-tab${usedAdvanced ? ' disabled' : ' active'}" data-outer-tab="standard" ${usedAdvanced ? 'title="Locked — this location already uses Advanced angles"' : ''}>Standard</div>
+        <div class="form-tab${usedAdvanced ? ' active' : ''}" data-outer-tab="advanced">Advanced</div>
       </div>
 
-      <div class="form-tab-panel" id="outerPanelStandard">
+      <div class="form-tab-panel" id="outerPanelStandard" ${usedAdvanced ? 'style="display:none;"' : ''}>
 
       <div class="form-tabs">
         <div class="form-tab active" data-tab="details">Manual</div>
@@ -224,7 +230,7 @@ function showLocationForm(cat, editIdx){
 
       </div>
 
-      <div class="form-tab-panel" id="outerPanelAdvanced" style="display:none;">
+      <div class="form-tab-panel" id="outerPanelAdvanced" ${usedAdvanced ? '' : 'style="display:none;"'}>
         <div class="cf-field">
           <label>Angles</label>
           <div class="location-angle-grid" id="locAngleShotGrid">
@@ -247,6 +253,7 @@ function showLocationForm(cat, editIdx){
 
   previewEl.querySelectorAll('[data-outer-tab]').forEach(tabEl=>{
     tabEl.onclick = ()=>{
+      if(usedAdvanced && tabEl.dataset.outerTab==='standard') return; // locked
       previewEl.querySelectorAll('[data-outer-tab]').forEach(t=>t.classList.remove('active'));
       tabEl.classList.add('active');
       document.getElementById('outerPanelStandard').style.display = tabEl.dataset.outerTab==='standard' ? '' : 'none';
