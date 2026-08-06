@@ -367,6 +367,52 @@ function renderSceneSettingsPanel(body, scene){
   });
 }
 
+// Small popup showing thumbnails of a location's filled angles, with labels — clicking
+// one selects it for the shot immediately and closes the popup. Same interaction pattern
+// (positioning, zoom compensation, close-on-outside-click) as the Lip-sync menu and the
+// location's own angle-tile menu, for consistency.
+function openLocationAnglePreview(btnEl, locationId, shot, selectEl){
+  closeLocationAnglePreview();
+  const locCat = state.categories.find(c=>c.key==='locations');
+  const loc = locCat && locCat.items.find(l=>l.id===locationId);
+  if(!loc || typeof getLocationAngle!=='function') return;
+  const angleLabel = { wide:'Wide', front:'Front', reverse:'Reverse', left:'Left', right:'Right' };
+  const available = LOCATION_ANGLE_KEYS.filter(k=> !!getLocationAngle(loc, k));
+  if(!available.length) return;
+
+  const rect = btnEl.getBoundingClientRect();
+  const zoom = parseFloat(getComputedStyle(document.body).zoom) || 1;
+  const popup = document.createElement('div');
+  popup.className = 'loc-angle-preview-popup';
+  popup.id = 'locAnglePreviewPopup';
+  popup.style.left = (rect.left / zoom) + 'px';
+  popup.style.top = ((rect.bottom + 4) / zoom) + 'px';
+  popup.innerHTML = available.map(k=>{
+    const angle = getLocationAngle(loc, k);
+    return `<div class="loc-angle-preview-item" data-key="${k}">
+      <img src="${angle.photo}">
+      <div class="loc-angle-preview-item-label">${angleLabel[k]}</div>
+    </div>`;
+  }).join('');
+  document.body.appendChild(popup);
+
+  popup.querySelectorAll('.loc-angle-preview-item').forEach(item=>{
+    item.onclick = (e)=>{
+      e.stopPropagation();
+      const key = item.dataset.key;
+      shot.locationAngle = key;
+      if(selectEl) selectEl.value = key;
+      if(typeof saveProjectSoon==='function') saveProjectSoon();
+      closeLocationAnglePreview();
+    };
+  });
+  setTimeout(()=> document.addEventListener('click', closeLocationAnglePreview, { once:true }), 0);
+}
+function closeLocationAnglePreview(){
+  const existing = document.getElementById('locAnglePreviewPopup');
+  if(existing) existing.remove();
+}
+
 function renderInspectorPanel(){
   const body = document.getElementById('inspBody');
   if(!body) return;
@@ -451,7 +497,7 @@ function renderInspectorPanel(){
         const available = LOCATION_ANGLE_KEYS.filter(k=> !!getLocationAngle(loc, k));
         if(!available.length) return '';
         const angleLabel = { wide:'Wide', front:'Front', reverse:'Reverse', left:'Left', right:'Right' };
-        return `<div class="cf-field"><label>Location angle</label>
+        return `<div class="cf-field"><label>Location angle <span class="loc-angle-preview-btn" id="shotLocationAnglePreviewBtn" data-loc-id="${loc.id}" title="Preview angles"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg></span></label>
           <select id="shotLocationAngleInput">
             <option value="">Not selected</option>
             ${available.map(k=>`<option value="${k}" ${shot.locationAngle===k?'selected':''}>${angleLabel[k]}</option>`).join('')}
@@ -519,6 +565,13 @@ function renderInspectorPanel(){
       shot.locationAngle = e.target.value || null;
       if(typeof saveProjectSoon==='function') saveProjectSoon();
     });
+  }
+  const shotLocationAnglePreviewBtn = document.getElementById('shotLocationAnglePreviewBtn');
+  if(shotLocationAnglePreviewBtn){
+    shotLocationAnglePreviewBtn.onclick = (e)=>{
+      e.stopPropagation();
+      openLocationAnglePreview(shotLocationAnglePreviewBtn, shotLocationAnglePreviewBtn.dataset.locId, shot, shotLocationAngleInput);
+    };
   }
   document.getElementById('shotLightSameChk').addEventListener('change', (e)=>{
     shot.lightingSameAsScene = e.target.checked;
