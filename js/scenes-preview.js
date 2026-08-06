@@ -385,8 +385,10 @@ function openLocationAnglePreview(btnEl, locationId, shot, selectEl){
   const popup = document.createElement('div');
   popup.className = 'loc-angle-preview-popup';
   popup.id = 'locAnglePreviewPopup';
-  popup.style.left = (rect.left / zoom) + 'px';
-  popup.style.top = ((rect.bottom + 4) / zoom) + 'px';
+  // Opens up-left from the button (anchored via right/bottom) rather than down-right —
+  // near the edge of a fullscreen window, down-right pushed half the popup off-screen.
+  popup.style.right = ((window.innerWidth - rect.right) / zoom) + 'px';
+  popup.style.bottom = ((window.innerHeight - rect.top) / zoom + 4) + 'px';
   popup.innerHTML = available.map(k=>{
     const angle = getLocationAngle(loc, k);
     return `<div class="loc-angle-preview-item" data-key="${k}">
