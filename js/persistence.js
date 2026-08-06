@@ -747,6 +747,18 @@ async function persistLocationImages(location){
       }
     }
   }
+  if(location.angleShots){
+    Object.keys(location.angleShots).forEach(key=>{
+      const angle = location.angleShots[key];
+      const fieldKey = 'angle_' + key;
+      if(angle && angle.photo && angle.photo.indexOf('data:')===0){
+        jobs.push(
+          persistImageAsset(pid() + ':locations:' + location.id + ':' + fieldKey, angle.photo, assetsDir)
+            .then(fileName=>{ location._assetFiles[fieldKey] = fileName; })
+        );
+      }
+    });
+  }
   await Promise.all(jobs);
   console.log('[ProjectStore] persisted ' + jobs.length + ' image(s) for location "' + location.name + '"', location._assetFiles);
 }
