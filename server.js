@@ -332,9 +332,9 @@ app.get('/api/models', (req, res) => {
 // examples — same input shape (prompt, image_url, duration, negative_prompt, cfg_scale)
 // across all three tiers, just different quality/price points.
 const VIDEO_MODELS = [
-  { id: 'kling/v2-1-standard', label: 'Kling 2.1 Standard', costUsd: 0.125, blurb: '720p — fastest and cheapest, solid everyday motion' },
-  { id: 'kling/v2-1-pro', label: 'Kling 2.1 Pro', costUsd: 0.25, blurb: '1080p — smoother, more realistic motion' },
-  { id: 'kling/v2-1-master-image-to-video', label: 'Kling 2.1 Master', costUsd: 0.80, blurb: '1080p — best quality, realistic physics and camera work, priciest' },
+  { id: 'kling/v2-1-standard', label: 'Kling 2.1 Standard', costUsd: 0.125, blurb: '720p — fastest and cheapest, solid everyday motion', resolutionClass: '720p' },
+  { id: 'kling/v2-1-pro', label: 'Kling 2.1 Pro', costUsd: 0.25, blurb: '1080p — smoother, more realistic motion', resolutionClass: '1080p' },
+  { id: 'kling/v2-1-master-image-to-video', label: 'Kling 2.1 Master', costUsd: 0.80, blurb: '1080p — best quality, realistic physics and camera work, priciest', resolutionClass: '1080p' },
   // Confirmed via docs.kie.ai's own request example for this exact model id: Seedance uses
   // first_frame_url (and, only when animating between two chosen images, last_frame_url
   // too) even for plain single-image animation — NOT the image_url field Kling uses. A
@@ -345,7 +345,7 @@ const VIDEO_MODELS = [
   // per-generation fee — a real 5s generation billed 165 credits ($0.825) against our
   // earlier flat $0.30 guess, a 2.75x miss. Recalibrated from that real bill rather than
   // another guess; still an estimate (shown as "≈"), KIE's own dashboard is the real total.
-  { id: 'bytedance/seedance-2-fast', label: 'Seedance 2.0 Fast', costUsd: 0.80, blurb: 'Supports first+last frame — animates a clean transition between two chosen images', supportsLastFrame: true, imageFieldName: 'first_frame_url' },
+  { id: 'bytedance/seedance-2-fast', label: 'Seedance 2.0 Fast', costUsd: 0.80, blurb: 'Supports first+last frame — animates a clean transition between two chosen images', supportsLastFrame: true, imageFieldName: 'first_frame_url', resolutionClass: '720p' },
   // Confirmed via a literal docs.kie.ai request example (model id "bytedance/seedance-2",
   // same first_frame_url/last_frame_url convention as Fast) — the full/standard tier: up to
   // 4K, stronger multi-shot consistency, ~5min vs Fast's ~4min. costUsd is an unconfirmed
@@ -354,10 +354,10 @@ const VIDEO_MODELS = [
   // once a real generation runs. Deliberately NOT wiring the extra multi-reference/native
   // audio inputs this pass (reference_image_urls/reference_video_urls/reference_audio_urls/
   // generate_audio) — those are a bigger, separate feature to design later, not a drop-in.
-  { id: 'bytedance/seedance-2', label: 'Seedance 2.0', costUsd: 1.10, blurb: 'Full/standard tier — stronger multi-shot consistency, up to 4K, for a final polished pass rather than quick drafts', supportsLastFrame: true, imageFieldName: 'first_frame_url' },
+  { id: 'bytedance/seedance-2', label: 'Seedance 2.0', costUsd: 1.10, blurb: 'Full/standard tier — stronger multi-shot consistency, up to 4K, for a final polished pass rather than quick drafts', supportsLastFrame: true, imageFieldName: 'first_frame_url', resolutionClass: 'both' },
 ];
 app.get('/api/video-models', (req, res) => {
-  res.json({ models: VIDEO_MODELS.map(m => ({ id: m.id, label: m.label, costUsd: m.costUsd, blurb: m.blurb, supportsLastFrame: !!m.supportsLastFrame })) });
+  res.json({ models: VIDEO_MODELS.map(m => ({ id: m.id, label: m.label, costUsd: m.costUsd, blurb: m.blurb, supportsLastFrame: !!m.supportsLastFrame, resolutionClass: m.resolutionClass })) });
 });
 
 // ---- lip-sync models — separate list since these take video+audio, not prompt+image ----
@@ -781,26 +781,34 @@ app.post('/api/generate-image/start', async (req, res) => {
 // Reuses the exact same task store, webhook, and status-check machinery as image
 // generation above — applyTaskResult just extracts whatever URL comes back, regardless of
 // whether it's an image or a video, so nothing there needed to change.
-function buildVideoInputFor(modelId, imageUrl, prompt, duration, lastFrameImageUrl) {
+function buildVideoInputFor(modelId, imageUrl, prompt, duration, lastFrameImageUrl, resolution, aspectRatio) {
   const model = VIDEO_MODELS.find(m => m.id === modelId);
   if (model && model.imageFieldName === 'first_frame_url') {
     const input = { prompt, first_frame_url: imageUrl, duration: String(duration || 5) };
     if (lastFrameImageUrl) input.last_frame_url = lastFrameImageUrl;
+    // Seedance: resolution and aspect_ratio are two genuinely separate explicit fields.
+    if (resolution) input.resolution = resolution;
+    if (aspectRatio) input.aspect_ratio = aspectRatio;
     return input;
   }
-  return {
+  const input = {
     prompt,
     image_url: imageUrl,
     duration: String(duration || 5),
     negative_prompt: 'blurry, distorted, low quality, extra limbs, morphing, flickering',
     cfg_scale: 0.5,
   };
+  // Kling: resolution is fixed by which specific model id you picked (Standard=720p,
+  // Pro/Master=1080p always) — there's no resolution field to send. Only aspect_ratio is
+  // ever adjustable; omitting it lets Kling auto-match the input image's own shape.
+  if (aspectRatio) input.aspect_ratio = aspectRatio;
+  return input;
 }
 app.post('/api/generate-video/start', async (req, res) => {
   if (!KIE_API_KEY) {
     return res.status(503).json({ error: 'not_configured', message: 'KIE_API_KEY is not set on the server yet.' });
   }
-  const { prompt, imageUrl, lastFrameImageUrl, duration, model, meta } = req.body || {};
+  const { prompt, imageUrl, lastFrameImageUrl, duration, model, resolution, aspectRatio, meta } = req.body || {};
   if (!prompt || typeof prompt !== 'string') {
     return res.status(400).json({ error: 'bad_request', message: 'prompt is required.' });
   }
@@ -808,7 +816,7 @@ app.post('/api/generate-video/start', async (req, res) => {
     return res.status(400).json({ error: 'bad_request', message: 'imageUrl is required — video generation animates an already-generated shot image.' });
   }
   const modelId = (VIDEO_MODELS.find(m => m.id === model) || VIDEO_MODELS[0]).id;
-  const input = buildVideoInputFor(modelId, imageUrl, prompt, duration, lastFrameImageUrl);
+  const input = buildVideoInputFor(modelId, imageUrl, prompt, duration, lastFrameImageUrl, resolution, aspectRatio);
   const callBackUrl = PUBLIC_URL ? PUBLIC_URL + '/api/webhook/kie' : undefined;
 
   try {

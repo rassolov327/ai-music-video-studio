@@ -1,6 +1,32 @@
 // ---------- MOVIE tab: animate already-generated shots (image-to-video) ----------
-let videoModelOptions = []; // [{id, label, costUsd, blurb}]
+let videoModelOptions = []; // [{id, label, costUsd, blurb, supportsLastFrame, resolutionClass}]
 let movieSelectedShotIds = new Set();
+
+// Single list of every resolution/aspect-ratio combination we offer — options a given
+// model doesn't support are shown disabled rather than hidden, so it's always visible
+// what's available at a glance rather than the list silently changing shape.
+const VIDEO_RES_PRESETS = [
+  { value:'', label:'Default (project resolution)' },
+  { value:'720p|16:9', resolution:'720p', aspectRatio:'16:9', label:'720p / 16:9' },
+  { value:'720p|9:16', resolution:'720p', aspectRatio:'9:16', label:'720p / 9:16' },
+  { value:'720p|1:1', resolution:'720p', aspectRatio:'1:1', label:'720p / 1:1' },
+  { value:'1080p|16:9', resolution:'1080p', aspectRatio:'16:9', label:'1080p / 16:9' },
+  { value:'1080p|9:16', resolution:'1080p', aspectRatio:'9:16', label:'1080p / 9:16' },
+  { value:'1080p|1:1', resolution:'1080p', aspectRatio:'1:1', label:'1080p / 1:1' },
+];
+function videoResPresetSupported(preset, resolutionClass){
+  if(!preset.value) return true; // "Default" always available
+  if(!resolutionClass || resolutionClass==='both') return true;
+  return preset.resolution === resolutionClass;
+}
+function videoResolutionSelectHtml(modelId, selectedValue){
+  const model = videoModelOptions.find(m=> m.id===modelId);
+  const resolutionClass = model ? model.resolutionClass : null;
+  const opts = VIDEO_RES_PRESETS.map(p=>
+    `<option value="${p.value}" ${videoResPresetSupported(p, resolutionClass) ? '' : 'disabled'} ${p.value===(selectedValue||'')?'selected':''}>${p.label}</option>`
+  ).join('');
+  return `<select class="movie-tile-res-select">${opts}</select>`;
+}
 
 async function loadVideoModelList(){
   try{
@@ -77,6 +103,7 @@ function renderMovieGrid(){
           ${shot.seedanceMode && !shot.lastFrameImage ? '<div class="gen-hint" style="color:var(--danger);">Last frame not generated yet — needed before this can animate.</div>' : ''}
           ${shot.lipsyncReserved ? '<div class="gen-hint" style="color:var(--danger);">Reserved for lip-sync — release it on the timeline to animate normally.</div>' : ''}
           ${videoModelSelectHtml(modelId, shot.seedanceMode)}
+          ${videoResolutionSelectHtml(modelId, shot._movieResPreset)}
           ${blurb ? `<div class="gen-hint" style="margin-top:4px;">${blurb}</div>` : ''}
           <button class="cf-btn primary movie-tile-send-btn" style="width:100%;margin-top:8px;" ${(shot.seedanceMode && !shot.lastFrameImage) || shot.lipsyncReserved ? 'disabled' : ''}>${isAnimated ? 'Re-animate' : 'Animate'}${model ? ' — ' + formatCost(model.costUsd) : ''}</button>
         </div>
@@ -168,10 +195,27 @@ function wireMovieTiles(){
       const found = collectAnimatableShots().find(x=> x.shot.id===shotId);
       if(found){
         found.shot._movieModel = e.target.value;
+        // If the newly-picked model doesn't support the currently-chosen resolution
+        // combo, fall back to Default rather than leaving a now-invalid combo selected.
+        const newModel = videoModelOptions.find(m=> m.id===e.target.value);
+        const currentPreset = VIDEO_RES_PRESETS.find(p=> p.value===found.shot._movieResPreset);
+        if(currentPreset && !videoResPresetSupported(currentPreset, newModel && newModel.resolutionClass)){
+          found.shot._movieResPreset = '';
+        }
         if(typeof saveProjectSoon==='function') saveProjectSoon();
       }
       renderMovieGrid();
     };
+    const resSelect = tile.querySelector('.movie-tile-res-select');
+    if(resSelect){
+      resSelect.onchange = (e)=>{
+        const found = collectAnimatableShots().find(x=> x.shot.id===shotId);
+        if(found){
+          found.shot._movieResPreset = e.target.value;
+          if(typeof saveProjectSoon==='function') saveProjectSoon();
+        }
+      };
+    }
     tile.querySelector('.task-tile-thumb').onclick = (e)=>{
       if(e.target.closest('select')) return;
       if(movieSelectedShotIds.has(shotId)) movieSelectedShotIds.delete(shotId);
@@ -243,10 +287,12 @@ async function sendMovieShot(shotId){
       if(!lastFrameImageUrl) throw new Error('Could not upload the last-frame image.');
     }
     const prompt = buildVideoPromptForShot(shot, scene);
+    const preset = VIDEO_RES_PRESETS.find(p=> p.value===shot._movieResPreset);
     const res = await fetch('/api/generate-video/start', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         prompt, imageUrl, lastFrameImageUrl, duration: MOVIE_CLIP_DURATION_SEC, model: modelId,
+        resolution: preset ? preset.resolution : undefined, aspectRatio: preset ? preset.aspectRatio : undefined,
         meta: { projectId: currentProjectId, kind: 'movie', sceneId: scene.id, sceneName: scene.name, shotId: shot.id, shotName: shot.name },
       }),
     });

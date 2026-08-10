@@ -1078,6 +1078,7 @@
   }
   .task-tile-thumb video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
   .movie-tile-model-select{width:100%;}
+  .movie-tile-res-select{width:100%;margin-top:6px;}
 
   /* ---- Archive: info icon (video metadata) + always-visible delete ---- */
   .archive-audio-playbtn{
