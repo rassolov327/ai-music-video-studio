@@ -18,6 +18,7 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { initDb } from './db.js';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs/promises';
@@ -974,4 +975,5 @@ app.listen(PORT, () => {
   console.log('AI Music Video Studio server listening on port ' + PORT);
   console.log('KIE_API_KEY configured: ' + (!!KIE_API_KEY));
   console.log('Public URL for webhooks: ' + (PUBLIC_URL || '(none detected — falling back to polling only)'));
+  initDb();
 });
