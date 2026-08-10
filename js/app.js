@@ -4,7 +4,53 @@ function goHome(){
   pausePlayback();
   refreshMainPreview();
 }
+let currentUser = null;
+async function checkAuthAndMaybeGate(){
+  try{
+    const res = await fetch('/api/me');
+    if(res.ok){
+      currentUser = await res.json();
+      return true;
+    }
+  } catch(err){}
+  showLoginScreen();
+  return false;
+}
+function showLoginScreen(){
+  document.getElementById('loginScreen').classList.remove('hidden');
+  document.getElementById('loginInput').focus();
+  const errHint = document.getElementById('loginErrorHint');
+  const submit = async ()=>{
+    errHint.style.display = 'none';
+    const login = document.getElementById('loginInput').value.trim();
+    const password = document.getElementById('loginPasswordInput').value;
+    if(!login || !password) return;
+    try{
+      const res = await fetch('/api/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ login, password }),
+      });
+      const data = await res.json().catch(()=> null);
+      if(!res.ok){
+        errHint.textContent = (data && data.message) || 'Could not sign in.';
+        errHint.style.display = '';
+        return;
+      }
+      // Simplest, most robust way to resume boot with a fully-authenticated state — a
+      // fresh reload re-runs the whole init sequence from a clean slate rather than trying
+      // to splice a login in the middle of an already-partially-initialized app.
+      location.reload();
+    } catch(err){
+      errHint.textContent = 'Could not reach the server.';
+      errHint.style.display = '';
+    }
+  };
+  document.getElementById('loginSubmitBtn').onclick = submit;
+  document.getElementById('loginPasswordInput').addEventListener('keydown', (e)=>{ if(e.key==='Enter') submit(); });
+}
 (async function(){
+  const authed = await checkAuthAndMaybeGate();
+  if(!authed) return; // login screen is showing; boot resumes via a reload after sign-in
   wireNewProjectScreen();
   wireFileMenu();
   wireProjectMenu();

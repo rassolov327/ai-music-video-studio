@@ -18,7 +18,9 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { initDb } from './db.js';
+import { initDb, pool } from './db.js';
+import bcrypt from 'bcryptjs';
+import cookieParser from 'cookie-parser';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs/promises';
@@ -52,7 +54,69 @@ const PUBLIC_URL = process.env.RAILWAY_PUBLIC_DOMAIN
   ? 'https://' + process.env.RAILWAY_PUBLIC_DOMAIN
   : (process.env.PUBLIC_URL || '');
 
+const SESSION_SECRET = process.env.SESSION_SECRET || '';
+if (!SESSION_SECRET) {
+  console.warn('[server] SESSION_SECRET is not set — using an insecure built-in fallback. Set a real SESSION_SECRET env var before real users log in.');
+}
+
 app.use(express.json({ limit: '20mb' }));
+app.use(cookieParser(SESSION_SECRET || 'insecure-dev-fallback-change-me'));
+
+// ---- auth (stage 2 of the user/token system) ----
+// Deliberately simple for a small, admin-managed user base — one signed httpOnly cookie
+// holding just the user's numeric id, no separate session store/table needed at this
+// scale. requireAuth is exported-in-place for later stages (protecting generation routes,
+// stage 6) to reuse rather than re-deriving this logic.
+async function requireAuth(req, res, next) {
+  if (!pool) return res.status(503).json({ error: 'not_configured', message: 'The user database is not available.' });
+  const userId = req.signedCookies && req.signedCookies.session;
+  if (!userId) return res.status(401).json({ error: 'not_authenticated', message: 'Not logged in.' });
+  try {
+    const result = await pool.query('SELECT id, name, login, tokens, is_admin FROM users WHERE id = $1', [userId]);
+    if (!result.rows.length) return res.status(401).json({ error: 'not_authenticated', message: 'Not logged in.' });
+    req.user = result.rows[0];
+    next();
+  } catch (err) {
+    console.error('[server] requireAuth query failed:', err);
+    res.status(500).json({ error: 'server_error', message: 'Could not verify login.' });
+  }
+}
+
+app.post('/api/login', async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'not_configured', message: 'The user database is not available yet.' });
+  const { login, password } = req.body || {};
+  if (!login || !password) {
+    return res.status(400).json({ error: 'bad_request', message: 'Login and password are both required.' });
+  }
+  try {
+    const result = await pool.query('SELECT id, name, login, password_hash, tokens, is_admin FROM users WHERE login = $1', [login]);
+    const user = result.rows[0];
+    // Same generic message whether the login doesn't exist or the password is wrong —
+    // doesn't tell an attacker which one they got right.
+    const genericError = { error: 'invalid_credentials', message: 'Incorrect login or password.' };
+    if (!user) return res.status(401).json(genericError);
+    const ok = await bcrypt.compare(password, user.password_hash);
+    if (!ok) return res.status(401).json(genericError);
+    await pool.query('UPDATE users SET last_login = now() WHERE id = $1', [user.id]);
+    res.cookie('session', String(user.id), {
+      httpOnly: true, signed: true, sameSite: 'lax',
+      secure: req.protocol === 'https', maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+    });
+    res.json({ id: user.id, name: user.name, login: user.login, tokens: user.tokens, isAdmin: user.is_admin });
+  } catch (err) {
+    console.error('[server] /api/login failed:', err);
+    res.status(500).json({ error: 'server_error', message: 'Could not log in.' });
+  }
+});
+
+app.post('/api/logout', (req, res) => {
+  res.clearCookie('session');
+  res.json({ ok: true });
+});
+
+app.get('/api/me', requireAuth, (req, res) => {
+  res.json({ id: req.user.id, name: req.user.name, login: req.user.login, tokens: req.user.tokens, isAdmin: req.user.is_admin });
+});
 
 // Same CSP shape the project already relied on (Caddyfile), with blob: explicitly present
 // in img-src and media-src — omitting it silently breaks restored photos/audio with no

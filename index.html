@@ -19,6 +19,25 @@
   </div>
 </div>
 
+<div id="loginScreen" class="home-screen hidden">
+  <div class="np-box">
+    <div class="np-header">
+      <h2>Sign in</h2>
+    </div>
+    <div class="cf-field">
+      <label>Login</label>
+      <input type="text" id="loginInput" autocomplete="username">
+    </div>
+    <div class="cf-field">
+      <label>Password</label>
+      <input type="password" id="loginPasswordInput" autocomplete="current-password">
+    </div>
+    <div class="gen-hint" id="loginErrorHint" style="color:var(--danger);display:none;"></div>
+    <div class="cf-actions">
+      <button class="cf-btn primary" id="loginSubmitBtn" style="width:100%;">Sign in</button>
+    </div>
+  </div>
+</div>
 <div id="homeScreen" class="home-screen hidden">
   <div class="home-hero">
     <div class="home-hero-art"><i class="ti ti-movie"></i></div>
