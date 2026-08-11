@@ -19,6 +19,37 @@
   </div>
 </div>
 
+<div id="adminScreen" class="home-screen hidden">
+  <div class="np-box" style="max-width:820px;">
+    <div class="np-header">
+      <h2>Admin — Users</h2>
+      <button class="np-close" id="adminCloseBtn" title="Back"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+    </div>
+
+    <div id="adminAddUserForm" style="display:none;margin-bottom:14px;padding:12px;border:1px solid var(--line);border-radius:8px;">
+      <div class="cf-field"><label>Name</label><input type="text" id="adminNewName"></div>
+      <div class="cf-field"><label>Login</label><input type="text" id="adminNewLogin"></div>
+      <div class="cf-field"><label>Password</label><input type="text" id="adminNewPassword"></div>
+      <div class="cf-field"><label>Tokens</label><input type="number" id="adminNewTokens" value="0" min="0"></div>
+      <div class="gen-hint" id="adminAddErrorHint" style="color:var(--danger);display:none;"></div>
+      <div class="cf-actions">
+        <button class="cf-btn" id="adminAddCancelBtn">Cancel</button>
+        <button class="cf-btn primary" id="adminAddSaveBtn">Add user</button>
+      </div>
+    </div>
+
+    <div class="cf-actions" style="margin-bottom:10px;">
+      <button class="cf-btn primary" id="adminAddUserBtn">+ Add user</button>
+    </div>
+
+    <table class="admin-users-table">
+      <thead>
+        <tr><th>#</th><th>Name</th><th>Login</th><th>Tokens</th><th>Last login</th><th></th></tr>
+      </thead>
+      <tbody id="adminUsersBody"></tbody>
+    </table>
+  </div>
+</div>
 <div id="loginScreen" class="home-screen hidden">
   <div class="np-box">
     <div class="np-header">
@@ -30,7 +61,7 @@
     </div>
     <div class="cf-field">
       <label>Password</label>
-      <input type="password" id="loginPasswordInput" autocomplete="current-password">
+      <input type="text" id="loginPasswordInput" autocomplete="current-password">
     </div>
     <div class="gen-hint" id="loginErrorHint" style="color:var(--danger);display:none;"></div>
     <div class="cf-actions">
@@ -153,7 +184,7 @@
 
   <div class="topbar">
     <div class="brand"><i class="ti ti-movie"></i>AI Music Video Studio</div>
-    <div class="menu"><span class="menu-project" id="menuFileBtn">File<div class="menu-dropdown" id="menuFileDropdown"><div data-action="save">Save</div><div data-action="export">Export…</div><div data-action="close">Close project</div></div></span><span>Edit</span><span class="menu-project" id="menuProjectBtn">Project<div class="menu-dropdown" id="menuProjectDropdown"><div data-action="new">New Project…</div><div data-action="all">All Projects…</div><div data-action="rename">Rename Project…</div><div data-action="settings">Project Settings…</div></div></span><span class="menu-project" id="menuToolsBtn">Tools<div class="menu-dropdown" id="menuToolsDropdown"><div data-action="check">Check Project…</div><div data-action="ai-generator">AI Generator…</div></div></span><span>Help</span></div>
+    <div class="menu"><span class="menu-project" id="menuFileBtn">File<div class="menu-dropdown" id="menuFileDropdown"><div data-action="save">Save</div><div data-action="export">Export…</div><div data-action="close">Close project</div><div class="menu-dropdown-sep"></div><div data-action="logout">Log Out</div></div></span><span>Edit</span><span class="menu-project" id="menuProjectBtn">Project<div class="menu-dropdown" id="menuProjectDropdown"><div data-action="new">New Project…</div><div data-action="all">All Projects…</div><div data-action="rename">Rename Project…</div><div data-action="settings">Project Settings…</div></div></span><span class="menu-project" id="menuToolsBtn">Tools<div class="menu-dropdown" id="menuToolsDropdown"><div data-action="check">Check Project…</div><div data-action="ai-generator">AI Generator…</div></div></span><span>Help</span></div>
     <div class="proj-title">New project — <b>Untitled</b></div>
     <span class="save-status" id="saveStatus" title="Autosave status"></span>
     <button class="tbtn" id="connectFolderBtn" style="display:none;" title="Keep this project as real files on your disk"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>Save to disk folder</button>
@@ -194,6 +225,7 @@
       <div class="preview-bar">
         <div class="pb-left">
           <button class="tbtn" id="homeBtn" title="Back to main screen"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"></path><path d="M5 10v10a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V10"></path></svg>Home</button>
+          <button class="tbtn hidden" id="adminBtn" title="Admin — manage users"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-4z"></path></svg>Admin</button>
           <button class="tbtn storyboard-open-btn" id="storyboardOpenBtn" title="Open Storyboard"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="7" height="7" rx="1"></rect><rect x="14" y="4" width="7" height="7" rx="1"></rect><rect x="3" y="13" width="7" height="7" rx="1"></rect><rect x="14" y="13" width="7" height="7" rx="1"></rect></svg>Storyboard</button>
           <span id="previewBar">Preview</span>
         </div>
@@ -489,6 +521,7 @@
 <script src="js/persistence.js"></script>
 <script src="js/panels.js"></script>
 <script src="js/projects.js"></script>
+<script src="js/admin.js"></script>
 <script src="js/check.js"></script>
 <script src="js/tasks.js"></script>
 <script src="js/archive.js"></script>

@@ -307,6 +307,10 @@ function wireFileMenu(){
       if(currentProjectId) await saveProjectNow();
       pausePlayback();
       showHomeScreen();
+    } else if(action==='logout'){
+      if(currentProjectId) await saveProjectNow();
+      try{ await fetch('/api/logout', { method: 'POST' }); } catch(err){}
+      location.reload();
     }
   });
 }

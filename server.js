@@ -82,6 +82,76 @@ async function requireAuth(req, res, next) {
   }
 }
 
+async function requireAdmin(req, res, next) {
+  await requireAuth(req, res, () => {
+    if (!req.user.is_admin) return res.status(403).json({ error: 'forbidden', message: 'Admin access required.' });
+    next();
+  });
+}
+
+app.get('/api/admin/users', requireAdmin, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT id, name, login, tokens, is_admin, last_login, created_at FROM users ORDER BY id ASC');
+    res.json({ users: result.rows });
+  } catch (err) {
+    console.error('[server] /api/admin/users (list) failed:', err);
+    res.status(500).json({ error: 'server_error', message: 'Could not load users.' });
+  }
+});
+
+app.post('/api/admin/users', requireAdmin, async (req, res) => {
+  const { name, login, password, tokens } = req.body || {};
+  if (!name || !login || !password) {
+    return res.status(400).json({ error: 'bad_request', message: 'Name, login, and password are all required.' });
+  }
+  const tokenCount = Number.isFinite(Number(tokens)) ? Math.max(0, Math.floor(Number(tokens))) : 0;
+  try {
+    // Hard rule, per Костян: never let the sum of tokens promised to ALL users exceed
+    // his real KIE balance — checked fresh against KIE every time, not a cached number.
+    if (tokenCount > 0) {
+      const [kieCredits, sumResult] = await Promise.all([
+        fetchKieCreditsRaw(),
+        pool.query('SELECT COALESCE(SUM(tokens), 0) AS total FROM users'),
+      ]);
+      const currentTotal = Number(sumResult.rows[0].total);
+      if (currentTotal + tokenCount > kieCredits) {
+        return res.status(400).json({
+          error: 'over_budget',
+          message: `Can't add ${tokenCount} tokens — that would put total user tokens (${currentTotal + tokenCount}) over your real KIE balance (${kieCredits}).`,
+        });
+      }
+    }
+    const hash = await bcrypt.hash(password, 10);
+    const result = await pool.query(
+      `INSERT INTO users (name, login, password_hash, tokens, is_admin)
+       VALUES ($1, $2, $3, $4, false)
+       RETURNING id, name, login, tokens, is_admin, last_login, created_at`,
+      [name, login, hash, tokenCount]
+    );
+    res.json({ user: result.rows[0] });
+  } catch (err) {
+    if (err && err.code === '23505') { // unique_violation on login
+      return res.status(400).json({ error: 'login_taken', message: 'That login is already in use.' });
+    }
+    console.error('[server] /api/admin/users (create) failed:', err);
+    res.status(500).json({ error: 'server_error', message: 'Could not create the user.' });
+  }
+});
+
+app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'bad_request', message: 'Invalid user id.' });
+  if (id === req.user.id) return res.status(400).json({ error: 'bad_request', message: "You can't delete your own account while logged in as it." });
+  try {
+    await pool.query('DELETE FROM users WHERE id = $1', [id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[server] /api/admin/users (delete) failed:', err);
+    res.status(500).json({ error: 'server_error', message: 'Could not delete the user.' });
+  }
+});
+
+
 app.post('/api/login', async (req, res) => {
   if (!pool) return res.status(503).json({ error: 'not_configured', message: 'The user database is not available yet.' });
   const { login, password } = req.body || {};
@@ -663,19 +733,24 @@ app.post('/api/motion-control/start', async (req, res) => {
 
 // ---- KIE.ai credit balance (for the small indicator in the corner of the UI) ----
 const KIE_CREDIT_USD = 0.005; // KIE's own published rate — see docs.kie.ai
+// Shared by /api/kie-credits and the admin panel's "don't promise more tokens than the
+// real KIE balance" hard limit — one fetch implementation, not two copies that could drift.
+async function fetchKieCreditsRaw() {
+  const creditRes = await fetch(`${KIE_BASE}/api/v1/chat/credit`, {
+    headers: { Authorization: `Bearer ${KIE_API_KEY}` },
+  });
+  const data = await creditRes.json().catch(() => null);
+  if (!creditRes.ok || !data || typeof data.data !== 'number') {
+    throw new Error((data && data.msg) || ('KIE.ai rejected the request (HTTP ' + creditRes.status + ').'));
+  }
+  return data.data;
+}
 app.get('/api/kie-credits', async (req, res) => {
   if (!KIE_API_KEY) {
     return res.status(503).json({ error: 'not_configured', message: 'KIE_API_KEY is not set on the server yet.' });
   }
   try {
-    const creditRes = await fetch(`${KIE_BASE}/api/v1/chat/credit`, {
-      headers: { Authorization: `Bearer ${KIE_API_KEY}` },
-    });
-    const data = await creditRes.json().catch(() => null);
-    if (!creditRes.ok || !data || typeof data.data !== 'number') {
-      return res.status(502).json({ error: 'provider_error', message: (data && data.msg) || ('KIE.ai rejected the request (HTTP ' + creditRes.status + ').') });
-    }
-    const credits = data.data;
+    const credits = await fetchKieCreditsRaw();
     const cheapestModel = MODELS.reduce((min, m) => (m.costUsd && (!min || m.costUsd < min.costUsd)) ? m : min, null);
     const usd = credits * KIE_CREDIT_USD;
     const imagesRemaining = cheapestModel ? Math.floor(usd / cheapestModel.costUsd) : null;
