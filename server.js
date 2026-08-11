@@ -151,6 +151,58 @@ app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
   }
 });
 
+app.patch('/api/admin/users/:id', requireAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'bad_request', message: 'Invalid user id.' });
+  const { login, password, addTokens } = req.body || {};
+  try {
+    const current = await pool.query('SELECT id, tokens FROM users WHERE id = $1', [id]);
+    if (!current.rows.length) return res.status(404).json({ error: 'not_found', message: 'User not found.' });
+
+    const sets = [];
+    const values = [];
+    let i = 1;
+    if (login) { sets.push(`login = $${i++}`); values.push(login); }
+    if (password) { sets.push(`password_hash = $${i++}`); values.push(await bcrypt.hash(password, 10)); }
+
+    const addAmt = Number.isFinite(Number(addTokens)) ? Math.floor(Number(addTokens)) : 0;
+    if (addAmt !== 0) {
+      // Same hard rule as creating a user, checked fresh — the total across everyone
+      // (including this top-up) can never exceed Костян's real KIE balance.
+      const [kieCredits, othersResult] = await Promise.all([
+        fetchKieCreditsRaw(),
+        pool.query('SELECT COALESCE(SUM(tokens), 0) AS total FROM users WHERE id != $1', [id]),
+      ]);
+      const othersTotal = Number(othersResult.rows[0].total);
+      const newTokens = current.rows[0].tokens + addAmt;
+      if (newTokens < 0) {
+        return res.status(400).json({ error: 'bad_request', message: "Can't remove more tokens than this user has." });
+      }
+      if (othersTotal + newTokens > kieCredits) {
+        return res.status(400).json({
+          error: 'over_budget',
+          message: `Can't add ${addAmt} tokens — that would put total user tokens (${othersTotal + newTokens}) over your real KIE balance (${kieCredits}).`,
+        });
+      }
+      sets.push(`tokens = $${i++}`); values.push(newTokens);
+    }
+
+    if (!sets.length) return res.status(400).json({ error: 'bad_request', message: 'Nothing to update.' });
+    values.push(id);
+    const result = await pool.query(
+      `UPDATE users SET ${sets.join(', ')} WHERE id = $${i} RETURNING id, name, login, tokens, is_admin, last_login, created_at`,
+      values
+    );
+    res.json({ user: result.rows[0] });
+  } catch (err) {
+    if (err && err.code === '23505') {
+      return res.status(400).json({ error: 'login_taken', message: 'That login is already in use.' });
+    }
+    console.error('[server] /api/admin/users (edit) failed:', err);
+    res.status(500).json({ error: 'server_error', message: 'Could not update the user.' });
+  }
+});
+
 
 app.post('/api/login', async (req, res) => {
   if (!pool) return res.status(503).json({ error: 'not_configured', message: 'The user database is not available yet.' });

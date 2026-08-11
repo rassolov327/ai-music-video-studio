@@ -58,8 +58,81 @@ function renderAdminUsers(users){
     };
   });
   body.querySelectorAll('[data-admin-edit]').forEach(el=>{
-    el.onclick = ()=> alert('Editing is coming in the next stage.');
+    el.onclick = ()=>{
+      const id = el.dataset.adminEdit;
+      const row = users.find(u=> String(u.id)===id);
+      if(row) openAdminEditModal(row);
+    };
   });
+}
+
+let adminEditingUserId = null;
+function openAdminEditModal(user){
+  adminEditingUserId = user.id;
+  document.getElementById('adminEditLogin').value = user.login;
+  document.getElementById('adminEditPassword').value = '';
+  document.getElementById('adminEditTokensCurrent').textContent = user.tokens;
+  document.getElementById('adminEditAddTokens').value = '';
+  document.getElementById('adminEditErrorHint').style.display = 'none';
+  document.getElementById('adminEditModal').classList.remove('hidden');
+}
+function closeAdminEditModal(){
+  document.getElementById('adminEditModal').classList.add('hidden');
+  adminEditingUserId = null;
+}
+function wireAdminEditModal(){
+  document.getElementById('adminEditCloseBtn').onclick = closeAdminEditModal;
+  document.getElementById('adminEditCancelBtn').onclick = closeAdminEditModal;
+  document.getElementById('adminEditAddTokensBtn').onclick = async ()=>{
+    const errHint = document.getElementById('adminEditErrorHint');
+    errHint.style.display = 'none';
+    const addAmt = Number(document.getElementById('adminEditAddTokens').value);
+    if(!addAmt){ return; }
+    try{
+      const res = await fetch('/api/admin/users/' + adminEditingUserId, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ addTokens: addAmt }),
+      });
+      const data = await res.json().catch(()=> null);
+      if(!res.ok){
+        errHint.textContent = (data && data.message) || 'Could not add tokens.';
+        errHint.style.display = '';
+        return;
+      }
+      document.getElementById('adminEditTokensCurrent').textContent = data.user.tokens;
+      document.getElementById('adminEditAddTokens').value = '';
+    } catch(err){
+      errHint.textContent = 'Could not reach the server.';
+      errHint.style.display = '';
+    }
+  };
+  document.getElementById('adminEditSaveBtn').onclick = async ()=>{
+    const errHint = document.getElementById('adminEditErrorHint');
+    errHint.style.display = 'none';
+    const login = document.getElementById('adminEditLogin').value.trim();
+    const password = document.getElementById('adminEditPassword').value;
+    const body = {};
+    if(login) body.login = login;
+    if(password) body.password = password;
+    if(!Object.keys(body).length){ closeAdminEditModal(); return; }
+    try{
+      const res = await fetch('/api/admin/users/' + adminEditingUserId, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(()=> null);
+      if(!res.ok){
+        errHint.textContent = (data && data.message) || 'Could not save changes.';
+        errHint.style.display = '';
+        return;
+      }
+      closeAdminEditModal();
+      loadAdminUsers();
+    } catch(err){
+      errHint.textContent = 'Could not reach the server.';
+      errHint.style.display = '';
+    }
+  };
 }
 
 function showAdminScreen(){
@@ -72,6 +145,7 @@ function hideAdminScreen(){
 }
 
 function wireAdminScreen(){
+  wireAdminEditModal();
   const adminBtn = document.getElementById('adminBtn');
   if(currentUser && currentUser.isAdmin){
     adminBtn.classList.remove('hidden');

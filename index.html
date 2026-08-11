@@ -19,6 +19,28 @@
   </div>
 </div>
 
+<div id="adminEditModal" class="task-preview-modal hidden">
+  <div class="np-box" style="max-width:420px;">
+    <div class="np-header">
+      <h2>Edit user</h2>
+      <button class="np-close" id="adminEditCloseBtn"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+    </div>
+    <div class="cf-field"><label>Login</label><input type="text" id="adminEditLogin"></div>
+    <div class="cf-field"><label>New password (leave blank to keep the current one)</label><input type="text" id="adminEditPassword"></div>
+    <div class="cf-field">
+      <label>Tokens: <span id="adminEditTokensCurrent">0</span></label>
+      <div style="display:flex;gap:8px;">
+        <input type="number" id="adminEditAddTokens" placeholder="Amount to add">
+        <button class="cf-btn" id="adminEditAddTokensBtn">Add</button>
+      </div>
+    </div>
+    <div class="gen-hint" id="adminEditErrorHint" style="color:var(--danger);display:none;"></div>
+    <div class="cf-actions">
+      <button class="cf-btn" id="adminEditCancelBtn">Cancel</button>
+      <button class="cf-btn primary" id="adminEditSaveBtn">Save changes</button>
+    </div>
+  </div>
+</div>
 <div id="adminScreen" class="home-screen hidden">
   <div class="np-box" style="max-width:820px;">
     <div class="np-header">
