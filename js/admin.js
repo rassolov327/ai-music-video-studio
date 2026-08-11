@@ -24,12 +24,13 @@ function renderAdminUsers(users){
     body.innerHTML = `<tr><td colspan="6" style="color:var(--text-3);">No users yet.</td></tr>`;
     return;
   }
+  const promisedToUsers = users.filter(u=> !u.is_admin).reduce((sum,u)=> sum + (u.tokens||0), 0);
   body.innerHTML = users.map((u, i)=> `
     <tr data-user-id="${u.id}">
       <td>${i+1}</td>
       <td>${u.name}</td>
       <td>${u.login}${u.is_admin ? ' <span style="color:var(--text-3);">(admin)</span>' : ''}</td>
-      <td>${u.tokens}</td>
+      <td>${u.tokens}${u.is_admin ? `<div style="color:var(--text-3);font-size:10.5px;">(${promisedToUsers} owed to users)</div>` : ''}</td>
       <td style="color:var(--text-3);">${u.last_login ? new Date(u.last_login).toLocaleString() : 'never'}</td>
       <td>
         <div class="admin-row-actions">

@@ -741,14 +741,35 @@ async function deductTokensForTask(userId, modelId) {
 }
 // Pre-generation check — called by every /api/*/start endpoint before it ever talks to KIE.
 // Admins are exempt entirely (their balance IS the real KIE account, not a ledger to check).
+// The admin's real personal balance — his actual KIE credits minus everything currently
+// promised to users (their live token sum). This is what HE has left for his own
+// generations, distinct from the raw KIE number, which includes tokens that aren't really
+// his to spend.
+async function getPersonalBalanceCredits() {
+  const [kieCredits, sumResult] = await Promise.all([
+    fetchKieCreditsRaw(),
+    pool.query('SELECT COALESCE(SUM(tokens), 0) AS total FROM users WHERE is_admin = false'),
+  ]);
+  const promised = Number(sumResult.rows[0].total);
+  return { kieCredits, promised, personalBalance: kieCredits - promised };
+}
 async function checkUserCanAfford(req, res, modelId) {
-  if (!req.user || req.user.is_admin) return true;
+  if (!req.user) return true;
   const costUsd = findModelCostUsd(modelId);
   if (!costUsd) return true; // unknown cost — don't block on something we can't evaluate
   const costCredits = Math.ceil(costUsd / KIE_CREDIT_USD);
   try {
-    const result = await pool.query('SELECT tokens FROM users WHERE id = $1', [req.user.id]);
-    const balance = result.rows.length ? result.rows[0].tokens : 0;
+    let balance;
+    if (req.user.is_admin) {
+      // Admin's own generations now really do get blocked once his PERSONAL balance (KIE
+      // minus what's promised to users) runs low — not exempt anymore, per the user's
+      // explicit request that this actually protect him, not just display a number.
+      const p = await getPersonalBalanceCredits();
+      balance = p.personalBalance;
+    } else {
+      const result = await pool.query('SELECT tokens FROM users WHERE id = $1', [req.user.id]);
+      balance = result.rows.length ? result.rows[0].tokens : 0;
+    }
     if (balance < costCredits) {
       res.status(400).json({
         error: 'insufficient_balance',
@@ -873,9 +894,12 @@ async function fetchKieCreditsRaw() {
 app.get('/api/my-balance', requireAuth, async (req, res) => {
   try {
     let credits;
+    let personal = null;
     if (req.user.is_admin) {
       if (!KIE_API_KEY) return res.status(503).json({ error: 'not_configured', message: 'KIE_API_KEY is not set on the server yet.' });
-      credits = await fetchKieCreditsRaw();
+      const p = await getPersonalBalanceCredits();
+      credits = p.kieCredits;
+      personal = p.personalBalance;
     } else {
       // Fresh from the DB, not the value from login time — this is meant to reflect real
       // spending as it happens (stage 6), not a number that goes stale the moment you log in.
@@ -885,7 +909,13 @@ app.get('/api/my-balance', requireAuth, async (req, res) => {
     const cheapestModel = MODELS.reduce((min, m) => (m.costUsd && (!min || m.costUsd < min.costUsd)) ? m : min, null);
     const usd = credits * KIE_CREDIT_USD;
     const imagesRemaining = cheapestModel ? Math.floor(usd / cheapestModel.costUsd) : null;
-    res.json({ credits, usd, imagesRemaining, isAdmin: req.user.is_admin });
+    const out = { credits, usd, imagesRemaining, isAdmin: req.user.is_admin };
+    if (personal !== null) {
+      out.personalBalance = personal;
+      out.personalUsd = personal * KIE_CREDIT_USD;
+      out.personalImagesRemaining = cheapestModel ? Math.floor(out.personalUsd / cheapestModel.costUsd) : null;
+    }
+    res.json(out);
   } catch (err) {
     console.error('[server] /api/my-balance failed:', err);
     res.status(500).json({ error: 'server_error', message: String(err && err.message || err) });

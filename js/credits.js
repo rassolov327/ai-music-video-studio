@@ -5,6 +5,8 @@ function wireCreditsIndicator(){
   const el = document.getElementById('creditsIndicator');
   if(!el) return;
   el.onclick = refreshCredits;
+  const personalEl = document.getElementById('personalBalanceIndicator');
+  if(personalEl) personalEl.onclick = refreshCredits;
   refreshCredits();
   if(creditsRefreshTimer) clearInterval(creditsRefreshTimer);
   creditsRefreshTimer = setInterval(refreshCredits, 5 * 60 * 1000);
@@ -42,6 +44,28 @@ async function refreshCredits(){
     } else {
       const imagesText = (imagesRemaining!==null && imagesRemaining!==undefined) ? (' (~' + imagesRemaining + ' images at the cheapest model)') : '';
       el.title = 'Your balance: ' + data.credits + ' tokens' + imagesText + ' — click to refresh';
+    }
+
+    // Second indicator, admin only — the personal balance actually available for HIS OWN
+    // generations (KIE credits minus everything currently promised to users).
+    const personalEl = document.getElementById('personalBalanceIndicator');
+    const personalDot = document.getElementById('personalBalanceDot');
+    const personalValue = document.getElementById('personalBalanceValue');
+    if(personalEl && personalDot && personalValue){
+      if(data.isAdmin && typeof data.personalBalance === 'number'){
+        personalEl.classList.remove('hidden');
+        const pImagesRemaining = data.personalImagesRemaining;
+        let pCls = 'grey';
+        if(pImagesRemaining===0) pCls = 'red';
+        else if(pImagesRemaining!==null && pImagesRemaining!==undefined && pImagesRemaining < 20) pCls = 'yellow';
+        else if(pImagesRemaining!==null && pImagesRemaining!==undefined) pCls = 'green';
+        personalDot.className = 'credits-dot ' + pCls;
+        personalValue.textContent = data.personalBalance + ' cr (yours)';
+        const pUsdText = typeof data.personalUsd === 'number' ? '$' + data.personalUsd.toFixed(2) : '';
+        personalEl.title = 'Your personal balance (KIE credits minus what\'s owed to users): ' + data.personalBalance + ' (' + pUsdText + ') — click to refresh';
+      } else {
+        personalEl.classList.add('hidden');
+      }
     }
   } catch(err){
     dot.className = 'credits-dot red';
