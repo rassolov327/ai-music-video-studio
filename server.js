@@ -111,7 +111,7 @@ app.post('/api/admin/users', requireAdmin, async (req, res) => {
     if (tokenCount > 0) {
       const [kieCredits, sumResult] = await Promise.all([
         fetchKieCreditsRaw(),
-        pool.query('SELECT COALESCE(SUM(tokens), 0) AS total FROM users'),
+        pool.query("SELECT COALESCE(SUM(tokens), 0) AS total FROM users WHERE is_admin = false"),
       ]);
       const currentTotal = Number(sumResult.rows[0].total);
       if (currentTotal + tokenCount > kieCredits) {
@@ -171,7 +171,7 @@ app.patch('/api/admin/users/:id', requireAdmin, async (req, res) => {
       // (including this top-up) can never exceed Костян's real KIE balance.
       const [kieCredits, othersResult] = await Promise.all([
         fetchKieCreditsRaw(),
-        pool.query('SELECT COALESCE(SUM(tokens), 0) AS total FROM users WHERE id != $1', [id]),
+        pool.query('SELECT COALESCE(SUM(tokens), 0) AS total FROM users WHERE id != $1 AND is_admin = false', [id]),
       ]);
       const othersTotal = Number(othersResult.rows[0].total);
       const newTokens = current.rows[0].tokens + addAmt;
