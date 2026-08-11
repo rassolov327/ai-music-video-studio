@@ -73,6 +73,8 @@ function openAdminEditModal(user){
   document.getElementById('adminEditPassword').value = '';
   document.getElementById('adminEditTokensCurrent').textContent = user.tokens;
   document.getElementById('adminEditAddTokens').value = '';
+  document.getElementById('adminEditAddTokensRow').style.display = user.is_admin ? 'none' : '';
+  document.getElementById('adminEditTokensLockedNote').style.display = user.is_admin ? '' : 'none';
   document.getElementById('adminEditErrorHint').style.display = 'none';
   document.getElementById('adminEditModal').classList.remove('hidden');
 }

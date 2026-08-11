@@ -38,10 +38,11 @@
     <div class="cf-field"><label>New password (leave blank to keep the current one)</label><input type="text" id="adminEditPassword"></div>
     <div class="cf-field">
       <label>Tokens: <span id="adminEditTokensCurrent">0</span></label>
-      <div style="display:flex;gap:8px;">
+      <div style="display:flex;gap:8px;" id="adminEditAddTokensRow">
         <input type="number" id="adminEditAddTokens" placeholder="Amount to add">
         <button class="cf-btn" id="adminEditAddTokensBtn">Add</button>
       </div>
+      <div class="gen-hint" id="adminEditTokensLockedNote" style="display:none;">Always mirrors your real KIE balance — changes only from generations or topping up on KIE.</div>
     </div>
     <div class="gen-hint" id="adminEditErrorHint" style="color:var(--danger);display:none;"></div>
     <div class="cf-actions">

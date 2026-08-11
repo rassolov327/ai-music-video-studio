@@ -92,7 +92,19 @@ async function requireAdmin(req, res, next) {
 app.get('/api/admin/users', requireAdmin, async (req, res) => {
   try {
     const result = await pool.query('SELECT id, name, login, tokens, is_admin, last_login, created_at FROM users ORDER BY id ASC');
-    res.json({ users: result.rows });
+    const users = result.rows;
+    // Admin rows show the LIVE KIE balance, not the stored tokens column — this is what
+    // makes the number in the table always exactly match reality, since it's fetched
+    // fresh rather than being a stored number that could ever drift or get hand-edited.
+    if (users.some(u => u.is_admin)) {
+      try {
+        const liveCredits = await fetchKieCreditsRaw();
+        users.forEach(u => { if (u.is_admin) u.tokens = liveCredits; });
+      } catch (err) {
+        console.warn('[server] could not fetch live KIE balance for admin row(s), showing the stored value instead:', err);
+      }
+    }
+    res.json({ users });
   } catch (err) {
     console.error('[server] /api/admin/users (list) failed:', err);
     res.status(500).json({ error: 'server_error', message: 'Could not load users.' });
@@ -156,8 +168,15 @@ app.patch('/api/admin/users/:id', requireAdmin, async (req, res) => {
   if (!Number.isInteger(id)) return res.status(400).json({ error: 'bad_request', message: 'Invalid user id.' });
   const { login, password, addTokens } = req.body || {};
   try {
-    const current = await pool.query('SELECT id, tokens FROM users WHERE id = $1', [id]);
+    const current = await pool.query('SELECT id, tokens, is_admin FROM users WHERE id = $1', [id]);
     if (!current.rows.length) return res.status(404).json({ error: 'not_found', message: 'User not found.' });
+
+    if (current.rows[0].is_admin && Number(addTokens)) {
+      return res.status(400).json({
+        error: 'admin_tokens_locked',
+        message: "An admin account's balance always mirrors your real KIE credits — it can't be edited here. It changes only from generations or topping up on KIE.",
+      });
+    }
 
     const sets = [];
     const values = [];
