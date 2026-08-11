@@ -583,7 +583,7 @@ const LIPSYNC_MODELS = [
 app.get('/api/lipsync-models', (req, res) => {
   res.json({ models: LIPSYNC_MODELS.map(m => ({ id: m.id, label: m.label, costUsd: m.costUsd, blurb: m.blurb })) });
 });
-app.post('/api/lipsync/start', async (req, res) => {
+app.post('/api/lipsync/start', requireAuth, async (req, res) => {
   if (!KIE_API_KEY) {
     return res.status(503).json({ error: 'not_configured', message: 'KIE_API_KEY is not set on the server yet.' });
   }
@@ -592,6 +592,7 @@ app.post('/api/lipsync/start', async (req, res) => {
     return res.status(400).json({ error: 'bad_request', message: 'videoUrl and audioUrl are both required.' });
   }
   const matched = LIPSYNC_MODELS.find(m => m.id === model) || LIPSYNC_MODELS[0];
+  if (!(await checkUserCanAfford(req, res, matched.id))) return;
   // Both entries are really the same KIE model id — "Basic" is just a different mode value
   // in the request, not a different model — so the real id sent to KIE is always the base one.
   const modelId = 'volcengine/video-to-video-lip-sync';
@@ -622,7 +623,7 @@ app.post('/api/lipsync/start', async (req, res) => {
     }
     tasks.set(taskId, {
       status: 'pending', imageUrl: null, message: null, model: matched.id, prompt: '', isVideo: true,
-      meta: meta || {}, createdAt: Date.now(), updatedAt: Date.now(),
+      meta: meta || {}, createdAt: Date.now(), updatedAt: Date.now(), userId: req.user.id,
     });
     if (!callBackUrl) {
       console.warn('[server] no PUBLIC_URL known — this task will rely entirely on the polling fallback.');
@@ -650,7 +651,7 @@ const PHOTO_LIPSYNC_MODELS = [
 app.get('/api/photo-lipsync-models', (req, res) => {
   res.json({ models: PHOTO_LIPSYNC_MODELS.map(m => ({ id: m.id, label: m.label, costUsd: m.costUsd, blurb: m.blurb })) });
 });
-app.post('/api/photo-lipsync/start', async (req, res) => {
+app.post('/api/photo-lipsync/start', requireAuth, async (req, res) => {
   if (!KIE_API_KEY) {
     return res.status(503).json({ error: 'not_configured', message: 'KIE_API_KEY is not set on the server yet.' });
   }
@@ -659,6 +660,7 @@ app.post('/api/photo-lipsync/start', async (req, res) => {
     return res.status(400).json({ error: 'bad_request', message: 'imageUrl and audioUrl are both required.' });
   }
   const matched = PHOTO_LIPSYNC_MODELS.find(m => m.id === model) || PHOTO_LIPSYNC_MODELS[0];
+  if (!(await checkUserCanAfford(req, res, matched.id))) return;
   const input = matched.provider === 'omnihuman'
     ? { image_url: imageUrl, audio_url: audioUrl, output_resolution: '1080' }
     : { image_url: imageUrl, audio_url: audioUrl, prompt: 'The person sings passionately along with the audio, with facial expressions and movement matching the rhythm and emotion of the song.' };
@@ -683,7 +685,7 @@ app.post('/api/photo-lipsync/start', async (req, res) => {
     }
     tasks.set(taskId, {
       status: 'pending', imageUrl: null, message: null, model: matched.id, prompt: '', isVideo: true,
-      meta: meta || {}, createdAt: Date.now(), updatedAt: Date.now(),
+      meta: meta || {}, createdAt: Date.now(), updatedAt: Date.now(), userId: req.user.id,
     });
     if (!callBackUrl) {
       console.warn('[server] no PUBLIC_URL known — this task will rely entirely on the polling fallback.');
@@ -711,6 +713,57 @@ const MOTION_CONTROL_MODELS = [
 app.get('/api/motion-control-models', (req, res) => {
   res.json({ models: MOTION_CONTROL_MODELS.map(m => ({ id: m.id, label: m.label, costUsd: m.costUsd, blurb: m.blurb })) });
 });
+
+const ALL_MODEL_CATALOGS = [MODELS, VIDEO_MODELS, LIPSYNC_MODELS, PHOTO_LIPSYNC_MODELS, MOTION_CONTROL_MODELS];
+function findModelCostUsd(modelId) {
+  for (const catalog of ALL_MODEL_CATALOGS) {
+    const found = catalog.find(m => m.id === modelId);
+    if (found && found.costUsd) return found.costUsd;
+  }
+  return null;
+}
+// Stage 6 — real per-generation deduction. Rounds UP (a user should never be able to start
+// a generation their balance can't quite cover) and never lets a balance go below 0 even if
+// something about the timing was imperfect.
+async function deductTokensForTask(userId, modelId) {
+  if (!pool || !userId) return;
+  const costUsd = findModelCostUsd(modelId);
+  if (!costUsd) return; // unknown model — nothing sensible to deduct
+  const costCredits = Math.ceil(costUsd / KIE_CREDIT_USD);
+  try {
+    await pool.query(
+      'UPDATE users SET tokens = GREATEST(0, tokens - $1) WHERE id = $2 AND is_admin = false',
+      [costCredits, userId]
+    );
+  } catch (err) {
+    console.error('[server] could not deduct tokens for user ' + userId + ':', err);
+  }
+}
+// Pre-generation check — called by every /api/*/start endpoint before it ever talks to KIE.
+// Admins are exempt entirely (their balance IS the real KIE account, not a ledger to check).
+async function checkUserCanAfford(req, res, modelId) {
+  if (!req.user || req.user.is_admin) return true;
+  const costUsd = findModelCostUsd(modelId);
+  if (!costUsd) return true; // unknown cost — don't block on something we can't evaluate
+  const costCredits = Math.ceil(costUsd / KIE_CREDIT_USD);
+  try {
+    const result = await pool.query('SELECT tokens FROM users WHERE id = $1', [req.user.id]);
+    const balance = result.rows.length ? result.rows[0].tokens : 0;
+    if (balance < costCredits) {
+      res.status(400).json({
+        error: 'insufficient_balance',
+        message: `Not enough tokens — this needs ${costCredits}, your balance is ${balance}.`,
+      });
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error('[server] balance check failed:', err);
+    res.status(500).json({ error: 'server_error', message: 'Could not verify your balance.' });
+    return false;
+  }
+}
+
 // Re-hosts a file we already have in memory directly on KIE's OWN storage (their File
 // Stream Upload API), instead of giving KIE's model backends a URL pointing back at our
 // own server. This is the real fix for Motion Control's persistent failures — comparing
@@ -734,7 +787,7 @@ async function uploadToKieFileHost(buffer, mime, fileName){
   }
   return data.data.downloadUrl;
 }
-app.post('/api/motion-control/start', async (req, res) => {
+app.post('/api/motion-control/start', requireAuth, async (req, res) => {
   if (!KIE_API_KEY) {
     return res.status(503).json({ error: 'not_configured', message: 'KIE_API_KEY is not set on the server yet.' });
   }
@@ -743,6 +796,7 @@ app.post('/api/motion-control/start', async (req, res) => {
     return res.status(400).json({ error: 'bad_request', message: 'imageUrl and videoUrl are both required.' });
   }
   const matched = MOTION_CONTROL_MODELS.find(m => m.id === model) || MOTION_CONTROL_MODELS[0];
+  if (!(await checkUserCanAfford(req, res, matched.id))) return;
 
   let kieImageUrl, kieVideoUrl;
   try {
@@ -790,7 +844,7 @@ app.post('/api/motion-control/start', async (req, res) => {
     }
     tasks.set(taskId, {
       status: 'pending', imageUrl: null, message: null, model: matched.id, prompt: '', isVideo: true,
-      meta: meta || {}, createdAt: Date.now(), updatedAt: Date.now(),
+      meta: meta || {}, createdAt: Date.now(), updatedAt: Date.now(), userId: req.user.id,
     });
     if (!callBackUrl) {
       console.warn('[server] no PUBLIC_URL known — this task will rely entirely on the polling fallback.');
@@ -965,7 +1019,7 @@ app.get('/api/reference-image/:id', (req, res) => {
 // ---- start a generation task ----
 // `meta` carries scene/shot context purely for display in the Tasks tab — it never goes
 // to KIE, it's just stored alongside the task on our side.
-app.post('/api/generate-image/start', async (req, res) => {
+app.post('/api/generate-image/start', requireAuth, async (req, res) => {
   if (!KIE_API_KEY) {
     return res.status(503).json({ error: 'not_configured', message: 'KIE_API_KEY is not set on the server yet.' });
   }
@@ -974,6 +1028,7 @@ app.post('/api/generate-image/start', async (req, res) => {
     return res.status(400).json({ error: 'bad_request', message: 'prompt is required.' });
   }
   const modelId = (MODELS.find(m => m.id === model) || MODELS[0]).id;
+  if (!(await checkUserCanAfford(req, res, modelId))) return;
   const built = buildInputFor(modelId, prompt, width, height, referenceImageUrl);
   const actualModelId = built.modelId;
   const input = built.input;
@@ -998,7 +1053,7 @@ app.post('/api/generate-image/start', async (req, res) => {
     }
     tasks.set(taskId, {
       status: 'pending', imageUrl: null, message: null, model: actualModelId, prompt,
-      meta: meta || {}, createdAt: Date.now(), updatedAt: Date.now(),
+      meta: meta || {}, createdAt: Date.now(), updatedAt: Date.now(), userId: req.user.id,
     });
     if (!callBackUrl) {
       console.warn('[server] no PUBLIC_URL known — this task will rely entirely on the polling fallback.');
@@ -1037,7 +1092,7 @@ function buildVideoInputFor(modelId, imageUrl, prompt, duration, lastFrameImageU
   if (aspectRatio) input.aspect_ratio = aspectRatio;
   return input;
 }
-app.post('/api/generate-video/start', async (req, res) => {
+app.post('/api/generate-video/start', requireAuth, async (req, res) => {
   if (!KIE_API_KEY) {
     return res.status(503).json({ error: 'not_configured', message: 'KIE_API_KEY is not set on the server yet.' });
   }
@@ -1049,6 +1104,7 @@ app.post('/api/generate-video/start', async (req, res) => {
     return res.status(400).json({ error: 'bad_request', message: 'imageUrl is required — video generation animates an already-generated shot image.' });
   }
   const modelId = (VIDEO_MODELS.find(m => m.id === model) || VIDEO_MODELS[0]).id;
+  if (!(await checkUserCanAfford(req, res, modelId))) return;
   const input = buildVideoInputFor(modelId, imageUrl, prompt, duration, lastFrameImageUrl, resolution, aspectRatio);
   const callBackUrl = PUBLIC_URL ? PUBLIC_URL + '/api/webhook/kie' : undefined;
 
@@ -1071,7 +1127,7 @@ app.post('/api/generate-video/start', async (req, res) => {
     }
     tasks.set(taskId, {
       status: 'pending', imageUrl: null, message: null, model: modelId, prompt, isVideo: true, duration: duration || 5,
-      meta: meta || {}, createdAt: Date.now(), updatedAt: Date.now(),
+      meta: meta || {}, createdAt: Date.now(), updatedAt: Date.now(), userId: req.user.id,
     });
     if (!callBackUrl) {
       console.warn('[server] no PUBLIC_URL known — this task will rely entirely on the polling fallback.');
@@ -1087,7 +1143,7 @@ app.post('/api/generate-video/start', async (req, res) => {
 // The exact payload shape isn't confirmed from docs alone (only the request side, i.e.
 // callBackUrl usage, was documented) — log the raw body in full so the first real delivery
 // can be inspected, and parse defensively across the shapes KIE uses elsewhere.
-app.post('/api/webhook/kie', (req, res) => {
+app.post('/api/webhook/kie', async (req, res) => {
   const body = req.body || {};
   console.log('[server] webhook received:', JSON.stringify(body));
   const d = body.data || body;
@@ -1096,7 +1152,7 @@ app.post('/api/webhook/kie', (req, res) => {
     console.warn('[server] webhook payload had no recognizable taskId — ignoring.');
     return res.status(200).json({ ok: true }); // still 200 so KIE doesn't retry forever
   }
-  applyTaskResult(taskId, d);
+  await applyTaskResult(taskId, d);
   res.status(200).json({ ok: true });
 });
 
@@ -1117,7 +1173,7 @@ function extractResultUrl(d) {
   return null;
 }
 
-function applyTaskResult(taskId, d) {
+async function applyTaskResult(taskId, d) {
   const existing = tasks.get(taskId) || { meta: {}, createdAt: Date.now() };
   const state = (d.state || '').toLowerCase();
   const flag = Number(d.successFlag);
@@ -1128,6 +1184,12 @@ function applyTaskResult(taskId, d) {
   if (isSuccess && resultUrl) {
     tasks.set(taskId, { ...existing, status: 'success', imageUrl: resultUrl, updatedAt: Date.now() });
     console.log('[server] task ' + taskId + ' -> success');
+    // Deduct exactly once per task, no matter how many times a webhook or poll re-confirms
+    // the same success (KIE's own webhook delivery can legitimately retry/duplicate).
+    if (!existing.tokensDeducted && existing.userId) {
+      tasks.set(taskId, { ...tasks.get(taskId), tokensDeducted: true });
+      await deductTokensForTask(existing.userId, existing.model);
+    }
   } else if (isFailed) {
     tasks.set(taskId, { ...existing, status: 'failed', message: d.failMsg || d.errorMessage || 'Generation failed.', updatedAt: Date.now() });
     console.log('[server] task ' + taskId + ' -> failed:', d.failMsg || d.errorMessage);
@@ -1154,7 +1216,7 @@ app.get('/api/generate-image/status', async (req, res) => {
       });
       const pollData = await pollRes.json().catch(() => null);
       console.log('[server] fallback poll ' + taskId + ':', JSON.stringify(pollData));
-      if (pollData && pollData.data) applyTaskResult(taskId, pollData.data);
+      if (pollData && pollData.data) await applyTaskResult(taskId, pollData.data);
       t = tasks.get(taskId);
     } catch (err) {
       console.warn('[server] fallback poll failed:', err);
