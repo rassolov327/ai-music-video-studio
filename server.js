@@ -18,6 +18,9 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { initDb, pool } from './db.js';
+import bcrypt from 'bcryptjs';
+import cookieParser from 'cookie-parser';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs/promises';
@@ -51,7 +54,210 @@ const PUBLIC_URL = process.env.RAILWAY_PUBLIC_DOMAIN
   ? 'https://' + process.env.RAILWAY_PUBLIC_DOMAIN
   : (process.env.PUBLIC_URL || '');
 
+const SESSION_SECRET = process.env.SESSION_SECRET || '';
+if (!SESSION_SECRET) {
+  console.warn('[server] SESSION_SECRET is not set — using an insecure built-in fallback. Set a real SESSION_SECRET env var before real users log in.');
+}
+
 app.use(express.json({ limit: '20mb' }));
+app.use(cookieParser(SESSION_SECRET || 'insecure-dev-fallback-change-me'));
+
+// ---- auth (stage 2 of the user/token system) ----
+// Deliberately simple for a small, admin-managed user base — one signed httpOnly cookie
+// holding just the user's numeric id, no separate session store/table needed at this
+// scale. requireAuth is exported-in-place for later stages (protecting generation routes,
+// stage 6) to reuse rather than re-deriving this logic.
+async function requireAuth(req, res, next) {
+  if (!pool) return res.status(503).json({ error: 'not_configured', message: 'The user database is not available.' });
+  const userId = req.signedCookies && req.signedCookies.session;
+  if (!userId) return res.status(401).json({ error: 'not_authenticated', message: 'Not logged in.' });
+  try {
+    const result = await pool.query('SELECT id, name, login, tokens, is_admin FROM users WHERE id = $1', [userId]);
+    if (!result.rows.length) return res.status(401).json({ error: 'not_authenticated', message: 'Not logged in.' });
+    req.user = result.rows[0];
+    next();
+  } catch (err) {
+    console.error('[server] requireAuth query failed:', err);
+    res.status(500).json({ error: 'server_error', message: 'Could not verify login.' });
+  }
+}
+
+async function requireAdmin(req, res, next) {
+  await requireAuth(req, res, () => {
+    if (!req.user.is_admin) return res.status(403).json({ error: 'forbidden', message: 'Admin access required.' });
+    next();
+  });
+}
+
+app.get('/api/admin/users', requireAdmin, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT id, name, login, tokens, is_admin, last_login, created_at FROM users ORDER BY id ASC');
+    const users = result.rows;
+    // Admin rows show the LIVE KIE balance, not the stored tokens column — this is what
+    // makes the number in the table always exactly match reality, since it's fetched
+    // fresh rather than being a stored number that could ever drift or get hand-edited.
+    if (users.some(u => u.is_admin)) {
+      try {
+        const liveCredits = await fetchKieCreditsRaw();
+        users.forEach(u => { if (u.is_admin) u.tokens = liveCredits; });
+      } catch (err) {
+        console.warn('[server] could not fetch live KIE balance for admin row(s), showing the stored value instead:', err);
+      }
+    }
+    res.json({ users });
+  } catch (err) {
+    console.error('[server] /api/admin/users (list) failed:', err);
+    res.status(500).json({ error: 'server_error', message: 'Could not load users.' });
+  }
+});
+
+app.post('/api/admin/users', requireAdmin, async (req, res) => {
+  const { name, login, password, tokens } = req.body || {};
+  if (!name || !login || !password) {
+    return res.status(400).json({ error: 'bad_request', message: 'Name, login, and password are all required.' });
+  }
+  const tokenCount = Number.isFinite(Number(tokens)) ? Math.max(0, Math.floor(Number(tokens))) : 0;
+  try {
+    // Hard rule, per Костян: never let the sum of tokens promised to ALL users exceed
+    // his real KIE balance — checked fresh against KIE every time, not a cached number.
+    if (tokenCount > 0) {
+      const [kieCredits, sumResult] = await Promise.all([
+        fetchKieCreditsRaw(),
+        pool.query("SELECT COALESCE(SUM(tokens), 0) AS total FROM users WHERE is_admin = false"),
+      ]);
+      const currentTotal = Number(sumResult.rows[0].total);
+      if (currentTotal + tokenCount > kieCredits) {
+        return res.status(400).json({
+          error: 'over_budget',
+          message: `Can't add ${tokenCount} tokens — that would put total user tokens (${currentTotal + tokenCount}) over your real KIE balance (${kieCredits}).`,
+        });
+      }
+    }
+    const hash = await bcrypt.hash(password, 10);
+    const result = await pool.query(
+      `INSERT INTO users (name, login, password_hash, tokens, is_admin)
+       VALUES ($1, $2, $3, $4, false)
+       RETURNING id, name, login, tokens, is_admin, last_login, created_at`,
+      [name, login, hash, tokenCount]
+    );
+    res.json({ user: result.rows[0] });
+  } catch (err) {
+    if (err && err.code === '23505') { // unique_violation on login
+      return res.status(400).json({ error: 'login_taken', message: 'That login is already in use.' });
+    }
+    console.error('[server] /api/admin/users (create) failed:', err);
+    res.status(500).json({ error: 'server_error', message: 'Could not create the user.' });
+  }
+});
+
+app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'bad_request', message: 'Invalid user id.' });
+  if (id === req.user.id) return res.status(400).json({ error: 'bad_request', message: "You can't delete your own account while logged in as it." });
+  try {
+    await pool.query('DELETE FROM users WHERE id = $1', [id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[server] /api/admin/users (delete) failed:', err);
+    res.status(500).json({ error: 'server_error', message: 'Could not delete the user.' });
+  }
+});
+
+app.patch('/api/admin/users/:id', requireAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'bad_request', message: 'Invalid user id.' });
+  const { login, password, addTokens } = req.body || {};
+  try {
+    const current = await pool.query('SELECT id, tokens, is_admin FROM users WHERE id = $1', [id]);
+    if (!current.rows.length) return res.status(404).json({ error: 'not_found', message: 'User not found.' });
+
+    if (current.rows[0].is_admin && Number(addTokens)) {
+      return res.status(400).json({
+        error: 'admin_tokens_locked',
+        message: "An admin account's balance always mirrors your real KIE credits — it can't be edited here. It changes only from generations or topping up on KIE.",
+      });
+    }
+
+    const sets = [];
+    const values = [];
+    let i = 1;
+    if (login) { sets.push(`login = $${i++}`); values.push(login); }
+    if (password) { sets.push(`password_hash = $${i++}`); values.push(await bcrypt.hash(password, 10)); }
+
+    const addAmt = Number.isFinite(Number(addTokens)) ? Math.floor(Number(addTokens)) : 0;
+    if (addAmt !== 0) {
+      // Same hard rule as creating a user, checked fresh — the total across everyone
+      // (including this top-up) can never exceed Костян's real KIE balance.
+      const [kieCredits, othersResult] = await Promise.all([
+        fetchKieCreditsRaw(),
+        pool.query('SELECT COALESCE(SUM(tokens), 0) AS total FROM users WHERE id != $1 AND is_admin = false', [id]),
+      ]);
+      const othersTotal = Number(othersResult.rows[0].total);
+      const newTokens = current.rows[0].tokens + addAmt;
+      if (newTokens < 0) {
+        return res.status(400).json({ error: 'bad_request', message: "Can't remove more tokens than this user has." });
+      }
+      if (othersTotal + newTokens > kieCredits) {
+        return res.status(400).json({
+          error: 'over_budget',
+          message: `Can't add ${addAmt} tokens — that would put total user tokens (${othersTotal + newTokens}) over your real KIE balance (${kieCredits}).`,
+        });
+      }
+      sets.push(`tokens = $${i++}`); values.push(newTokens);
+    }
+
+    if (!sets.length) return res.status(400).json({ error: 'bad_request', message: 'Nothing to update.' });
+    values.push(id);
+    const result = await pool.query(
+      `UPDATE users SET ${sets.join(', ')} WHERE id = $${i} RETURNING id, name, login, tokens, is_admin, last_login, created_at`,
+      values
+    );
+    res.json({ user: result.rows[0] });
+  } catch (err) {
+    if (err && err.code === '23505') {
+      return res.status(400).json({ error: 'login_taken', message: 'That login is already in use.' });
+    }
+    console.error('[server] /api/admin/users (edit) failed:', err);
+    res.status(500).json({ error: 'server_error', message: 'Could not update the user.' });
+  }
+});
+
+
+app.post('/api/login', async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'not_configured', message: 'The user database is not available yet.' });
+  const { login, password } = req.body || {};
+  if (!login || !password) {
+    return res.status(400).json({ error: 'bad_request', message: 'Login and password are both required.' });
+  }
+  try {
+    const result = await pool.query('SELECT id, name, login, password_hash, tokens, is_admin FROM users WHERE login = $1', [login]);
+    const user = result.rows[0];
+    // Same generic message whether the login doesn't exist or the password is wrong —
+    // doesn't tell an attacker which one they got right.
+    const genericError = { error: 'invalid_credentials', message: 'Incorrect login or password.' };
+    if (!user) return res.status(401).json(genericError);
+    const ok = await bcrypt.compare(password, user.password_hash);
+    if (!ok) return res.status(401).json(genericError);
+    await pool.query('UPDATE users SET last_login = now() WHERE id = $1', [user.id]);
+    res.cookie('session', String(user.id), {
+      httpOnly: true, signed: true, sameSite: 'lax',
+      secure: req.protocol === 'https', maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+    });
+    res.json({ id: user.id, name: user.name, login: user.login, tokens: user.tokens, isAdmin: user.is_admin });
+  } catch (err) {
+    console.error('[server] /api/login failed:', err);
+    res.status(500).json({ error: 'server_error', message: 'Could not log in.' });
+  }
+});
+
+app.post('/api/logout', (req, res) => {
+  res.clearCookie('session');
+  res.json({ ok: true });
+});
+
+app.get('/api/me', requireAuth, (req, res) => {
+  res.json({ id: req.user.id, name: req.user.name, login: req.user.login, tokens: req.user.tokens, isAdmin: req.user.is_admin });
+});
 
 // Same CSP shape the project already relied on (Caddyfile), with blob: explicitly present
 // in img-src and media-src — omitting it silently breaks restored photos/audio with no
@@ -377,7 +583,7 @@ const LIPSYNC_MODELS = [
 app.get('/api/lipsync-models', (req, res) => {
   res.json({ models: LIPSYNC_MODELS.map(m => ({ id: m.id, label: m.label, costUsd: m.costUsd, blurb: m.blurb })) });
 });
-app.post('/api/lipsync/start', async (req, res) => {
+app.post('/api/lipsync/start', requireAuth, async (req, res) => {
   if (!KIE_API_KEY) {
     return res.status(503).json({ error: 'not_configured', message: 'KIE_API_KEY is not set on the server yet.' });
   }
@@ -386,6 +592,7 @@ app.post('/api/lipsync/start', async (req, res) => {
     return res.status(400).json({ error: 'bad_request', message: 'videoUrl and audioUrl are both required.' });
   }
   const matched = LIPSYNC_MODELS.find(m => m.id === model) || LIPSYNC_MODELS[0];
+  if (!(await checkUserCanAfford(req, res, matched.id))) return;
   // Both entries are really the same KIE model id — "Basic" is just a different mode value
   // in the request, not a different model — so the real id sent to KIE is always the base one.
   const modelId = 'volcengine/video-to-video-lip-sync';
@@ -416,7 +623,7 @@ app.post('/api/lipsync/start', async (req, res) => {
     }
     tasks.set(taskId, {
       status: 'pending', imageUrl: null, message: null, model: matched.id, prompt: '', isVideo: true,
-      meta: meta || {}, createdAt: Date.now(), updatedAt: Date.now(),
+      meta: meta || {}, createdAt: Date.now(), updatedAt: Date.now(), userId: req.user.id,
     });
     if (!callBackUrl) {
       console.warn('[server] no PUBLIC_URL known — this task will rely entirely on the polling fallback.');
@@ -444,7 +651,7 @@ const PHOTO_LIPSYNC_MODELS = [
 app.get('/api/photo-lipsync-models', (req, res) => {
   res.json({ models: PHOTO_LIPSYNC_MODELS.map(m => ({ id: m.id, label: m.label, costUsd: m.costUsd, blurb: m.blurb })) });
 });
-app.post('/api/photo-lipsync/start', async (req, res) => {
+app.post('/api/photo-lipsync/start', requireAuth, async (req, res) => {
   if (!KIE_API_KEY) {
     return res.status(503).json({ error: 'not_configured', message: 'KIE_API_KEY is not set on the server yet.' });
   }
@@ -453,6 +660,7 @@ app.post('/api/photo-lipsync/start', async (req, res) => {
     return res.status(400).json({ error: 'bad_request', message: 'imageUrl and audioUrl are both required.' });
   }
   const matched = PHOTO_LIPSYNC_MODELS.find(m => m.id === model) || PHOTO_LIPSYNC_MODELS[0];
+  if (!(await checkUserCanAfford(req, res, matched.id))) return;
   const input = matched.provider === 'omnihuman'
     ? { image_url: imageUrl, audio_url: audioUrl, output_resolution: '1080' }
     : { image_url: imageUrl, audio_url: audioUrl, prompt: 'The person sings passionately along with the audio, with facial expressions and movement matching the rhythm and emotion of the song.' };
@@ -477,7 +685,7 @@ app.post('/api/photo-lipsync/start', async (req, res) => {
     }
     tasks.set(taskId, {
       status: 'pending', imageUrl: null, message: null, model: matched.id, prompt: '', isVideo: true,
-      meta: meta || {}, createdAt: Date.now(), updatedAt: Date.now(),
+      meta: meta || {}, createdAt: Date.now(), updatedAt: Date.now(), userId: req.user.id,
     });
     if (!callBackUrl) {
       console.warn('[server] no PUBLIC_URL known — this task will rely entirely on the polling fallback.');
@@ -505,6 +713,78 @@ const MOTION_CONTROL_MODELS = [
 app.get('/api/motion-control-models', (req, res) => {
   res.json({ models: MOTION_CONTROL_MODELS.map(m => ({ id: m.id, label: m.label, costUsd: m.costUsd, blurb: m.blurb })) });
 });
+
+const ALL_MODEL_CATALOGS = [MODELS, VIDEO_MODELS, LIPSYNC_MODELS, PHOTO_LIPSYNC_MODELS, MOTION_CONTROL_MODELS];
+function findModelCostUsd(modelId) {
+  for (const catalog of ALL_MODEL_CATALOGS) {
+    const found = catalog.find(m => m.id === modelId);
+    if (found && found.costUsd) return found.costUsd;
+  }
+  return null;
+}
+// Stage 6 — real per-generation deduction. Rounds UP (a user should never be able to start
+// a generation their balance can't quite cover) and never lets a balance go below 0 even if
+// something about the timing was imperfect.
+async function deductTokensForTask(userId, modelId) {
+  if (!pool || !userId) return;
+  const costUsd = findModelCostUsd(modelId);
+  if (!costUsd) return; // unknown model — nothing sensible to deduct
+  const costCredits = Math.ceil(costUsd / KIE_CREDIT_USD);
+  try {
+    await pool.query(
+      'UPDATE users SET tokens = GREATEST(0, tokens - $1) WHERE id = $2 AND is_admin = false',
+      [costCredits, userId]
+    );
+  } catch (err) {
+    console.error('[server] could not deduct tokens for user ' + userId + ':', err);
+  }
+}
+// Pre-generation check — called by every /api/*/start endpoint before it ever talks to KIE.
+// Admins are exempt entirely (their balance IS the real KIE account, not a ledger to check).
+// The admin's real personal balance — his actual KIE credits minus everything currently
+// promised to users (their live token sum). This is what HE has left for his own
+// generations, distinct from the raw KIE number, which includes tokens that aren't really
+// his to spend.
+async function getPersonalBalanceCredits() {
+  const [kieCredits, sumResult] = await Promise.all([
+    fetchKieCreditsRaw(),
+    pool.query('SELECT COALESCE(SUM(tokens), 0) AS total FROM users WHERE is_admin = false'),
+  ]);
+  const promised = Number(sumResult.rows[0].total);
+  return { kieCredits, promised, personalBalance: kieCredits - promised };
+}
+async function checkUserCanAfford(req, res, modelId) {
+  if (!req.user) return true;
+  const costUsd = findModelCostUsd(modelId);
+  if (!costUsd) return true; // unknown cost — don't block on something we can't evaluate
+  const costCredits = Math.ceil(costUsd / KIE_CREDIT_USD);
+  try {
+    let balance;
+    if (req.user.is_admin) {
+      // Admin's own generations now really do get blocked once his PERSONAL balance (KIE
+      // minus what's promised to users) runs low — not exempt anymore, per the user's
+      // explicit request that this actually protect him, not just display a number.
+      const p = await getPersonalBalanceCredits();
+      balance = p.personalBalance;
+    } else {
+      const result = await pool.query('SELECT tokens FROM users WHERE id = $1', [req.user.id]);
+      balance = result.rows.length ? result.rows[0].tokens : 0;
+    }
+    if (balance < costCredits) {
+      res.status(400).json({
+        error: 'insufficient_balance',
+        message: `Not enough tokens — this needs ${costCredits}, your balance is ${balance}.`,
+      });
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error('[server] balance check failed:', err);
+    res.status(500).json({ error: 'server_error', message: 'Could not verify your balance.' });
+    return false;
+  }
+}
+
 // Re-hosts a file we already have in memory directly on KIE's OWN storage (their File
 // Stream Upload API), instead of giving KIE's model backends a URL pointing back at our
 // own server. This is the real fix for Motion Control's persistent failures — comparing
@@ -528,7 +808,7 @@ async function uploadToKieFileHost(buffer, mime, fileName){
   }
   return data.data.downloadUrl;
 }
-app.post('/api/motion-control/start', async (req, res) => {
+app.post('/api/motion-control/start', requireAuth, async (req, res) => {
   if (!KIE_API_KEY) {
     return res.status(503).json({ error: 'not_configured', message: 'KIE_API_KEY is not set on the server yet.' });
   }
@@ -537,6 +817,7 @@ app.post('/api/motion-control/start', async (req, res) => {
     return res.status(400).json({ error: 'bad_request', message: 'imageUrl and videoUrl are both required.' });
   }
   const matched = MOTION_CONTROL_MODELS.find(m => m.id === model) || MOTION_CONTROL_MODELS[0];
+  if (!(await checkUserCanAfford(req, res, matched.id))) return;
 
   let kieImageUrl, kieVideoUrl;
   try {
@@ -584,7 +865,7 @@ app.post('/api/motion-control/start', async (req, res) => {
     }
     tasks.set(taskId, {
       status: 'pending', imageUrl: null, message: null, model: matched.id, prompt: '', isVideo: true,
-      meta: meta || {}, createdAt: Date.now(), updatedAt: Date.now(),
+      meta: meta || {}, createdAt: Date.now(), updatedAt: Date.now(), userId: req.user.id,
     });
     if (!callBackUrl) {
       console.warn('[server] no PUBLIC_URL known — this task will rely entirely on the polling fallback.');
@@ -598,19 +879,55 @@ app.post('/api/motion-control/start', async (req, res) => {
 
 // ---- KIE.ai credit balance (for the small indicator in the corner of the UI) ----
 const KIE_CREDIT_USD = 0.005; // KIE's own published rate — see docs.kie.ai
+// Shared by /api/kie-credits and the admin panel's "don't promise more tokens than the
+// real KIE balance" hard limit — one fetch implementation, not two copies that could drift.
+async function fetchKieCreditsRaw() {
+  const creditRes = await fetch(`${KIE_BASE}/api/v1/chat/credit`, {
+    headers: { Authorization: `Bearer ${KIE_API_KEY}` },
+  });
+  const data = await creditRes.json().catch(() => null);
+  if (!creditRes.ok || !data || typeof data.data !== 'number') {
+    throw new Error((data && data.msg) || ('KIE.ai rejected the request (HTTP ' + creditRes.status + ').'));
+  }
+  return data.data;
+}
+app.get('/api/my-balance', requireAuth, async (req, res) => {
+  try {
+    let credits;
+    let personal = null;
+    if (req.user.is_admin) {
+      if (!KIE_API_KEY) return res.status(503).json({ error: 'not_configured', message: 'KIE_API_KEY is not set on the server yet.' });
+      const p = await getPersonalBalanceCredits();
+      credits = p.kieCredits;
+      personal = p.personalBalance;
+    } else {
+      // Fresh from the DB, not the value from login time — this is meant to reflect real
+      // spending as it happens (stage 6), not a number that goes stale the moment you log in.
+      const result = await pool.query('SELECT tokens FROM users WHERE id = $1', [req.user.id]);
+      credits = result.rows.length ? result.rows[0].tokens : 0;
+    }
+    const cheapestModel = MODELS.reduce((min, m) => (m.costUsd && (!min || m.costUsd < min.costUsd)) ? m : min, null);
+    const usd = credits * KIE_CREDIT_USD;
+    const imagesRemaining = cheapestModel ? Math.floor(usd / cheapestModel.costUsd) : null;
+    const out = { credits, usd, imagesRemaining, isAdmin: req.user.is_admin };
+    if (personal !== null) {
+      out.personalBalance = personal;
+      out.personalUsd = personal * KIE_CREDIT_USD;
+      out.personalImagesRemaining = cheapestModel ? Math.floor(out.personalUsd / cheapestModel.costUsd) : null;
+    }
+    res.json(out);
+  } catch (err) {
+    console.error('[server] /api/my-balance failed:', err);
+    res.status(500).json({ error: 'server_error', message: String(err && err.message || err) });
+  }
+});
+
 app.get('/api/kie-credits', async (req, res) => {
   if (!KIE_API_KEY) {
     return res.status(503).json({ error: 'not_configured', message: 'KIE_API_KEY is not set on the server yet.' });
   }
   try {
-    const creditRes = await fetch(`${KIE_BASE}/api/v1/chat/credit`, {
-      headers: { Authorization: `Bearer ${KIE_API_KEY}` },
-    });
-    const data = await creditRes.json().catch(() => null);
-    if (!creditRes.ok || !data || typeof data.data !== 'number') {
-      return res.status(502).json({ error: 'provider_error', message: (data && data.msg) || ('KIE.ai rejected the request (HTTP ' + creditRes.status + ').') });
-    }
-    const credits = data.data;
+    const credits = await fetchKieCreditsRaw();
     const cheapestModel = MODELS.reduce((min, m) => (m.costUsd && (!min || m.costUsd < min.costUsd)) ? m : min, null);
     const usd = credits * KIE_CREDIT_USD;
     const imagesRemaining = cheapestModel ? Math.floor(usd / cheapestModel.costUsd) : null;
@@ -732,7 +1049,7 @@ app.get('/api/reference-image/:id', (req, res) => {
 // ---- start a generation task ----
 // `meta` carries scene/shot context purely for display in the Tasks tab — it never goes
 // to KIE, it's just stored alongside the task on our side.
-app.post('/api/generate-image/start', async (req, res) => {
+app.post('/api/generate-image/start', requireAuth, async (req, res) => {
   if (!KIE_API_KEY) {
     return res.status(503).json({ error: 'not_configured', message: 'KIE_API_KEY is not set on the server yet.' });
   }
@@ -741,6 +1058,7 @@ app.post('/api/generate-image/start', async (req, res) => {
     return res.status(400).json({ error: 'bad_request', message: 'prompt is required.' });
   }
   const modelId = (MODELS.find(m => m.id === model) || MODELS[0]).id;
+  if (!(await checkUserCanAfford(req, res, modelId))) return;
   const built = buildInputFor(modelId, prompt, width, height, referenceImageUrl);
   const actualModelId = built.modelId;
   const input = built.input;
@@ -765,7 +1083,7 @@ app.post('/api/generate-image/start', async (req, res) => {
     }
     tasks.set(taskId, {
       status: 'pending', imageUrl: null, message: null, model: actualModelId, prompt,
-      meta: meta || {}, createdAt: Date.now(), updatedAt: Date.now(),
+      meta: meta || {}, createdAt: Date.now(), updatedAt: Date.now(), userId: req.user.id,
     });
     if (!callBackUrl) {
       console.warn('[server] no PUBLIC_URL known — this task will rely entirely on the polling fallback.');
@@ -804,7 +1122,7 @@ function buildVideoInputFor(modelId, imageUrl, prompt, duration, lastFrameImageU
   if (aspectRatio) input.aspect_ratio = aspectRatio;
   return input;
 }
-app.post('/api/generate-video/start', async (req, res) => {
+app.post('/api/generate-video/start', requireAuth, async (req, res) => {
   if (!KIE_API_KEY) {
     return res.status(503).json({ error: 'not_configured', message: 'KIE_API_KEY is not set on the server yet.' });
   }
@@ -816,6 +1134,7 @@ app.post('/api/generate-video/start', async (req, res) => {
     return res.status(400).json({ error: 'bad_request', message: 'imageUrl is required — video generation animates an already-generated shot image.' });
   }
   const modelId = (VIDEO_MODELS.find(m => m.id === model) || VIDEO_MODELS[0]).id;
+  if (!(await checkUserCanAfford(req, res, modelId))) return;
   const input = buildVideoInputFor(modelId, imageUrl, prompt, duration, lastFrameImageUrl, resolution, aspectRatio);
   const callBackUrl = PUBLIC_URL ? PUBLIC_URL + '/api/webhook/kie' : undefined;
 
@@ -838,7 +1157,7 @@ app.post('/api/generate-video/start', async (req, res) => {
     }
     tasks.set(taskId, {
       status: 'pending', imageUrl: null, message: null, model: modelId, prompt, isVideo: true, duration: duration || 5,
-      meta: meta || {}, createdAt: Date.now(), updatedAt: Date.now(),
+      meta: meta || {}, createdAt: Date.now(), updatedAt: Date.now(), userId: req.user.id,
     });
     if (!callBackUrl) {
       console.warn('[server] no PUBLIC_URL known — this task will rely entirely on the polling fallback.');
@@ -854,7 +1173,7 @@ app.post('/api/generate-video/start', async (req, res) => {
 // The exact payload shape isn't confirmed from docs alone (only the request side, i.e.
 // callBackUrl usage, was documented) — log the raw body in full so the first real delivery
 // can be inspected, and parse defensively across the shapes KIE uses elsewhere.
-app.post('/api/webhook/kie', (req, res) => {
+app.post('/api/webhook/kie', async (req, res) => {
   const body = req.body || {};
   console.log('[server] webhook received:', JSON.stringify(body));
   const d = body.data || body;
@@ -863,7 +1182,7 @@ app.post('/api/webhook/kie', (req, res) => {
     console.warn('[server] webhook payload had no recognizable taskId — ignoring.');
     return res.status(200).json({ ok: true }); // still 200 so KIE doesn't retry forever
   }
-  applyTaskResult(taskId, d);
+  await applyTaskResult(taskId, d);
   res.status(200).json({ ok: true });
 });
 
@@ -884,7 +1203,7 @@ function extractResultUrl(d) {
   return null;
 }
 
-function applyTaskResult(taskId, d) {
+async function applyTaskResult(taskId, d) {
   const existing = tasks.get(taskId) || { meta: {}, createdAt: Date.now() };
   const state = (d.state || '').toLowerCase();
   const flag = Number(d.successFlag);
@@ -895,6 +1214,12 @@ function applyTaskResult(taskId, d) {
   if (isSuccess && resultUrl) {
     tasks.set(taskId, { ...existing, status: 'success', imageUrl: resultUrl, updatedAt: Date.now() });
     console.log('[server] task ' + taskId + ' -> success');
+    // Deduct exactly once per task, no matter how many times a webhook or poll re-confirms
+    // the same success (KIE's own webhook delivery can legitimately retry/duplicate).
+    if (!existing.tokensDeducted && existing.userId) {
+      tasks.set(taskId, { ...tasks.get(taskId), tokensDeducted: true });
+      await deductTokensForTask(existing.userId, existing.model);
+    }
   } else if (isFailed) {
     tasks.set(taskId, { ...existing, status: 'failed', message: d.failMsg || d.errorMessage || 'Generation failed.', updatedAt: Date.now() });
     console.log('[server] task ' + taskId + ' -> failed:', d.failMsg || d.errorMessage);
@@ -921,7 +1246,7 @@ app.get('/api/generate-image/status', async (req, res) => {
       });
       const pollData = await pollRes.json().catch(() => null);
       console.log('[server] fallback poll ' + taskId + ':', JSON.stringify(pollData));
-      if (pollData && pollData.data) applyTaskResult(taskId, pollData.data);
+      if (pollData && pollData.data) await applyTaskResult(taskId, pollData.data);
       t = tasks.get(taskId);
     } catch (err) {
       console.warn('[server] fallback poll failed:', err);
@@ -974,4 +1299,5 @@ app.listen(PORT, () => {
   console.log('AI Music Video Studio server listening on port ' + PORT);
   console.log('KIE_API_KEY configured: ' + (!!KIE_API_KEY));
   console.log('Public URL for webhooks: ' + (PUBLIC_URL || '(none detected — falling back to polling only)'));
+  initDb();
 });

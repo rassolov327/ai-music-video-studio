@@ -56,6 +56,7 @@
     padding:5px 10px;border-radius:6px;font-size:12px;font-family:var(--font-ui);
     cursor:pointer;
   }
+  .tbtn.hidden{display:none;}
   .tbtn:hover{border-color:#3a3e48;color:var(--text-1);background:var(--bg-elevated);}
   .storyboard-open-btn{
     background:var(--accent);border-color:var(--accent);color:#1a1408;font-weight:600;
@@ -348,7 +349,7 @@
   .photo-drop.has-photo .photo-remove{display:flex;}
   .cf-field{margin-bottom:12px;}
   .cf-field label{display:block;font-size:11px;color:var(--text-3);margin-bottom:4px;}
-  .cf-field input[type=text], .cf-field select, .cf-field textarea{
+  .cf-field input[type=text], .cf-field input[type=password], .cf-field select, .cf-field textarea{
     width:100%;background:var(--bg-elevated);border:1px solid var(--line);color:var(--text-1);
     border-radius:5px;padding:7px 9px;font-size:12.5px;font-family:var(--font-ui);
   }
@@ -797,6 +798,23 @@
     padding:7px 10px;border-radius:5px;font-size:12px;color:var(--text-2);cursor:pointer;white-space:nowrap;
   }
   .menu-dropdown div:hover{background:var(--bg-panel-2);color:var(--text-1);}
+  .menu-dropdown-sep{
+    height:1px;margin:5px 4px;padding:0;background:var(--line);cursor:default;
+  }
+  .menu-dropdown-sep:hover{background:var(--line);}
+  .admin-users-table{width:100%;border-collapse:collapse;font-size:12.5px;}
+  .admin-users-table th{
+    text-align:left;padding:8px 10px;color:var(--text-3);font-weight:500;
+    border-bottom:1px solid var(--line);font-size:11px;text-transform:uppercase;letter-spacing:.03em;
+  }
+  .admin-users-table td{padding:8px 10px;border-bottom:1px solid var(--line);color:var(--text-1);}
+  .admin-users-table tr:last-child td{border-bottom:none;}
+  .admin-users-table .admin-row-actions{display:flex;gap:6px;justify-content:flex-end;}
+  .admin-users-table .admin-row-btn{
+    color:var(--text-3);cursor:pointer;padding:3px;border-radius:4px;display:inline-flex;
+  }
+  .admin-users-table .admin-row-btn:hover{color:var(--text-1);background:var(--bg-panel-2);}
+  .admin-users-table .admin-row-btn.danger:hover{color:var(--danger);}
 
   /* ---- Check Project report ---- */
   .check-box{width:560px;}
@@ -962,6 +980,7 @@
     cursor:pointer;user-select:none;box-shadow:0 2px 8px rgba(0,0,0,.25);
   }
   .credits-indicator:hover{border-color:#3a3e48;color:var(--text-1);}
+  .credits-indicator.hidden{display:none;}
   .credits-dot{width:7px;height:7px;border-radius:50%;background:#6a6f78;flex:0 0 auto;}
   .credits-dot.green{background:#5fae7a;}
   .credits-dot.yellow{background:var(--warn);}

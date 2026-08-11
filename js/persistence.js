@@ -95,7 +95,11 @@ function pid(){ return currentProjectId || 'default'; }
 async function listProjects(){
   try{
     const rows = await idbGetAll(STORE_PROJECT_META);
-    return rows.map(r=>r.value).filter(Boolean).sort((a,b)=> (b.updatedAt||0) - (a.updatedAt||0));
+    const all = rows.map(r=>r.value).filter(Boolean);
+    const mine = (typeof currentUser!=='undefined' && currentUser)
+      ? all.filter(p=> p.ownerId===currentUser.id || (!p.ownerId && currentUser.isAdmin))
+      : all; // no login system active (e.g. local dev without a DB) — show everything, unchanged from before
+    return mine.sort((a,b)=> (b.updatedAt||0) - (a.updatedAt||0));
   } catch(err){ return []; }
 }
 async function saveProjectMeta(meta){
@@ -130,6 +134,7 @@ async function createProject({ name, format, width, height, fps, folderHandle })
     storage: diskDirHandle ? 'disk' : 'idb',
     folderName: diskDirHandle ? diskDirHandle.name : null,
     createdAt: now, updatedAt: now,
+    ownerId: (typeof currentUser!=='undefined' && currentUser) ? currentUser.id : null,
   };
 
   // reset in-memory state to a fresh empty project
