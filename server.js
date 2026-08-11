@@ -816,6 +816,28 @@ async function fetchKieCreditsRaw() {
   }
   return data.data;
 }
+app.get('/api/my-balance', requireAuth, async (req, res) => {
+  try {
+    let credits;
+    if (req.user.is_admin) {
+      if (!KIE_API_KEY) return res.status(503).json({ error: 'not_configured', message: 'KIE_API_KEY is not set on the server yet.' });
+      credits = await fetchKieCreditsRaw();
+    } else {
+      // Fresh from the DB, not the value from login time — this is meant to reflect real
+      // spending as it happens (stage 6), not a number that goes stale the moment you log in.
+      const result = await pool.query('SELECT tokens FROM users WHERE id = $1', [req.user.id]);
+      credits = result.rows.length ? result.rows[0].tokens : 0;
+    }
+    const cheapestModel = MODELS.reduce((min, m) => (m.costUsd && (!min || m.costUsd < min.costUsd)) ? m : min, null);
+    const usd = credits * KIE_CREDIT_USD;
+    const imagesRemaining = cheapestModel ? Math.floor(usd / cheapestModel.costUsd) : null;
+    res.json({ credits, usd, imagesRemaining, isAdmin: req.user.is_admin });
+  } catch (err) {
+    console.error('[server] /api/my-balance failed:', err);
+    res.status(500).json({ error: 'server_error', message: String(err && err.message || err) });
+  }
+});
+
 app.get('/api/kie-credits', async (req, res) => {
   if (!KIE_API_KEY) {
     return res.status(503).json({ error: 'not_configured', message: 'KIE_API_KEY is not set on the server yet.' });
