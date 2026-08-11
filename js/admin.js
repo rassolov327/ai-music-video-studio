@@ -135,23 +135,9 @@ function wireAdminEditModal(){
   };
 }
 
-function showAdminScreen(){
-  document.getElementById('adminScreen').classList.remove('hidden');
-  document.getElementById('adminAddUserForm').style.display = 'none';
-  loadAdminUsers();
-}
-function hideAdminScreen(){
-  document.getElementById('adminScreen').classList.add('hidden');
-}
-
 function wireAdminScreen(){
   wireAdminEditModal();
-  const adminBtn = document.getElementById('adminBtn');
-  if(currentUser && currentUser.isAdmin){
-    adminBtn.classList.remove('hidden');
-    adminBtn.onclick = showAdminScreen;
-  }
-  document.getElementById('adminCloseBtn').onclick = hideAdminScreen;
+  loadAdminUsers();
   document.getElementById('adminAddUserBtn').onclick = ()=>{
     document.getElementById('adminAddUserForm').style.display = '';
     document.getElementById('adminNewName').value = '';

@@ -56,7 +56,6 @@ function showLoginScreen(){
   wireProjectMenu();
   wireProjectSettingsModal();
   wireToolsMenu();
-  wireAdminScreen();
   wireCheckReport();
   wireFolderButton();
   wirePageTabs();
