@@ -39,6 +39,9 @@ function showLoginScreen(){
       // Simplest, most robust way to resume boot with a fully-authenticated state — a
       // fresh reload re-runs the whole init sequence from a clean slate rather than trying
       // to splice a login in the middle of an already-partially-initialized app.
+      // Marked so the boot sequence knows this reload followed a fresh login specifically —
+      // it should always land on the project picker, never auto-resume the last project.
+      sessionStorage.setItem('justLoggedIn', '1');
       location.reload();
     } catch(err){
       errHint.textContent = 'Could not reach the server.';
@@ -76,7 +79,9 @@ function showLoginScreen(){
   wireStoryboardPage();
   wireRenderPage();
   startBackgroundTaskWatcher();
-  const restored = await initProjectStore();
+  const justLoggedIn = sessionStorage.getItem('justLoggedIn');
+  if(justLoggedIn) sessionStorage.removeItem('justLoggedIn');
+  const restored = justLoggedIn ? false : await initProjectStore();
   if(restored){
     updateProjTitleDisplay();
     return;

@@ -234,6 +234,11 @@ function wireNewProjectScreen(){
   };
   document.getElementById('npCloseBtn').onclick = ()=> document.getElementById('npCancelBtn').click();
   document.getElementById('homeNewProjectBtn').onclick = ()=> showNewProjectScreen(true);
+  document.getElementById('homeLogoutBtn').onclick = async ()=>{
+    if(currentProjectId) await saveProjectNow();
+    try{ await fetch('/api/logout', { method: 'POST' }); } catch(err){}
+    location.reload();
+  };
   const importBtn = document.getElementById('homeImportBtn');
   const importInput = document.getElementById('homeImportInput');
   const importBtnLabel = document.getElementById('homeImportBtnLabel');
