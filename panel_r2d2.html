@@ -19,7 +19,7 @@
     </div>
     <div class="cf-field">
       <label>Password</label>
-      <input type="text" id="panelPasswordInput" autocomplete="current-password">
+      <input type="password" id="panelPasswordInput" autocomplete="current-password">
     </div>
     <div class="gen-hint" id="panelLoginErrorHint" style="color:var(--danger);display:none;"></div>
     <div class="cf-actions">
@@ -35,7 +35,7 @@
       <button class="np-close" id="adminEditCloseBtn"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
     </div>
     <div class="cf-field"><label>Login</label><input type="text" id="adminEditLogin"></div>
-    <div class="cf-field"><label>New password (leave blank to keep the current one)</label><input type="text" id="adminEditPassword"></div>
+    <div class="cf-field"><label>New password (leave blank to keep the current one)</label><input type="password" id="adminEditPassword"></div>
     <div class="cf-field">
       <label>Tokens: <span id="adminEditTokensCurrent">0</span></label>
       <div style="display:flex;gap:8px;" id="adminEditAddTokensRow">
@@ -62,7 +62,7 @@
     <div id="adminAddUserForm" style="display:none;margin-bottom:14px;padding:12px;border:1px solid var(--line);border-radius:8px;">
       <div class="cf-field"><label>Name</label><input type="text" id="adminNewName"></div>
       <div class="cf-field"><label>Login</label><input type="text" id="adminNewLogin"></div>
-      <div class="cf-field"><label>Password</label><input type="text" id="adminNewPassword"></div>
+      <div class="cf-field"><label>Password</label><input type="password" id="adminNewPassword"></div>
       <div class="cf-field"><label>Tokens</label><input type="number" id="adminNewTokens" value="0" min="0"></div>
       <div class="gen-hint" id="adminAddErrorHint" style="color:var(--danger);display:none;"></div>
       <div class="cf-actions">
