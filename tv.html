@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>/TV — TAKE:ONE LAB</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/2.44.0/iconfont/tabler-icons.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<style>
+  /* /TV-specific layout — reuses styles.css only for CSS vars/fonts, not for markup
+     structure (that assumes the main app's #app shell), so this page defines its own. */
+  html, body{ overflow:auto; }
+  body.tv-body{ background:var(--bg-app); color:var(--text-1); font-family:var(--font-ui); min-height:100vh; }
+  .tv-topbar{
+    display:flex; align-items:center; gap:16px; padding:0 16px; height:48px;
+    background:var(--bg-panel); border-bottom:1px solid var(--line);
+  }
+  .tv-brand{ font-weight:600; letter-spacing:0.5px; color:var(--accent-text); }
+  .tv-page-tabs{ display:flex; gap:4px; }
+  .tv-page-tab{
+    padding:7px 12px; border-radius:6px; font-size:12.5px; color:var(--text-2);
+    cursor:pointer; user-select:none;
+  }
+  .tv-page-tab:hover{ color:var(--text-1); }
+  .tv-page-tab.active{ background:var(--bg-elevated); color:var(--accent-text); }
+  .tv-topbar-spacer{ flex:1; }
+  #tvApproveBtn{
+    background:transparent; border:1px solid var(--line); color:var(--text-2);
+    padding:6px 14px; border-radius:6px; font-size:12px; font-family:var(--font-ui); cursor:pointer;
+  }
+  #tvApproveBtn:hover{ border-color:#3a3e48; color:var(--text-1); }
+  #tvApproveBtn.tv-approved{ border-color:var(--ok); color:var(--ok); background:rgba(95,174,122,0.12); }
+
+  .tv-page{ padding:20px; max-width:1400px; margin:0 auto; }
+  .tv-page.hidden{ display:none; }
+  .tv-page-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
+  .tv-page-title{ font-size:15px; font-weight:600; color:var(--text-1); }
+  .tv-page-desc{ font-size:12px; color:var(--text-3); margin-top:2px; }
+
+  .tv-section{ margin-bottom:28px; }
+  .tv-section-title{ font-size:12.5px; font-weight:600; color:var(--text-2); margin-bottom:8px; display:flex; align-items:center; justify-content:space-between; }
+  .tv-btn{
+    background:transparent; border:1px solid var(--line); color:var(--text-2);
+    padding:5px 10px; border-radius:6px; font-size:12px; font-family:var(--font-ui); cursor:pointer;
+  }
+  .tv-btn:hover{ border-color:#3a3e48; color:var(--text-1); background:var(--bg-elevated); }
+  .tv-btn.primary{ border-color:var(--accent); color:var(--accent-text); }
+
+  .tv-card-grid{ display:flex; flex-wrap:wrap; gap:10px; }
+  .tv-card-tile{
+    width:140px; height:100px; border:1px solid var(--line); border-radius:8px;
+    background:var(--bg-panel-2); display:flex; align-items:flex-end; padding:8px;
+  }
+  .tv-card-tile-name{ font-size:12px; color:var(--text-1); }
+  .tv-empty-hint{ font-size:12px; color:var(--text-3); padding:14px; border:1px dashed var(--line); border-radius:8px; }
+
+  .tv-news-panes{ display:flex; gap:14px; }
+  .tv-news-pane{ flex:1; min-width:0; border:1px solid var(--line); border-radius:8px; background:var(--bg-panel-2); min-height:340px; }
+  .tv-news-pane-head{ font-size:11.5px; color:var(--text-2); padding:8px 10px; border-bottom:1px solid var(--line); }
+  .tv-news-row{
+    display:flex; align-items:center; gap:8px; padding:7px 10px; border-bottom:1px solid var(--line-soft);
+    font-size:12.5px; cursor:grab;
+  }
+  .tv-news-rubric{ font-size:10.5px; color:var(--accent-text); border:1px solid var(--accent-dim); border-radius:4px; padding:1px 6px; flex:0 0 auto; }
+  .tv-news-title{ flex:1; color:var(--text-1); }
+  .tv-news-flag{ font-size:10px; color:var(--warn); border:1px solid var(--warn); border-radius:4px; padding:1px 6px; }
+  .tv-news-flag-anniv{ color:var(--accent-text); border-color:var(--accent); }
+  .tv-news-rubric-filters{ display:flex; gap:6px; margin-bottom:10px; }
+
+  .tv-studio-list{ border:1px solid var(--line); border-radius:8px; background:var(--bg-panel-2); }
+
+  .tv-grid-block-group{ margin-bottom:16px; }
+  .tv-grid-block-label{ font-size:11.5px; color:var(--text-2); margin-bottom:6px; }
+  .tv-grid-block-row{ display:flex; gap:8px; }
+  .tv-grid-block{ width:120px; height:64px; border:1px solid var(--line); border-radius:6px; background:var(--bg-panel-2); }
+
+  .tv-placeholder-box{ border:1px dashed var(--line); border-radius:8px; padding:24px; text-align:center; color:var(--text-3); font-size:12.5px; }
+</style>
+</head>
+<body class="tv-body">
+
+<div class="tv-topbar">
+  <div class="tv-brand"><i class="ti ti-device-tv-old"></i> /TV</div>
+  <div class="tv-page-tabs">
+    <div class="tv-page-tab active" data-tv-page="work">Work</div>
+    <div class="tv-page-tab" data-tv-page="news">Новости</div>
+    <div class="tv-page-tab" data-tv-page="studio">Студия</div>
+    <div class="tv-page-tab" data-tv-page="grid">Сетка</div>
+    <div class="tv-page-tab" data-tv-page="tasks">TASKS</div>
+    <div class="tv-page-tab" data-tv-page="archive">Архив</div>
+    <div class="tv-page-tab" data-tv-page="air">Эфир</div>
+  </div>
+  <div class="tv-topbar-spacer"></div>
+  <button id="tvApproveBtn">Утвердить в выпуск</button>
+</div>
+
+<!-- 1. Work — anchors (Character Card) + studio backdrops (Object Card) -->
+<div class="tv-page" data-tv-page="work">
+  <div class="tv-page-head">
+    <div>
+      <div class="tv-page-title">Work</div>
+      <div class="tv-page-desc">Ведущие и декорации виртуальной студии.</div>
+    </div>
+  </div>
+  <div class="tv-section">
+    <div class="tv-section-title">Ведущие <button class="tv-btn primary" id="tvAddAnchorBtn">+ Ведущий</button></div>
+    <div class="tv-card-grid" id="tvAnchorsGrid"></div>
+  </div>
+  <div class="tv-section">
+    <div class="tv-section-title">Декорации студии <button class="tv-btn primary" id="tvAddBackdropBtn">+ Декорация</button></div>
+    <div class="tv-card-grid" id="tvBackdropsGrid"></div>
+  </div>
+</div>
+
+<!-- 2. Новости — two-pane picker -->
+<div class="tv-page hidden" data-tv-page="news">
+  <div class="tv-page-head">
+    <div>
+      <div class="tv-page-title">Новости</div>
+      <div class="tv-page-desc">Новости той же недели 25 лет назад. Перетащите слева направо, чтобы включить в выпуск.</div>
+    </div>
+  </div>
+  <div class="tv-news-rubric-filters" id="tvNewsRubricFilters"></div>
+  <div class="tv-news-panes">
+    <div class="tv-news-pane">
+      <div class="tv-news-pane-head">Предложено</div>
+      <div id="tvNewsLeftPane"></div>
+    </div>
+    <div class="tv-news-pane">
+      <div class="tv-news-pane-head">В выпуске</div>
+      <div id="tvNewsRightPane"></div>
+    </div>
+  </div>
+</div>
+
+<!-- 3. Студия — assign items to anchors, send to voice -->
+<div class="tv-page hidden" data-tv-page="studio">
+  <div class="tv-page-head">
+    <div>
+      <div class="tv-page-title">Студия</div>
+      <div class="tv-page-desc">Назначьте новости ведущим и отправьте на озвучку.</div>
+    </div>
+  </div>
+  <div class="tv-studio-list" id="tvStudioList">
+    <div class="tv-empty-hint">Нет новостей, включённых в выпуск — добавьте их на вкладке «Новости».</div>
+  </div>
+</div>
+
+<!-- 4. Сетка — NLE-style timeline, rubric-grouped blocks -->
+<div class="tv-page hidden" data-tv-page="grid">
+  <div class="tv-page-head">
+    <div>
+      <div class="tv-page-title">Сетка</div>
+      <div class="tv-page-desc">Монтажная сетка выпуска — рубрики идут блоками.</div>
+    </div>
+  </div>
+  <div id="tvGridTrack"></div>
+</div>
+
+<!-- 5. TASKS — generation queue -->
+<div class="tv-page hidden" data-tv-page="tasks">
+  <div class="tv-page-head">
+    <div>
+      <div class="tv-page-title">TASKS</div>
+      <div class="tv-page-desc">Очередь генерации.</div>
+    </div>
+  </div>
+  <div class="tv-placeholder-box" id="tvTasksBox">Задач пока нет.</div>
+</div>
+
+<!-- 6. Архив -->
+<div class="tv-page hidden" data-tv-page="archive">
+  <div class="tv-page-head">
+    <div>
+      <div class="tv-page-title">Архив</div>
+      <div class="tv-page-desc">История всех сгенерированных материалов.</div>
+    </div>
+  </div>
+  <div class="tv-placeholder-box" id="tvArchiveBox">Архив пуст.</div>
+</div>
+
+<!-- 7. Эфир — final render/output -->
+<div class="tv-page hidden" data-tv-page="air">
+  <div class="tv-page-head">
+    <div>
+      <div class="tv-page-title">Эфир</div>
+      <div class="tv-page-desc">Финальный рендер выпуска.</div>
+    </div>
+  </div>
+  <div class="tv-placeholder-box" id="tvAirBox">Выпуск ещё не собран.</div>
+</div>
+
+<script src="js/tv-state.js"></script>
+<script src="js/tv-app.js"></script>
+</body>
+</html>
