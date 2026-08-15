@@ -10,11 +10,11 @@ user gives you a newer version — it supersedes older copies.
 - Production (`main` branch) must keep working exactly as it does today, untouched.
 - All `/TV` work happens on `dev`. Never merge to `main` unless the user explicitly asks.
 - `dev` has its own Railway environment with its own Postgres instance (fully separate from
-  production's database) — confirmed by the user, so DB schema changes here are safe.
+  production's database) — confirmed by the user. That Postgres instance is used ONLY for
+  the shared users/login/token system TAKE:ONE already had (`db.js`) — `/TV` itself does
+  NOT use Postgres, see "Architecture" below.
 - Костян (the user) may step away from this project for extended periods (e.g. travel) —
-  nothing about `/TV` should require ongoing maintenance to avoid breaking anything. Any
-  scheduler/cron job must default to OFF/inert until explicitly enabled, so an idle `dev`
-  environment doesn't do anything unexpected while unattended.
+  nothing about `/TV` should require ongoing maintenance to avoid breaking anything.
 
 ## Who the user is
 
@@ -35,7 +35,8 @@ hand (no auto-upload yet).
 ### Reference material for the format
 
 - YouTube playlist: **"Мир Компьютера (11 канал, 6 канал, СТС, 1997-2003 год)"**
-  (uploads by Pavel Tsirulnikov / InquisitorAlex) — real full episodes.
+  (uploads by Pavel Tsirulnikov / InquisitorAlex) — real full episodes:
+  https://www.youtube.com/playlist?list=PLAWq99KZfygXMCI6oUHKF832ZDMeB7Njt
 - Archive: **staroetv.su** — 356 catalogued episodes with descriptions.
 - Real show staff/rubric structure (from episode credits, confirmed via research — this is
   the model for how `/TV`'s own anchors should map to rubrics, see below):
@@ -52,9 +53,16 @@ hand (no auto-upload yet).
 - Lives at `/TV` route in the SAME app as TAKE:ONE (same GitHub repo, same Railway project,
   same KIE account/key) — branch isolation (`dev`) is the safety mechanism, not a separate
   repo/service.
-- Unlike TAKE:ONE (which stores all project data client-side, IndexedDB/disk — a human
-  drives every generation manually), `/TV` needs SERVER-SIDE persistence (Postgres) because
-  the pipeline must run on a schedule with no browser open.
+- `/TV` is **browser-driven, exactly like TAKE:ONE** — no scheduler, no unattended runs.
+  The user logs in, presses a button (e.g. "Собрать новости" on Новости), and it runs while
+  the browser is open. This was a deliberate reversal of an earlier server-side-Postgres/
+  cron plan (see git history if the reasoning is ever needed again) — do not reintroduce a
+  scheduler or move `/TV`'s own data to Postgres without the user explicitly asking again.
+  Storage is local disk/IndexedDB, via `js/tv-persistence.js` — a single-workspace
+  adaptation of TAKE:ONE's own `js/persistence.js` pattern (folder picker, "Saved" status
+  pill, diff-based autosave, blob assets on disk with an IndexedDB fallback; `tv-project.json`
+  + an `assets/` folder when a disk folder is connected). Postgres (`db.js`) is only used
+  for the shared login/token/credits system, not for `/TV`'s own content data.
 - Reuses TAKE:ONE's proven engine pieces directly: KIE.ai generation wrappers in `server.js`
   (model catalogs, field-name quirks per model — see comments in `server.js`, hard-won via
   real trial and error, do not re-derive from scratch), Character Card / Object Card builder
@@ -66,17 +74,22 @@ hand (no auto-upload yet).
 
 ## Tab structure (final, in this order)
 
-1. **Work** — create anchors (Character Card pattern) and virtual studio backdrops/camera
-   angles (Object Card + angle-shots pattern from `locations.js`). **Every anchor is tied to
-   one rubric** at creation time (Новости / Игры / Софт / Интернет) — mirrors the real
-   show's structure of one dedicated host per rubric, not one anchor reading everything.
+1. **Work** — create anchors (Character Card pattern, built) and virtual studio backdrops/
+   camera angles (Object Card + angle-shots pattern from `locations.js`, built). **Every
+   anchor should be tied to one rubric** at creation time (Новости / Игры / Софт /
+   Интернет) — mirrors the real show's structure of one dedicated host per rubric, not one
+   anchor reading everything. NOT YET IMPLEMENTED — the anchor form currently has a free-text
+   "специализация" field instead of a rubric picker; add a proper rubric select tied to
+   `TV_RUBRICS` (`js/tv-state.js`) next time Work is touched.
 2. **Новости** — real-news aggregator for the matching week 25 years ago. UI: two-pane
    Total-Commander-style picker — left pane = system-proposed news items, right pane = items
    dragged in to include in the episode. Items are rubric-tagged. A calendar of known "big
    anniversary" events (e.g. PS2 launch) flags especially notable stories automatically. If
    real material (photo/video) is scarce for an item, flag it "мало материала" and WAIT —
    never auto-generate or silently drop it; the user either uploads their own material or
-   explicitly requests AI generation for that item.
+   explicitly requests AI generation for that item. "Собрать новости" button exists and
+   calls Gemini for a draft candidate list (`POST /api/tv/gather-news`) — see "News
+   sourcing" below for the fuller, not-yet-built free-API pipeline this should grow into.
 3. **Студия** — assign each chosen news item to a specific anchor (defaults to that item's
    rubric's anchor); sends it off for voice (TTS) generation.
 4. **Сетка** — the real editing timeline (NLE-style), auto-populated per the show's
@@ -104,7 +117,12 @@ tab), not per-item checkboxes scattered everywhere.
 ## News sourcing — FREE ONLY, no paid search
 
 The user wants this to cost nothing beyond what's already paid for (KIE, and Gemini stays
-on its free tier). Do NOT use Gemini's paid Grounding-with-Google-Search tool. Instead:
+on its free tier). Do NOT use Gemini's paid Grounding-with-Google-Search tool. Current state:
+`POST /api/tv/gather-news` asks Gemini's own (free-tier, non-grounded) model to draft a
+candidate list from its training knowledge — explicitly a draft, tagged `source:'ai-draft'`
+and `мало материала` client-side until reviewed. The fuller pipeline described below (real
+retrieved facts, not recalled ones) is NOT YET BUILT — worth doing once the draft-based flow
+proves the rest of the pipeline (Студия → Сетка) end to end:
 
 1. **Raw facts** come from free, keyless public APIs, scoped to the target week (current
    week's dates, year = currentYear − 25):
@@ -115,11 +133,12 @@ on its free tier). Do NOT use Gemini's paid Grounding-with-Google-Search tool. I
      archived snapshots of period tech-news sites for that exact week
    - Wikinews archive by date
 2. **Structuring** — feed the raw retrieved text into a normal (free) Gemini text call,
-   same JSON-schema-response pattern already used in `script-tab.js`'s
+   same JSON-schema-response pattern already used in `/api/tv/gather-news` and
    `/api/assist/analyze-script` (`responseMimeType: application/json` + `responseSchema`),
    to get structured `{headline, summary, rubric, sourceUrl, sourceDate}` candidates.
-   Gemini here is NOT searching or recalling from its own training data — it's only
-   organizing text that was actually retrieved, so it can't invent a fact or a date.
+   Gemini here would NOT be searching or recalling from its own training data — it would
+   only be organizing text that was actually retrieved, so it couldn't invent a fact or date
+   (unlike the current draft-only `/api/tv/gather-news`, which does rely on recall).
 3. **Images/photos for cutaways** — separate from the above, via direct free APIs:
    Wikimedia Commons API, archive.org magazine scans, and optionally YouTube Data API for
    video references. These photos are fine to source and use directly.
@@ -127,7 +146,7 @@ on its free tier). Do NOT use Gemini's paid Grounding-with-Google-Search tool. I
 ## Journalist — voiceover text only, must read as human-written
 
 Only ONE text output is needed per news item: what the anchor reads aloud. No separate
-print-article version.
+print-article version. NOT YET BUILT.
 
 The generation must be indistinguishable from a real human writer of that era. This is a
 prompting/context problem, not a model-choice problem:
@@ -160,9 +179,10 @@ rubric transitions by hand. He wants to only lightly review/adjust. Concretely:
   "удлини кадр с ведущим" into a chat, and have it actually apply the edit. Build this by
   extending the existing Gemini chat pattern (`gemini-chat.js`) with **function
   calling/tool use**: the model's reply includes a structured action (e.g.
-  `{action: "trim_block", blockId, newDurationSec}`), the server applies it to the grid
-  data, and the UI re-renders. This is meant to feel like directing a real editor by note,
-  not like operating a timeline UI.
+  `{action: "trim_block", blockId, newDurationSec}`), the client applies it to
+  `tvState.tvGridBlocks` (no server round-trip needed to persist it — same local workspace
+  as everything else), and the UI re-renders. This is meant to feel like directing a real
+  editor by note, not like operating a timeline UI. NOT YET BUILT.
   - Longer-term idea, not required for v1: since the pipeline is framed as a virtual
     "редакция" (editorial staff — journalist, editor, director, anchor), consider giving
     each virtual role its own addressable chat (not one generic assistant) — e.g. a
@@ -171,94 +191,87 @@ rubric transitions by hand. He wants to only lightly review/adjust. Concretely:
     talking to one undifferentiated bot. Revisit once the single staff-chat (montage notes)
     is working end to end.
 
-## Show format analysis (next concrete task)
+## Show format analysis (current task, in progress)
 
 Goal: produce a written "формат" document — the fixed template Сетка's auto-assembly will
 follow every week (segment order, typical durations, transition style, anchor-to-rubric
 pacing) — based on the REAL reference show, not invented.
 
 Two parallel passes, then reconcile:
-1. **Костян watches 2-3 real episodes himself** (from the YouTube playlist / staroetv.su
-   above) and notes: exact length of each segment type, how transitions between rubrics
-   look/feel, overall episode runtime, and craft details that don't show up in a transcript
-   (pacing of speech, camera framing choices, edit rhythm).
-2. **A parallel AI draft, done via Gemini's video understanding** (same `GEMINI_API_KEY`
-   already in use — this is free-tier eligible, no extra cost):
-   - Gemini can analyze a video directly by public YouTube URL — no download/upload needed.
-   - Free tier: up to 8 hours of YouTube video per day; only public (not unlisted/private)
-     videos; Gemini 2.5+ can take up to 10 videos in a single request, prior models only 1.
-   - Suggested one-off script (NOT part of the weekly pipeline — run manually once, or
-     re-run only if the reference set changes), e.g. `scripts/analyze-show-format.js`:
-     ```js
-     // one-off, manual run — analyzes the real reference show to draft a format template.
-     // Uses the SAME GEMINI_API_KEY already configured; free-tier eligible.
-     const EPISODE_URLS = [
-       'https://www.youtube.com/watch?v=REPLACE_WITH_REAL_EPISODE_URL_1',
-       'https://www.youtube.com/watch?v=REPLACE_WITH_REAL_EPISODE_URL_2',
-     ];
-     const PROMPT = `
-     You are analyzing archival footage of a Russian TV show ("Мир компьютера" /
-     "PROкомпьютер") to extract its structural format, for use as a template.
-     For each video, produce a timestamped breakdown:
-     - Every segment boundary (MM:SS) and what kind of segment it is (intro/jingle,
-       rapid-fire news roundup, single-topic deep-dive rubric, transition, outro).
-     - The approximate duration of each segment.
-     - How the transition INTO and OUT OF each segment looks/sounds (jingle only? host
-       speaks to camera first? cut style?).
-     - Total episode runtime.
-     Be precise about timestamps — use the video's actual timeline, don't estimate blindly.
-     Reply as structured JSON: an array of episodes, each with a `segments` array.
-     `;
-     // POST to https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent
-     // input: [{type:'text', text: PROMPT}, ...EPISODE_URLS.map(uri => ({type:'video', uri}))]
-     // (adjust to whichever Gemini SDK/endpoint shape the rest of server.js already uses)
-     ```
-   - Output is a DRAFT — Костян's own viewing notes are the source of truth where they
-     disagree with the model's read, especially anything about craft/feel that a transcript
-     can't capture.
+1. **Костян watches the reference episodes himself** and notes: exact length of each
+   segment type, how transitions between rubrics look/feel, overall episode runtime, and
+   craft details that don't show up in a transcript (pacing of speech, camera framing
+   choices, edit rhythm).
+2. **A parallel AI draft, via Gemini's video understanding** (same `GEMINI_API_KEY` already
+   in use — free-tier eligible, no extra cost). Script: `scripts/analyze-show-format.js`
+   (one-off, manual run — NOT part of the weekly pipeline; re-run only if the reference set
+   changes). Analyzes 3 real full episodes by public YouTube URL (Gemini can take a URL
+   directly, no download/upload needed):
+   - https://www.youtube.com/watch?v=HP3Qs4sbrBU (28.06.2002, СТС-6 канал)
+   - https://www.youtube.com/watch?v=wR27UEbLjnE (04.07.2002, СТС-6 канал)
+   - https://www.youtube.com/watch?v=VI797LxEM6M (11.07.2002, СТС-6 канал)
+
+   Same 3 episodes Костян should watch himself, so the two passes reconcile against the
+   same source material. Output is a DRAFT — Костян's own viewing notes are the source of
+   truth where they disagree with the model's read, especially anything about craft/feel
+   that a transcript can't capture.
 3. Once reconciled, write the final format template as a plain structured doc (JSON or
    markdown table: segment type → typical duration → transition style) and wire it into
    Сетка's auto-population logic as the literal algorithm it follows.
 
 ## Automation
 
-- The episode assembly runs automatically every Monday, on a schedule — no manual trigger
-  needed in normal operation. Scheduler must default OFF until explicitly enabled (see
-  "Hard rule" above — protects an unattended `dev` environment from doing anything while
-  the user is away).
+- No scheduler/cron — every stage (news gathering, episode assembly, animation) is
+  triggered manually from the browser while logged in (e.g. the "Собрать новости" button on
+  Новости), not run unattended. This was a deliberate reversal of an earlier
+  scheduled-Monday-cron plan — the user's role is still limited to approvals/adjustments
+  rather than doing generation steps by hand, but nothing runs without the browser open.
+- Real archival photos/screenshots (Wikimedia Commons, official press kits, archive.org
+  magazine scans) are fine to source directly and use freely.
 - Real YouTube video footage is explicitly OK to clip and use, not just reference images —
   the user has accepted the copyright/Content-ID risk personally, after being warned once.
   Don't add extra copyright-safety gating beyond the "утверждено в выпуск" approval flag —
   this was a deliberate, already-litigated decision.
 - YouTube upload stays manual for now — download the finished render, no auto-upload yet.
-- Everything (reference search, episode assembly, animation) should run automatically with
-  minimal manual involvement — the user's role is limited to approvals/light chat-based
-  notes, not doing steps by hand.
 
-## Already scaffolded (as of this file's writing — verify current state, may be stale)
+## Already built (as of this file's writing — verify current state, may be stale)
 
-- `tv.html` — entry page, 7-tab structure (placeholders for most tabs so far)
-- `js/tv-state.js` — client state shape: `tvAnchors`, `tvNewsItems`, `tvGridBlocks`, etc.
-- `js/tv-app.js` — tab-switching logic
-- `db.js` — draft Postgres schema added (or pending — check the file): `tv_anchors`,
-  `tv_episodes`, `tv_news_items`, `tv_grid_blocks`, `tv_anniversary_events`
+- `tv.html` — entry page, 7-tab structure. Top-right: save-status pill + "connect folder"
+  button. Bottom-right: KIE credits indicator (personal balance = live KIE balance minus a
+  manually-entered "roздано пользователям" number, since dev's Postgres has no record of
+  main's real users — see `js/tv-app.js`'s `tvSyncOwedInput`/`tvRenderCreditsIndicator`).
+- `js/tv-state.js` — client state shape: `tvAnchors`, `tvBackdrops`, `tvNewsItems`,
+  `tvGridBlocks`, etc. `tvState` IS the source of truth (no server mirror).
+- `js/tv-persistence.js` — local disk/IndexedDB workspace persistence (see Architecture).
+- `js/tv-app.js` — tab-switching; full anchor Character Card flow (gallery → detail → quick
+  form → 6-slot reference builder → generated turnaround sheet); full backdrop flow (same,
+  plus a 5-slot independently-generated angle-shots screen, `object-card.js`/`locations.js`
+  pattern); "Собрать новости" on Новости.
+- `server.js` — `POST /api/tv/gather-news` (Gemini-drafted candidate news list, stateless);
+  anchor/backdrop Character/Object Card generation reuses the existing
+  `/api/upload-reference-image` + `/api/generate-image/start`/`/status` routes.
+- `db.js` — no `/TV`-specific tables; Postgres here is only the shared users/login/token
+  schema TAKE:ONE already had.
+- `scripts/analyze-show-format.js` — one-off Gemini video-understanding script for the
+  show-format-analysis task above.
 
-## New routes to build (none exist yet — check before assuming duplicates)
+## New routes to build (check before assuming duplicates)
+
+Only add a server route for something that genuinely needs the server (an external call,
+like `/api/tv/gather-news`) — everything else is client-side against the local workspace.
 
 ```
-GET/POST /api/tv/news              — aggregation + two-pane picker data
-POST     /api/tv/news/:id/assign   — assign a news item to an anchor
-GET/POST /api/tv/grid              — read/build the episode's Сетка timeline
-POST     /api/tv/episode/generate  — kick off automated episode assembly (cron target,
-                                      default OFF)
-GET      /api/tv/anniversary       — anniversary-event calendar
-POST     /api/tv/staff-chat        — natural-language edit commands for Сетка (function
-                                      calling → grid mutation)
+POST /api/tv/staff-chat   — natural-language edit commands for Сетка (function calling).
+                             Could plausibly stay 100% client-side (call Gemini directly
+                             the way gather-news does, apply the returned action to
+                             tvState.tvGridBlocks) — only make this a real server route if
+                             there's a concrete reason the client can't do it alone.
 ```
 
 ## Next planned step
 
-1. Run the show-format analysis (parallel: user's own viewing notes + the Gemini video
-   script above), reconcile into a format template.
-2. Build out the anchor Character Card flow in **Work**, reusing `characters.js` +
-   `object-card.js` as the direct template, with the rubric field added.
+1. Run `scripts/analyze-show-format.js` against the 3 episodes above once Костян has also
+   watched them; reconcile into the format template (see "Show format analysis").
+2. Add a proper rubric field to the anchor form (Work tab) — see the NOT YET IMPLEMENTED
+   note under "Tab structure" above.
+3. Wire the reconciled format template into Сетка's auto-population logic.
