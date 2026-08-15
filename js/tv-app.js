@@ -559,15 +559,21 @@ async function tvRefreshCredits(){
       el.title = (data && data.message) || 'Не удалось связаться с сервером — нажмите, чтобы повторить';
       return;
     }
-    const imagesRemaining = data.imagesRemaining;
+    // Admins: show the PERSONAL balance (KIE credits minus what's currently owed to
+    // non-admin users' token balances), same number TAKE:ONE's second bottom-right pill
+    // shows — not the raw KIE account total, since that includes tokens already promised
+    // to users. Falls back to the plain balance for non-admin accounts.
+    const hasPersonal = data.isAdmin && typeof data.personalBalance === 'number';
+    const shownCredits = hasPersonal ? data.personalBalance : data.credits;
+    const imagesRemaining = hasPersonal ? data.personalImagesRemaining : data.imagesRemaining;
     let cls = 'grey';
     if(imagesRemaining===0) cls = 'red';
     else if(imagesRemaining!==null && imagesRemaining!==undefined && imagesRemaining < 20) cls = 'yellow';
     else if(imagesRemaining!==null && imagesRemaining!==undefined) cls = 'green';
     dot.className = 'credits-dot ' + cls;
     const unit = data.isAdmin ? ' кр' : ' токенов';
-    value.textContent = data.credits + unit;
-    el.title = 'Баланс KIE.ai: ' + data.credits + unit + ' — нажмите, чтобы обновить';
+    value.textContent = shownCredits + unit;
+    el.title = (hasPersonal ? 'Личный баланс (KIE минус выданное пользователям): ' : 'Баланс KIE.ai: ') + shownCredits + unit + ' — нажмите, чтобы обновить';
   } catch(err){
     dot.className = 'credits-dot red';
     value.textContent = 'ошибка';
