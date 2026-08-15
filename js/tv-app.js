@@ -965,22 +965,63 @@ function renderTvNewsPickers(){
   rightEl.innerHTML = right.length ? right.map(row).join('') : `<div class="tv-empty-hint">Перетащите новости сюда, чтобы включить в выпуск.</div>`;
 }
 
-// ---- Сетка tab: rubric-grouped blocks ----
+// ---- Сетка tab: auto-populated from TV_FORMAT_TEMPLATE (see tv-state.js — draft, derived
+// from scripts/analyze-show-format.js's analysis of 3 real reference episodes) ----
+const TV_GRID_FIXED_LABELS = { intro:'Заставка', host_intro:'Выход ведущего', jingle:'Джингл', outro:'Аутро' };
+function tvAutoPopulateGrid(){
+  const included = tvState.tvNewsItems.filter(n=> n.included);
+  if(!included.length){
+    alert('Нет новостей, включённых в выпуск — сначала добавьте их на вкладке «Новости».');
+    return;
+  }
+  const t = TV_FORMAT_TEMPLATE;
+  const blocks = [];
+  let order = 0;
+  const push = (fields)=> blocks.push(Object.assign({ id: tvGridBlockSeq++, rubric:null, newsItemId:null, sortOrder: order++, voTrack:{}, cutaways:[] }, fields));
+
+  push({ blockType:'intro', estimatedDurationSec: t.introDurationSec });
+  push({ blockType:'host_intro', estimatedDurationSec: t.hostIntroDurationSec });
+
+  t.rubricOrder.forEach(rubricKey=>{
+    const items = included.filter(n=> n.rubric===rubricKey).sort((a,b)=> (a.sortOrder||0)-(b.sortOrder||0));
+    if(!items.length) return;
+    push({ blockType:'jingle', estimatedDurationSec: t.jingleDurationSec });
+    items.forEach(item=>{
+      push({ blockType:'story', rubric: rubricKey, newsItemId: item.id, estimatedDurationSec: t.storyDurationSec[rubricKey] || 60 });
+    });
+  });
+
+  push({ blockType:'jingle', estimatedDurationSec: t.jingleDurationSec });
+  push({ blockType:'outro', estimatedDurationSec: t.outroDurationSec });
+
+  tvState.tvGridBlocks = blocks;
+  tvSaveSoon();
+  renderTvGrid();
+}
 function renderTvGrid(){
   const el = document.getElementById('tvGridTrack');
   if(!el) return;
   if(!tvState.tvGridBlocks.length){
-    el.innerHTML = `<div class="tv-empty-hint">Сетка пуста — соберётся автоматически из утверждённых новостей.</div>`;
+    el.innerHTML = `<div class="tv-empty-hint">Сетка пуста — нажмите «Собрать сетку», чтобы собрать её автоматически из новостей, включённых в выпуск.</div>`;
     return;
   }
-  el.innerHTML = TV_RUBRICS.map(r=>{
-    const blocks = tvState.tvGridBlocks.filter(b=> b.rubric===r.key).sort((a,b)=> a.sortOrder-b.sortOrder);
-    if(!blocks.length) return '';
-    return `<div class="tv-grid-block-group">
-      <div class="tv-grid-block-label">${r.label}</div>
-      <div class="tv-grid-block-row">${blocks.map(b=> `<div class="tv-grid-block">${b.newsItemId ?? ''}</div>`).join('')}</div>
+  const blocks = [...tvState.tvGridBlocks].sort((a,b)=> a.sortOrder-b.sortOrder);
+  const totalSec = blocks.reduce((sum,b)=> sum + (b.estimatedDurationSec||0), 0);
+  const rows = blocks.map(b=>{
+    if(b.blockType==='story'){
+      const item = tvState.tvNewsItems.find(n=> n.id===b.newsItemId);
+      return `<div class="tv-grid-item">
+        <span class="tv-grid-item-rubric">${tvRubricLabel(b.rubric)}</span>
+        <span class="tv-grid-item-title">${item ? item.title : '— новость удалена —'}</span>
+        <span class="tv-grid-item-dur">~${b.estimatedDurationSec}с</span>
+      </div>`;
+    }
+    return `<div class="tv-grid-item fixed">
+      <span class="tv-grid-item-title">${TV_GRID_FIXED_LABELS[b.blockType] || b.blockType}</span>
+      <span class="tv-grid-item-dur">~${b.estimatedDurationSec}с</span>
     </div>`;
   }).join('');
+  el.innerHTML = `<div class="gen-hint" style="margin-bottom:10px;">Черновая оценка хронометража: ~${Math.round(totalSec/60)} мин (${totalSec} сек) — уточнится, когда появится реальная озвучка.</div><div class="tv-grid-flow">${rows}</div>`;
 }
 
 // ---- Собрать новости — Gemini drafts a candidate list for the matching week 25 years
@@ -1122,6 +1163,8 @@ function wireTvPageTabs(){
   if(folderBtn) folderBtn.onclick = tvHandleFolderButtonClick;
   const gatherNewsBtn = document.getElementById('tvGatherNewsBtn');
   if(gatherNewsBtn) gatherNewsBtn.onclick = tvGatherNews;
+  const autoPopulateGridBtn = document.getElementById('tvAutoPopulateGridBtn');
+  if(autoPopulateGridBtn) autoPopulateGridBtn.onclick = tvAutoPopulateGrid;
 }
 
 (async function(){

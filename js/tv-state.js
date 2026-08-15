@@ -57,6 +57,36 @@ const TV_ANGLE_KEYS = ['wide', 'front', 'reverse', 'left', 'right'];
 const TV_ANGLE_UI_LABELS = { wide:'Общий план', front:'Спереди', reverse:'Разворот назад', left:'Слева', right:'Справа' };
 const TV_ANGLE_PROMPT_LABELS = { wide:'a wide establishing shot', front:'a front-facing shot', reverse:'the reverse angle, looking back the other way', left:'the camera turned to the left', right:'the camera turned to the right' };
 
+// ---- Сетка format template ----
+// Draft, derived from scripts/analyze-show-format.js's Gemini pass over 3 real reference
+// episodes (scripts/show-format-draft.json — 28.06/04.07/11.07.2002). Костян's own viewing
+// notes are the source of truth wherever they'd disagree with this — treat it as a
+// starting point to correct, not a finished spec (see CLAUDE.md's "Show format analysis").
+// Common pattern across all 3 episodes: ~44s station-ID/sponsor/title intro -> short host
+// intro -> a "Hot Line" rapid-fire news roundup -> one or more single-topic rubric
+// deep-dives (FAQ/software, internet, mobile) -> a large "Игры" block, always last and
+// biggest (280-470s observed) -> a ~30s outro. The real show interleaves news roundups
+// between rubric segments; /TV groups each rubric into one contiguous block instead (per
+// CLAUDE.md's "Rubrics air as grouped blocks" — a deliberate simplification, not an
+// oversight). Exact per-episode runtimes were NOT stable across repeated Gemini analysis
+// runs of the same video (seen a >15min swing) — don't trust the raw seconds without a
+// human sanity check; the segment ORDER and relative proportions held up better.
+const TV_FORMAT_TEMPLATE = {
+  introDurationSec: 44,      // fixed station-ID/sponsor/title jingle, reused every week
+  hostIntroDurationSec: 60,  // anchor on-camera open
+  jingleDurationSec: 4,      // graphic-bumper transition between blocks
+  outroDurationSec: 32,      // anchor sign-off + close
+  // News airs first (grouped, not interleaved — see comment above), then the deep-dive
+  // rubrics, with games always last to match all 3 analyzed episodes.
+  rubricOrder: ['news', 'soft', 'internet', 'games'],
+  // Per-story estimate within a rubric block, seconds — used only to show an approximate
+  // timeline length before any real VO/cutaway material exists. 'news' matches CLAUDE.md's
+  // "full-screen cutaway stills/clips (5-15 sec each, VO continues underneath)" plus a
+  // short anchor open/close; the others are the observed deep-dive segment range (60-220s),
+  // 'games' skewed up since it's consistently the episode's biggest single block.
+  storyDurationSec: { news: 30, soft: 100, internet: 100, games: 160 },
+};
+
 const tvState = {
   activeTab: 'work',
 
@@ -75,8 +105,10 @@ const tvState = {
                     //    approvedForRelease, sortOrder }]
 
   // Сетка tab — the assembled timeline, grouped into rubric blocks (all of one rubric
-  // together before the next rubric starts).
-  tvGridBlocks: [], // [{ id, rubric, newsItemId, sortOrder, voTrack, cutaways:[] }]
+  // together before the next rubric starts). Auto-populated from TV_FORMAT_TEMPLATE by
+  // tvAutoPopulateGrid() in tv-app.js.
+  tvGridBlocks: [], // [{ id, blockType:'intro'|'host_intro'|'jingle'|'outro'|'story',
+                     //    rubric, newsItemId, sortOrder, estimatedDurationSec, voTrack, cutaways:[] }]
 
   // TASKS / Архив — direct analogs of the main app's taskQueue / archive.
   tvTaskQueue: [], // [{ id, kind, newsItemId, model, status, createdAt }]

@@ -213,9 +213,17 @@ Two parallel passes, then reconcile:
    same source material. Output is a DRAFT — Костян's own viewing notes are the source of
    truth where they disagree with the model's read, especially anything about craft/feel
    that a transcript can't capture.
-3. Once reconciled, write the final format template as a plain structured doc (JSON or
-   markdown table: segment type → typical duration → transition style) and wire it into
-   Сетка's auto-population logic as the literal algorithm it follows.
+3. **Draft template written and wired**: `TV_FORMAT_TEMPLATE` (`js/tv-state.js`) — fixed
+   intro/host-intro/jingle/outro durations, rubric order (news → soft → internet → games,
+   games always last), per-story duration guidelines. `tvAutoPopulateGrid()` (`js/tv-app.js`,
+   "Собрать сетку" button on Сетка) builds `tvState.tvGridBlocks` from it: included news
+   items grouped by rubric, with fixed bumper blocks between groups. This is explicitly a
+   DRAFT from the AI-only pass (Костян hasn't reconciled his own viewing notes against it
+   yet) — expect it to need correcting, especially exact durations (Gemini's own runtime
+   reads were unstable across repeated runs of the same video, see the comment above
+   `TV_FORMAT_TEMPLATE`). Durations shown in Сетка are estimates only — no real VO/cutaway
+   material exists yet to measure against (that's the Студия/Journalist work, still NOT
+   YET BUILT).
 
 ## Automation
 
@@ -268,9 +276,10 @@ POST /api/tv/staff-chat   — natural-language edit commands for Сетка (fun
 
 ## Next planned step
 
-1. Finish the show-format analysis: 2 of 3 reference episodes analyzed so far
-   (`scripts/show-format-draft.json`, 28.06 and 04.07.2002 — 11.07.2002 failed on a
-   transient Gemini 503, just needs a re-run), paused pending Костян's own viewing notes.
-   Reconcile into the final format template once both passes are done (see "Show format
-   analysis").
-2. Wire the reconciled format template into Сетка's auto-population logic.
+1. All 3 reference episodes analyzed (`scripts/show-format-draft.json`), draft template
+   written and wired into Сетка (see "Show format analysis" step 3). Костян still needs to
+   watch the same 3 episodes and correct the template where his notes disagree with the
+   AI-only draft — treat `TV_FORMAT_TEMPLATE` as provisional until that happens.
+2. News sourcing: replace `/api/tv/gather-news`'s recall-based draft with the real
+   free-API pipeline (Wikipedia/Wayback/Wikinews) described under "News sourcing" above.
+3. Journalist: generate the actual voiceover text per news item (not yet built at all).

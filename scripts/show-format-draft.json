@@ -2,119 +2,103 @@
   "episodes": [
     {
       "videoUrl": "https://www.youtube.com/watch?v=HP3Qs4sbrBU",
-      "totalRuntimeSec": 2508,
+      "totalRuntimeSec": 1508,
       "segments": [
         {
           "startSec": 0,
           "endSec": 44,
           "segmentType": "intro/jingle",
-          "notes": "Channel identification, sponsor intro (Microbit presentation), and animated 'World of Computer' title sequence.",
-          "transitionIn": "Hard cut from channel logo",
-          "transitionOut": "Hard cut to host in studio"
+          "notes": "Show opening credits, station ident ('Шестой канал'), sponsor message ('Микробит представляет'), and title graphic ('Мир компьютера').",
+          "transitionIn": "Hard cut from channel broadcast graphics",
+          "transitionOut": "Direct cut to studio set"
         },
         {
           "startSec": 44,
           "endSec": 136,
-          "segmentType": "intro",
-          "notes": "Main host Vladimir Bogdanov walks through computer store studio, delivers introductory monologue, introduces news anchor Tatyana Osekina.",
-          "transitionIn": "Hard cut from title sequence",
-          "transitionOut": "Jingle and graphic bumper 'Hot Line / Новости'"
+          "segmentType": "host intro",
+          "notes": "Main host Vladimir Bogdanov walks through store studio set, addresses audience, introduces episode theme and news section.",
+          "transitionIn": "Cut from title intro card",
+          "transitionOut": "Glitch sound effect with animated 'Hot Line Новости' bumper"
         },
         {
           "startSec": 136,
-          "endSec": 251,
+          "endSec": 171,
           "segmentType": "rapid-fire news roundup",
           "rubric": "Новости",
-          "transitionIn": "Hot Line graphic bumper and jingle",
-          "transitionOut": "Graphic bumper 'Hot Line' transitioning to 'FAQ'"
+          "transitionIn": "Animated 'Hot Line' graphic bumper with punchy audio effect",
+          "transitionOut": "Glitch sound effect with graphic transition to FAQ bumper"
         },
         {
-          "startSec": 251,
-          "endSec": 633,
+          "startSec": 171,
+          "endSec": 394,
           "segmentType": "single-topic deep-dive rubric segment",
-          "rubric": "Hardware / FAQ",
-          "transitionIn": "FAQ graphic bumper with jingle",
-          "transitionOut": "Graphic bumper 'Hot Line'"
+          "rubric": "other",
+          "transitionIn": "Animated 'FAQ' logo bumper with synth jingle",
+          "transitionOut": "Glitch transition into Hot Line bumper"
         },
         {
-          "startSec": 633,
-          "endSec": 722,
+          "startSec": 394,
+          "endSec": 442,
           "segmentType": "rapid-fire news roundup",
           "rubric": "Новости",
-          "transitionIn": "Hot Line graphic bumper",
-          "transitionOut": "Hard cut back to main studio host"
+          "transitionIn": "Animated 'Hot Line' title graphic",
+          "transitionOut": "Glitch transition back to studio anchor"
         },
         {
-          "startSec": 722,
-          "endSec": 1109,
+          "startSec": 442,
+          "endSec": 554,
           "segmentType": "single-topic deep-dive rubric segment",
-          "rubric": "Экономический обзор / Опрос",
-          "transitionIn": "Host speaks to camera in studio",
-          "transitionOut": "Title graphic 'Мир компьютера' transition jingle"
+          "rubric": "other",
+          "transitionIn": "Cut from news desk to host in studio",
+          "transitionOut": "Flash graphic 'Мир компьютера' bumper with electronic sound"
         },
         {
-          "startSec": 1109,
-          "endSec": 1251,
+          "startSec": 554,
+          "endSec": 665,
           "segmentType": "single-topic deep-dive rubric segment",
-          "rubric": "Конкурс",
-          "transitionIn": "Title graphic transition",
-          "transitionOut": "Hard cut to host"
+          "rubric": "other",
+          "transitionIn": "Flash graphic 'Мир компьютера' bumper followed by 'Экономический обзор' title screen",
+          "transitionOut": "Animated 'Мир компьютера' flash graphic bumper"
         },
         {
-          "startSec": 1251,
-          "endSec": 1314,
-          "segmentType": "transition/bumper",
-          "notes": "Host monologue teasing upcoming game section and introducing the Mobile World rubric.",
-          "transitionIn": "Hard cut",
-          "transitionOut": "Graphic bumper 'Мобильный мир' with jingle"
+          "startSec": 665,
+          "endSec": 769,
+          "segmentType": "single-topic deep-dive rubric segment",
+          "rubric": "other",
+          "transitionIn": "Animated flash graphic bumper",
+          "transitionOut": "Cut to host in studio set"
         },
         {
-          "startSec": 1314,
-          "endSec": 1445,
+          "startSec": 769,
+          "endSec": 885,
           "segmentType": "single-topic deep-dive rubric segment",
           "rubric": "Мобильный мир",
-          "transitionIn": "Graphic bumper 'Мобильный мир'",
-          "transitionOut": "Title graphic transition"
+          "transitionIn": "Title graphic 'Мобильный мир' bumper with techno audio sting",
+          "transitionOut": "Animated 'Мир компьютера' flash graphic bumper"
         },
         {
-          "startSec": 1445,
-          "endSec": 1608,
-          "segmentType": "single-topic deep-dive rubric segment",
-          "rubric": "Новости / Репортаж",
-          "transitionIn": "Title graphic transition to news anchor",
-          "transitionOut": "Graphic bumper 'Hot Line'"
-        },
-        {
-          "startSec": 1608,
-          "endSec": 1641,
+          "startSec": 885,
+          "endSec": 1001,
           "segmentType": "rapid-fire news roundup",
           "rubric": "Новости",
-          "transitionIn": "Graphic bumper 'Hot Line'",
-          "transitionOut": "Hard cut to main host"
+          "transitionIn": "Cut from graphic bumper to news desk",
+          "transitionOut": "Hot Line graphic bumper transition"
         },
         {
-          "startSec": 1641,
-          "endSec": 1720,
-          "segmentType": "transition/bumper",
-          "notes": "Main host humorous lead-in to games section.",
-          "transitionIn": "Hard cut from news",
-          "transitionOut": "Graphic bumper 'Игры' with countdown voiceover"
-        },
-        {
-          "startSec": 1720,
-          "endSec": 2434,
+          "startSec": 1001,
+          "endSec": 1474,
           "segmentType": "single-topic deep-dive rubric segment",
           "rubric": "Игры",
-          "transitionIn": "Graphic bumper 'Игры' with 5-4-3-2-1 countdown jingle",
-          "transitionOut": "Graphic transition logo 'Мир компьютера'"
+          "transitionIn": "Countdown visual with 'Игры / Start Time' graphic card and audio effect",
+          "transitionOut": "Animated 'Мир компьютера' graphic bumper"
         },
         {
-          "startSec": 2434,
-          "endSec": 2508,
+          "startSec": 1474,
+          "endSec": 1508,
           "segmentType": "outro",
-          "notes": "Main host Bogdanov concludes show, presents weekly contest question on screen with contact details.",
-          "transitionIn": "Graphic transition logo",
-          "transitionOut": "Fade to black / end of video"
+          "notes": "Host Vladimir Bogdanov delivers closing comedic remarks, presents weekly contest question graphic card, and displays contact email/address onscreen.",
+          "transitionIn": "Cut from graphic bumper to host in studio",
+          "transitionOut": "Hard cut to end of broadcast"
         }
       ]
     },
@@ -124,187 +108,260 @@
       "segments": [
         {
           "startSec": 0,
-          "endSec": 4,
-          "segmentType": "intro/jingle",
-          "notes": "Station ID / Channel logo ident ('Шестой канал').",
-          "transitionIn": "Hard cut from black",
-          "transitionOut": "Wipe/cut to sponsor animation"
-        },
-        {
-          "startSec": 4,
-          "endSec": 14,
-          "segmentType": "intro/jingle",
-          "notes": "Sponsor opening bumper ('Торговый дом МИКРОБИТ представляет программу'). Animated ant mascot.",
-          "transitionIn": "Cutaway",
-          "transitionOut": "Hard cut to title sequence"
-        },
-        {
-          "startSec": 14,
           "endSec": 44,
           "segmentType": "intro/jingle",
-          "notes": "Main title sequence and show opening jingle ('Мир компьютера'). 3D graphic animation with music.",
-          "transitionIn": "Title graphic animation",
-          "transitionOut": "Cross-fade / cut to studio"
+          "notes": "Includes channel logo ident ('Шестой канал'), sponsor animated intro ('Микробит представляет'), historical archival clip teaser about IBM 1971, and main show title sequence ('Мир компьютера').",
+          "transitionIn": "Fade in from black",
+          "transitionOut": "Hard cut to studio anchor"
         },
         {
           "startSec": 44,
-          "endSec": 100,
-          "segmentType": "transition/bumper",
-          "notes": "Main host opening monologue in studio. Explains temporary presenter change for the news block.",
-          "transitionIn": "Host speaks directly to camera",
-          "transitionOut": "Animated graphic wipe bumper ('Hot Line Новости')"
+          "endSec": 60,
+          "segmentType": "intro/host intro",
+          "notes": "Main anchor Vladimir stands in studio store set, introduces the show's news block presented by Dmitry Dovzhenko.",
+          "transitionIn": "Hard cut",
+          "transitionOut": "Animated graphic bumper with audio jingle ('Новости / Hot Line')"
         },
         {
-          "startSec": 100,
+          "startSec": 60,
           "endSec": 200,
           "segmentType": "rapid-fire news roundup",
           "rubric": "Новости",
-          "transitionIn": "News jingle and animated wipe banner",
-          "transitionOut": "Animated graphic wipe bumper ('Hot Line Новости')"
+          "transitionIn": "Graphic bumper with sound effect",
+          "transitionOut": "Audio jingle into title graphic bumper ('FAQ')"
         },
         {
           "startSec": 200,
-          "endSec": 320,
-          "segmentType": "rapid-fire news roundup",
-          "rubric": "Новости",
-          "transitionIn": "News jingle bumper",
-          "transitionOut": "Animated graphic bumper ('FAQ')"
+          "endSec": 206,
+          "segmentType": "transition/bumper",
+          "rubric": "FAQ",
+          "transitionIn": "Sound effect with animated graphic text ('FAQ')",
+          "transitionOut": "Hard cut to anchor in studio desk set"
         },
         {
-          "startSec": 320,
-          "endSec": 380,
+          "startSec": 206,
+          "endSec": 381,
           "segmentType": "single-topic deep-dive rubric segment",
           "rubric": "FAQ",
-          "transitionIn": "Graphic title card ('FAQ - Frequently Asked Questions') with techno jingle",
-          "transitionOut": "Cut back to news host in studio"
+          "transitionIn": "Hard cut from bumper",
+          "transitionOut": "Anchor speaks to camera, hard cut to news bumper"
         },
         {
-          "startSec": 380,
+          "startSec": 381,
           "endSec": 430,
           "segmentType": "rapid-fire news roundup",
           "rubric": "Новости",
-          "transitionIn": "News desk intro by news anchor",
-          "transitionOut": "Graphic wipe bumper"
+          "transitionIn": "Graphic bumper with sound effect",
+          "transitionOut": "Hard cut to host studio segment"
         },
         {
           "startSec": 430,
-          "endSec": 507,
+          "endSec": 510,
           "segmentType": "single-topic deep-dive rubric segment",
-          "rubric": "Новости",
-          "transitionIn": "Host intro on camera",
-          "transitionOut": "Cut back to main presenter in studio"
+          "rubric": "Другое (Опрос)",
+          "transitionIn": "Hard cut from anchor",
+          "transitionOut": "Graphic bumper with thunder sound effect"
         },
         {
-          "startSec": 507,
-          "endSec": 530,
-          "segmentType": "transition/bumper",
-          "notes": "Main presenter intro to street survey segment.",
-          "transitionIn": "Host speaks to camera",
-          "transitionOut": "Hard cut to vox-pop street interviews"
+          "startSec": 510,
+          "endSec": 613,
+          "segmentType": "single-topic deep-dive rubric segment",
+          "rubric": "Экономический обзор",
+          "transitionIn": "Title graphic bumper ('Экономический обзор')",
+          "transitionOut": "Graphic logo bumper ('Мир компьютера')"
         },
         {
-          "startSec": 530,
-          "endSec": 507,
+          "startSec": 613,
+          "endSec": 747,
           "segmentType": "single-topic deep-dive rubric segment",
           "rubric": "Интернет",
-          "transitionIn": "Graphic question overlay on screen ('Смотрите ли вы телепрограммы в интернете?')",
-          "transitionOut": "Animated title bumper ('Мир компьютера')"
+          "transitionIn": "Host intro on camera followed by title graphic bumper ('INTERNET')",
+          "transitionOut": "Graphic logo bumper ('Мир компьютера')"
         },
         {
-          "startSec": 507,
-          "endSec": 539,
-          "segmentType": "transition/bumper",
-          "notes": "Main presenter intro to Economic Review.",
-          "transitionIn": "Main title graphic bumper",
-          "transitionOut": "Graphic wipe bumper ('Экономический обзор')"
-        },
-        {
-          "startSec": 539,
-          "endSec": 610,
-          "segmentType": "single-topic deep-dive rubric segment",
-          "rubric": "Другое (Экономический обзор)",
-          "transitionIn": "3D animated title graphic with music",
-          "transitionOut": "Animated title bumper ('Мир компьютера')"
-        },
-        {
-          "startSec": 610,
-          "endSec": 629,
-          "segmentType": "transition/bumper",
-          "notes": "Main presenter intro to Internet software rubric.",
-          "transitionIn": "Main title graphic bumper",
-          "transitionOut": "Graphic title card ('INTERNET')"
-        },
-        {
-          "startSec": 629,
-          "endSec": 743,
-          "segmentType": "single-topic deep-dive rubric segment",
-          "rubric": "Софт",
-          "transitionIn": "Title graphic card ('INTERNET')",
-          "transitionOut": "Animated title bumper ('Мир компьютера')"
-        },
-        {
-          "startSec": 743,
-          "endSec": 780,
-          "segmentType": "transition/bumper",
-          "notes": "Main presenter intro to Mobile World rubric.",
-          "transitionIn": "Main title graphic bumper",
-          "transitionOut": "Title graphic card ('МОБИЛЬНЫЙ МИР')"
-        },
-        {
-          "startSec": 780,
-          "endSec": 874,
+          "startSec": 747,
+          "endSec": 877,
           "segmentType": "single-topic deep-dive rubric segment",
           "rubric": "Мобильный мир",
-          "transitionIn": "Title graphic card ('МОБИЛЬНЫЙ МИР')",
-          "transitionOut": "Animated title bumper ('Мир компьютера')"
+          "transitionIn": "Host intro in studio store set, transition into title graphic bumper ('МОБИЛЬНЫЙ МИР')",
+          "transitionOut": "Graphic logo bumper ('Мир компьютера')"
         },
         {
-          "startSec": 874,
-          "endSec": 974,
+          "startSec": 877,
+          "endSec": 976,
           "segmentType": "single-topic deep-dive rubric segment",
           "rubric": "Другое (Конкурс)",
-          "transitionIn": "Host intro on-camera presenting weekly competition results and interviewing winner on location",
-          "transitionOut": "Animated graphic wipe bumper ('Hot Line Новости')"
+          "transitionIn": "Host on-camera studio opening",
+          "transitionOut": "Graphic logo bumper into news jingle"
         },
         {
-          "startSec": 974,
+          "startSec": 976,
           "endSec": 1039,
           "segmentType": "rapid-fire news roundup",
-          "rubric": "Игры",
-          "transitionIn": "News jingle and animated wipe banner",
-          "transitionOut": "Cut to main studio host"
+          "rubric": "Новости",
+          "transitionIn": "Graphic bumper with sound effect ('Новости / Hot Line')",
+          "transitionOut": "Hard cut to host studio intro skit"
         },
         {
           "startSec": 1039,
-          "endSec": 1052,
-          "segmentType": "transition/bumper",
-          "notes": "Main presenter intro to Gaming rubric.",
-          "transitionIn": "Host speaks to camera in computer shop",
-          "transitionOut": "Title graphic animation card ('ИГРЫ')"
-        },
-        {
-          "startSec": 1052,
-          "endSec": 1420,
+          "endSec": 1424,
           "segmentType": "single-topic deep-dive rubric segment",
           "rubric": "Игры",
-          "transitionIn": "Countdown title graphic animation card with music",
-          "transitionOut": "Animated title bumper ('Мир компьютера')"
+          "transitionIn": "Host intro skit leading into title graphic bumper ('ИГРЫ')",
+          "transitionOut": "Graphic logo bumper ('Мир компьютера')"
         },
         {
-          "startSec": 1420,
+          "startSec": 1424,
           "endSec": 1456,
           "segmentType": "outro",
-          "notes": "Host closing remarks, poses the weekly contest question to viewers, and walks out of frame.",
-          "transitionIn": "Animated title bumper",
+          "notes": "Anchor Vladimir wraps up the episode, announces the new weekly viewer contest question via fullscreen graphic slide, signs off, and clip fades out.",
+          "transitionIn": "Hard cut from graphic bumper",
           "transitionOut": "Fade to black"
+        }
+      ]
+    },
+    {
+      "videoUrl": "https://www.youtube.com/watch?v=VI797LxEM6M",
+      "totalRuntimeSec": 1378,
+      "segments": [
+        {
+          "startSec": 0,
+          "endSec": 44,
+          "segmentType": "intro/jingle",
+          "notes": "Channel station ident followed by sponsor intro (Microbit) and animated show title sequence 'Мир компьютера'.",
+          "transitionIn": "Hard cut from channel intro",
+          "transitionOut": "Hard cut to studio host"
+        },
+        {
+          "startSec": 44,
+          "endSec": 108,
+          "segmentType": "intro/jingle",
+          "rubric": "other",
+          "transitionIn": "Hard cut",
+          "transitionOut": "Jingle and graphic bumper ('Новости / Hot Line')"
+        },
+        {
+          "startSec": 108,
+          "endSec": 245,
+          "segmentType": "rapid-fire news roundup",
+          "rubric": "Новости",
+          "transitionIn": "Hot Line graphic bumper and jingle",
+          "transitionOut": "FAQ graphic bumper with techno jingle"
+        },
+        {
+          "startSec": 245,
+          "endSec": 365,
+          "segmentType": "single-topic deep-dive rubric segment",
+          "rubric": "other",
+          "transitionIn": "FAQ graphic bumper with music",
+          "transitionOut": "Hot Line graphic bumper"
+        },
+        {
+          "startSec": 365,
+          "endSec": 423,
+          "segmentType": "rapid-fire news roundup",
+          "rubric": "Новости",
+          "transitionIn": "Hot Line graphic bumper",
+          "transitionOut": "Hard cut to main host in studio"
+        },
+        {
+          "startSec": 423,
+          "endSec": 492,
+          "segmentType": "single-topic deep-dive rubric segment",
+          "rubric": "other",
+          "transitionIn": "Host speaks to camera introducing street question",
+          "transitionOut": "Animated show title bumper 'Мир компьютера'"
+        },
+        {
+          "startSec": 492,
+          "endSec": 530,
+          "segmentType": "transition/bumper",
+          "rubric": "other",
+          "transitionIn": "Animated title bumper",
+          "transitionOut": "Title graphic 'Экономический обзор'"
+        },
+        {
+          "startSec": 530,
+          "endSec": 634,
+          "segmentType": "single-topic deep-dive rubric segment",
+          "rubric": "other",
+          "transitionIn": "Title graphic bumper 'Экономический обзор'",
+          "transitionOut": "Animated title bumper 'Мир компьютера'"
+        },
+        {
+          "startSec": 634,
+          "endSec": 683,
+          "segmentType": "transition/bumper",
+          "rubric": "other",
+          "transitionIn": "Animated title bumper",
+          "transitionOut": "Title graphic bumper 'Internet'"
+        },
+        {
+          "startSec": 683,
+          "endSec": 803,
+          "segmentType": "single-topic deep-dive rubric segment",
+          "rubric": "Интернет",
+          "transitionIn": "Title graphic bumper 'Internet'",
+          "transitionOut": "Animated title bumper 'Мир компьютера'"
+        },
+        {
+          "startSec": 803,
+          "endSec": 822,
+          "segmentType": "transition/bumper",
+          "rubric": "other",
+          "transitionIn": "Animated title bumper",
+          "transitionOut": "Title graphic bumper 'Мобильный мир'"
+        },
+        {
+          "startSec": 822,
+          "endSec": 928,
+          "segmentType": "single-topic deep-dive rubric segment",
+          "rubric": "Мобильный мир",
+          "transitionIn": "Title graphic bumper 'Мобильный мир'",
+          "transitionOut": "Animated title bumper 'Мир компьютера'"
+        },
+        {
+          "startSec": 928,
+          "endSec": 934,
+          "segmentType": "transition/bumper",
+          "rubric": "other",
+          "transitionIn": "Title bumper",
+          "transitionOut": "Title graphic bumper 'Мир компьютера'"
+        },
+        {
+          "startSec": 934,
+          "endSec": 1022,
+          "segmentType": "single-topic deep-dive rubric segment",
+          "rubric": "other",
+          "transitionIn": "Animated title bumper",
+          "transitionOut": "Hot Line graphic bumper"
+        },
+        {
+          "startSec": 1022,
+          "endSec": 1088,
+          "segmentType": "rapid-fire news roundup",
+          "rubric": "Игры",
+          "transitionIn": "Hot Line graphic bumper",
+          "transitionOut": "Hot Line graphic bumper"
+        },
+        {
+          "startSec": 1088,
+          "endSec": 1346,
+          "segmentType": "single-topic deep-dive rubric segment",
+          "rubric": "Игры",
+          "transitionIn": "Host speech leading into graphic bumper 'Игры'",
+          "transitionOut": "Animated title bumper 'Мир компьютера'"
+        },
+        {
+          "startSec": 1346,
+          "endSec": 1378,
+          "segmentType": "outro",
+          "rubric": "other",
+          "transitionIn": "Animated title bumper",
+          "transitionOut": "Hard cut / Fade to black"
         }
       ]
     }
   ],
-  "errors": [
-    {
-      "videoUrl": "https://www.youtube.com/watch?v=VI797LxEM6M",
-      "error": "Gemini request failed: {\"error\":{\"code\":503,\"message\":\"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\",\"status\":\"UNAVAILABLE\"}}"
-    }
-  ]
+  "errors": []
 }
