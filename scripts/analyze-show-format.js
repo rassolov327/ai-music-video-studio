@@ -26,11 +26,19 @@ const EPISODE_URLS = [
   'https://www.youtube.com/watch?v=VI797LxEM6M', // 11.07.2002
 ];
 
-const PROMPT = `You are analyzing archival footage of a Russian TV show ("Мир компьютера" /
+// One episode per request — a single request covering all three full episodes at once
+// (the original approach here) turned out to make Gemini return only one episode's worth
+// of segments, with an invented placeholder filename instead of the real URL, presumably
+// because producing a detailed segment-by-segment breakdown for ~75 minutes of combined
+// footage in one response is a lot to hold onto. Per-episode requests are slower (three
+// round-trips) but each one gets the model's full attention, and a failure on one episode
+// doesn't take down the other two.
+function buildPrompt(videoUrl) {
+  return `You are analyzing archival footage of a Russian TV show ("Мир компьютера" /
 "PROкомпьютер") to extract its structural format, for use as a template for an automated
-weekly re-creation of the show.
+weekly re-creation of the show. This is the video at ${videoUrl}.
 
-For EACH of the videos provided, produce a timestamped breakdown:
+Produce a timestamped breakdown of THIS video:
 - Every segment boundary (in seconds from the start) and what kind of segment it is:
   intro/jingle, rapid-fire news roundup ("Hot line"-style, several short items back to
   back), single-topic deep-dive rubric segment, transition/bumper, outro.
@@ -48,40 +56,58 @@ Be precise about timestamps — use the video's actual timeline, don't estimate 
 boundary is unclear, say so rather than guessing a specific second.
 
 Reply with ONLY the JSON described by the response schema, nothing else.`;
+}
 
 const responseSchema = {
   type: 'object',
   properties: {
-    episodes: {
+    totalRuntimeSec: { type: 'number' },
+    segments: {
       type: 'array',
       items: {
         type: 'object',
         properties: {
-          videoUrl: { type: 'string' },
-          totalRuntimeSec: { type: 'number' },
-          segments: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: {
-                startSec: { type: 'number' },
-                endSec: { type: 'number' },
-                segmentType: { type: 'string' },
-                rubric: { type: 'string' },
-                transitionIn: { type: 'string' },
-                transitionOut: { type: 'string' },
-                notes: { type: 'string' },
-              },
-              required: ['startSec', 'endSec', 'segmentType'],
-            },
-          },
+          startSec: { type: 'number' },
+          endSec: { type: 'number' },
+          segmentType: { type: 'string' },
+          rubric: { type: 'string' },
+          transitionIn: { type: 'string' },
+          transitionOut: { type: 'string' },
+          notes: { type: 'string' },
         },
-        required: ['videoUrl', 'segments'],
+        required: ['startSec', 'endSec', 'segmentType'],
       },
     },
   },
-  required: ['episodes'],
+  required: ['segments'],
 };
+
+async function analyzeOneEpisode(videoUrl) {
+  const res = await fetch(`${GEMINI_BASE}/models/${GEMINI_MODEL}:generateContent`, {
+    method: 'POST',
+    headers: { 'x-goog-api-key': GEMINI_API_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ role: 'user', parts: [{ text: buildPrompt(videoUrl) }, { fileData: { fileUri: videoUrl } }] }],
+      generationConfig: { responseMimeType: 'application/json', responseSchema },
+    }),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error('Gemini request failed: ' + JSON.stringify(data));
+  }
+  const candidate = data && data.candidates && data.candidates[0];
+  const text = candidate && candidate.content && candidate.content.parts && candidate.content.parts[0] && candidate.content.parts[0].text;
+  if (!text) {
+    throw new Error('Gemini returned no usable text (finishReason: ' + (candidate && candidate.finishReason) + '). Full response: ' + JSON.stringify(data));
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (err) {
+    throw new Error('Gemini output was not valid JSON. Raw text:\n' + text);
+  }
+  return { videoUrl, totalRuntimeSec: parsed.totalRuntimeSec, segments: parsed.segments || [] };
+}
 
 async function main() {
   if (!GEMINI_API_KEY) {
@@ -89,44 +115,26 @@ async function main() {
     process.exit(1);
   }
 
-  const parts = [
-    { text: PROMPT },
-    ...EPISODE_URLS.map((uri) => ({ fileData: { fileUri: uri } })),
-  ];
-
-  console.log('Sending ' + EPISODE_URLS.length + ' episode(s) to ' + GEMINI_MODEL + ' for analysis — this can take a few minutes for video understanding...');
-
-  const res = await fetch(`${GEMINI_BASE}/models/${GEMINI_MODEL}:generateContent`, {
-    method: 'POST',
-    headers: { 'x-goog-api-key': GEMINI_API_KEY, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ role: 'user', parts }],
-      generationConfig: { responseMimeType: 'application/json', responseSchema },
-    }),
-  });
-  const data = await res.json().catch(() => null);
-  if (!res.ok) {
-    console.error('Gemini request failed:', JSON.stringify(data, null, 2));
-    process.exit(1);
-  }
-  const text = data && data.candidates && data.candidates[0] && data.candidates[0].content
-    && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text;
-  if (!text) {
-    console.error('Gemini returned no usable text — it may have been blocked by a safety filter. Full response:', JSON.stringify(data, null, 2));
-    process.exit(1);
-  }
-
-  let parsed;
-  try {
-    parsed = JSON.parse(text);
-  } catch (err) {
-    console.error('Gemini output was not valid JSON. Raw text:\n', text);
-    process.exit(1);
+  const episodes = [];
+  const errors = [];
+  for (const url of EPISODE_URLS) {
+    console.log('Analyzing ' + url + ' — this can take a minute or two for video understanding...');
+    try {
+      const episode = await analyzeOneEpisode(url);
+      console.log('  -> ' + episode.segments.length + ' segments, ' + episode.totalRuntimeSec + 's total runtime');
+      episodes.push(episode);
+    } catch (err) {
+      console.error('  -> FAILED: ' + err.message);
+      errors.push({ videoUrl: url, error: err.message });
+    }
   }
 
   const outPath = new URL('./show-format-draft.json', import.meta.url);
-  await fs.writeFile(outPath, JSON.stringify(parsed, null, 2));
-  console.log('Draft written to scripts/show-format-draft.json — reconcile against Костян\'s own viewing notes before turning it into the final format template.');
+  await fs.writeFile(outPath, JSON.stringify({ episodes, errors }, null, 2));
+  console.log('\nDraft written to scripts/show-format-draft.json (' + episodes.length + '/' + EPISODE_URLS.length + ' episodes succeeded) — reconcile against Костян\'s own viewing notes before turning it into the final format template.');
+  if (errors.length) {
+    console.log('Re-run the script to retry — only failed episodes matter, but this version re-does all three each run (fine for a one-off analysis).');
+  }
 }
 
 main().catch((err) => {

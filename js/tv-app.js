@@ -131,7 +131,7 @@ function tvDeleteAnchorLocal(id){
 
 // ---- status (red = incomplete basics, yellow = basics done but no card yet, green = card built) ----
 function tvAnchorStatus(a){
-  if(!a.name || !a.photo || !a.role || !a.description) return 'red';
+  if(!a.name || !a.photo || !a.rubric || !a.description) return 'red';
   const hasSheet = !!(a.card && a.card.images && a.card.images.sheet && a.card.images.sheet.url);
   return hasSheet ? 'green' : 'yellow';
 }
@@ -149,7 +149,7 @@ function renderTvAnchors(){
       <div class="char-tile-photo">${a.photo ? `<img src="${a.photo}">` : '<i class="ti ti-user"></i>'}</div>
       <div class="char-tile-status status-${tvAnchorStatus(a)}"></div>
       <div class="char-tile-name">${a.name}</div>
-      ${a.role ? `<div class="char-tile-role">${a.role}</div>` : ''}
+      ${a.rubric ? `<div class="char-tile-role">${tvRubricLabel(a.rubric)}</div>` : ''}
     </div>`).join('');
   el.querySelectorAll('.char-tile').forEach(tile=>{
     tile.onclick = ()=>{
@@ -170,7 +170,7 @@ function tvOpenAnchorDetail(anchor){
       </div>
       <div class="char-card-body">
         <p class="char-card-name">${anchor.name}</p>
-        ${anchor.role ? `<span class="char-card-role">${anchor.role}</span>` : ''}
+        ${anchor.rubric ? `<span class="char-card-role">${tvRubricLabel(anchor.rubric)}</span>` : ''}
         ${anchor.description ? `<p class="char-card-desc">${anchor.description}</p>` : ''}
         ${anchor.voiceId ? `<div class="gen-hint" style="margin-top:-8px;margin-bottom:14px;">Голос: ${anchor.voiceId}</div>` : ''}
         <div class="char-card-section-title">Character Card</div>
@@ -205,9 +205,9 @@ function tvOpenAnchorForm(existing){
   body.innerHTML = `
     <div class="char-form">
       <h3>${existing ? 'Изменить ведущего' : 'Новый ведущий'}</h3>
-      <p class="sub">${existing ? 'Обновите данные ведущего.' : 'Имя, специализация, описание, голос, одно фото. После сохранения можно собрать полную Character Card.'}</p>
+      <p class="sub">${existing ? 'Обновите данные ведущего.' : 'Имя, рубрика, описание, голос, одно фото. После сохранения можно собрать полную Character Card.'}</p>
       <div class="cf-field"><label>Имя</label><input type="text" id="tvAnchorName" placeholder="например, Анна Соколова" value="${existing ? existing.name : ''}"></div>
-      <div class="cf-field"><label>Специализация</label><input type="text" id="tvAnchorRole" placeholder="например, ведёт рубрику Игры" value="${existing && existing.role ? existing.role : ''}"></div>
+      <div class="cf-field"><label>Рубрика</label><select id="tvAnchorRubric">${TV_RUBRICS.map(r=> `<option value="${r.key}"${existing && existing.rubric===r.key ? ' selected' : ''}>${r.label}</option>`).join('')}</select></div>
       <div class="cf-field"><label>Описание / характер</label><textarea id="tvAnchorDesc" placeholder="Внешность, манера, что важно помнить">${existing && existing.description ? existing.description : ''}</textarea></div>
       <div class="cf-field"><label>Голос (TTS id) <span style="color:var(--text-3);font-weight:400;">— пригодится во вкладке Студия</span></label><input type="text" id="tvAnchorVoice" placeholder="пока свободный текст" value="${existing && existing.voiceId ? existing.voiceId : ''}"></div>
       <div class="cf-field">
@@ -258,7 +258,7 @@ function tvOpenAnchorForm(existing){
     const isNewPhoto = photoDataUrl && photoDataUrl.indexOf('data:')===0;
     const payload = {
       name,
-      role: document.getElementById('tvAnchorRole').value.trim(),
+      rubric: document.getElementById('tvAnchorRubric').value,
       description: document.getElementById('tvAnchorDesc').value.trim(),
       voiceId: document.getElementById('tvAnchorVoice').value.trim(),
     };

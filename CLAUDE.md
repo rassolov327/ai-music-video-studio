@@ -76,11 +76,9 @@ hand (no auto-upload yet).
 
 1. **Work** — create anchors (Character Card pattern, built) and virtual studio backdrops/
    camera angles (Object Card + angle-shots pattern from `locations.js`, built). **Every
-   anchor should be tied to one rubric** at creation time (Новости / Игры / Софт /
-   Интернет) — mirrors the real show's structure of one dedicated host per rubric, not one
-   anchor reading everything. NOT YET IMPLEMENTED — the anchor form currently has a free-text
-   "специализация" field instead of a rubric picker; add a proper rubric select tied to
-   `TV_RUBRICS` (`js/tv-state.js`) next time Work is touched.
+   anchor is tied to one rubric** at creation time (`anchor.rubric`, a required `<select>`
+   over `TV_RUBRICS` in the anchor form) — mirrors the real show's structure of one
+   dedicated host per rubric, not one anchor reading everything.
 2. **Новости** — real-news aggregator for the matching week 25 years ago. UI: two-pane
    Total-Commander-style picker — left pane = system-proposed news items, right pane = items
    dragged in to include in the episode. Items are rubric-tagged. A calendar of known "big
@@ -270,8 +268,9 @@ POST /api/tv/staff-chat   — natural-language edit commands for Сетка (fun
 
 ## Next planned step
 
-1. Run `scripts/analyze-show-format.js` against the 3 episodes above once Костян has also
-   watched them; reconcile into the format template (see "Show format analysis").
-2. Add a proper rubric field to the anchor form (Work tab) — see the NOT YET IMPLEMENTED
-   note under "Tab structure" above.
-3. Wire the reconciled format template into Сетка's auto-population logic.
+1. Finish the show-format analysis: 2 of 3 reference episodes analyzed so far
+   (`scripts/show-format-draft.json`, 28.06 and 04.07.2002 — 11.07.2002 failed on a
+   transient Gemini 503, just needs a re-run), paused pending Костян's own viewing notes.
+   Reconcile into the final format template once both passes are done (see "Show format
+   analysis").
+2. Wire the reconciled format template into Сетка's auto-population logic.

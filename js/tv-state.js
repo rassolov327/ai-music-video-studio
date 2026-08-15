@@ -63,7 +63,7 @@ const tvState = {
   // Work tab — anchors (Character Card pattern) and studio backdrops (Object Card pattern).
   // Persisted locally (disk folder/IndexedDB, js/tv-persistence.js) — this array IS the
   // source of truth, restored from the workspace on load and saved after every change.
-  tvAnchors: [],    // [{ id, name, role, description, photo, voiceId, card:{inputSlots,prompt,images:{sheet:{url}}}, approved, _assetFiles }]
+  tvAnchors: [],    // [{ id, name, rubric, description, photo, voiceId, card:{inputSlots,prompt,images:{sheet:{url}}}, approved, _assetFiles }]
   tvBackdrops: [],  // [{ id, name, description, photo, card:{inputSlots,prompt,images:{sheet:{url}}}, angleShots:{wide,front,reverse,left,right:{photo}}, approved, _assetFiles }]
 
   // Новости tab — two-pane picker: proposed items (left) vs items dragged into the episode
