@@ -99,10 +99,13 @@ const tvState = {
   // Новости tab — two-pane picker: proposed items (left) vs items dragged into the episode
   // (right, `included:true`). `materialStatus` is 'ok' or 'мало материала' — when scarce,
   // the item waits for the user to upload material or explicitly request AI generation;
-  // it is never auto-generated or silently dropped.
-  tvNewsItems: [], // [{ id, rubric, title, summary, sourceDate, sourceUrl, media:[],
-                    //    materialStatus, isAnniversary, included, assignedAnchorId,
-                    //    approvedForRelease, sortOrder }]
+  // it is never auto-generated or silently dropped. Every item is REAL — sourced from
+  // Wayback Machine (sourcePrecision:'week') or Wikipedia (sourcePrecision:'year') via
+  // /api/tv/gather-news, never recalled/invented (see server.js's comment there).
+  tvNewsItems: [], // [{ id, rubric, title, summary, extract, sourceDate, sourceUrl,
+                    //    source:'wayback'|'wikipedia', sourcePrecision:'week'|'year',
+                    //    media:[{type,url,title}], materialStatus, isAnniversary, included,
+                    //    assignedAnchorId, approvedForRelease, sortOrder }]
 
   // Сетка tab — the assembled timeline, grouped into rubric blocks (all of one rubric
   // together before the next rubric starts). Auto-populated from TV_FORMAT_TEMPLATE by

@@ -527,12 +527,18 @@ app.post('/api/assist/analyze-script', async (req, res) => {
   }
 });
 
-// ---- /TV: "Собрать новости" — Gemini drafts a candidate list of real news from the
-// matching calendar week 25 years ago. No auth/DB needed (same posture as the other
-// Gemini text routes above) — /TV persists this client-side, this route is stateless.
-// The result is explicitly a DRAFT: the client tags every item 'мало материала' and
-// unincluded until Костян reviews the facts and attaches real material, per CLAUDE.md's
-// rule that scarce/unverified material is never silently treated as ready.
+// ---- /TV: "Собрать новости" — REAL, sourced IT/games/software/internet news from the
+// matching calendar week 25 years ago. No auth/DB needed — /TV persists this
+// client-side, this route is stateless. Two real sources, combined, no recall/invention:
+//  - Wayback Machine (week-precise): real archived snapshots of real tech-news sites from
+//    the exact target week, page text scraped and handed to Gemini with a strict
+//    "extract only what's literally present" instruction — this is CLAUDE.md's
+//    "Structuring" step, not a search/recall step.
+//  - Wikipedia (year-precise, supplementary): real category-listed articles + real page
+//    summaries for the target year, same structuring treatment.
+// Every returned item carries a real sourceUrl the user can click and verify. If both
+// passes come back empty, the response is an empty list — never a silent fallback to
+// recalled/invented facts, since replacing exactly that recall behavior is the point.
 function tvHistoricalWeekRange(refDate) {
   const now = refDate || new Date();
   const day = now.getUTCDay(); // 0=Sun..6=Sat
@@ -545,6 +551,178 @@ function tvHistoricalWeekRange(refDate) {
   const fmt = (d) => d.toISOString().slice(0, 10);
   return { start: fmt(histMonday), end: fmt(histSunday) };
 }
+
+function tvStripHtml(html) {
+  if (!html) return '';
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Shared "structure this real retrieved text, don't invent" Gemini call — used by both
+// passes below. `withSourceIndex` adds a required sourceIndex field so the caller (not
+// Gemini) maps each item back to its real URL/date — Gemini never gets to invent a source.
+async function tvCallGeminiStructuring(instruction, withSourceIndex) {
+  const itemProps = { rubric: { type: 'string' }, title: { type: 'string' }, summary: { type: 'string' } };
+  const required = ['rubric', 'title', 'summary'];
+  if (withSourceIndex) { itemProps.sourceIndex = { type: 'integer' }; required.push('sourceIndex'); }
+  const responseSchema = { type: 'object', properties: { items: { type: 'array', items: { type: 'object', properties: itemProps, required } } }, required: ['items'] };
+  const geminiRes = await fetch(`${GEMINI_BASE}/models/${GEMINI_MODEL}:generateContent`, {
+    method: 'POST',
+    headers: { 'x-goog-api-key': GEMINI_API_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ role: 'user', parts: [{ text: instruction }] }],
+      generationConfig: { responseMimeType: 'application/json', responseSchema },
+    }),
+  });
+  const data = await geminiRes.json().catch(() => null);
+  if (!geminiRes.ok) throw new Error((data && data.error && data.error.message) || ('Gemini rejected the request (HTTP ' + geminiRes.status + ').'));
+  const text = data && data.candidates && data.candidates[0] && data.candidates[0].content
+    && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text;
+  if (!text) throw new Error('Gemini returned an empty response — it may have been blocked by a safety filter.');
+  const parsed = JSON.parse(text);
+  return Array.isArray(parsed.items) ? parsed.items : [];
+}
+
+// Real, well-archived tech-news sites from the era (same outlets CLAUDE.md's Journalist
+// section already names for Russian period style) — fetched once each, Gemini classifies
+// rubric per story rather than us pre-assigning by site.
+const TV_WAYBACK_SITES = ['cnet.com', 'zdnet.com', 'wired.com', 'gamespot.com', 'ign.com', 'compulenta.ru', 'ixbt.com'];
+
+async function tvGatherWaybackNews(range) {
+  const from = range.start.replace(/-/g, '');
+  const to = range.end.replace(/-/g, '');
+  const pages = [];
+  for (const site of TV_WAYBACK_SITES) {
+    try {
+      const cdxUrl = `https://web.archive.org/cdx/search/cdx?url=${encodeURIComponent(site)}&from=${from}&to=${to}&output=json&filter=statuscode:200&collapse=timestamp:8&limit=2`;
+      const cdxRes = await fetch(cdxUrl);
+      if (!cdxRes.ok) { console.warn('[tv] wayback CDX failed for', site, cdxRes.status); continue; }
+      const cdxData = await cdxRes.json().catch(() => null);
+      if (!Array.isArray(cdxData) || cdxData.length < 2) continue; // header row only = no snapshots that week
+      for (const row of cdxData.slice(1)) {
+        const timestamp = row[1], original = row[2];
+        try {
+          // the "id_" suffix asks Wayback for the raw original page, without its own
+          // toolbar/link-rewriting injected — cleaner text to strip.
+          const pageRes = await fetch(`https://web.archive.org/web/${timestamp}id_/${original}`);
+          if (!pageRes.ok) continue;
+          const html = (await pageRes.text()).slice(0, 200000); // cap before stripping, some archived pages are huge
+          const text = tvStripHtml(html).slice(0, 4000);
+          if (text.length < 200) continue; // too little real content to be worth sending
+          pages.push({ site, timestamp, original, text });
+        } catch (err) { console.warn('[tv] wayback page fetch failed for', site, timestamp, err.message); }
+      }
+    } catch (err) { console.warn('[tv] wayback CDX request failed for', site, err.message); }
+  }
+  if (!pages.length) return [];
+
+  const sourceBlock = pages.map((p, i) => `[SOURCE ${i}: real archived page from ${p.site}, dated ${p.timestamp.slice(0, 4)}-${p.timestamp.slice(4, 6)}-${p.timestamp.slice(6, 8)}]\n${p.text}`).join('\n\n');
+  const instruction = [
+    'The following are real, literally-retrieved text snapshots of archived tech-news website pages from one specific historical week.',
+    'For EACH numbered source below, extract any IT/technology, video games, software, or internet NEWS STORIES that are LITERALLY PRESENT in that source\'s text — a short Russian title, a factual 1-3 sentence Russian summary based ONLY on the text given, and which sourceIndex it came from.',
+    'This is real scraped page content and may include navigation/ad/boilerplate text — ignore that. Do not add any fact, name, or number that is not literally present in the text.',
+    'rubric must be exactly one of: news, games, soft, internet.',
+    'If a source has no real news story content, skip it entirely rather than inventing one.',
+    'Respond with ONLY the JSON object, nothing else.',
+    '', sourceBlock,
+  ].join('\n');
+
+  const items = await tvCallGeminiStructuring(instruction, true);
+  return items.map((it) => {
+    const src = pages[it.sourceIndex];
+    if (!src) return null;
+    return {
+      rubric: it.rubric, title: it.title, summary: it.summary,
+      source: 'wayback', sourcePrecision: 'week',
+      sourceUrl: `https://web.archive.org/web/${src.timestamp}/${src.original}`,
+      sourceDate: `${src.timestamp.slice(0, 4)}-${src.timestamp.slice(4, 6)}-${src.timestamp.slice(6, 8)}`,
+      extract: src.text.slice(0, 500),
+      media: [],
+    };
+  }).filter(Boolean);
+}
+
+// Wikipedia category naming conventions that hold reliably across most years.
+const TV_WIKI_CATEGORY_PATTERNS = {
+  games: (year) => `Category:${year} video games`,
+  soft: (year) => `Category:${year} software`,
+  internet: (year) => `Category:Internet properties established in ${year}`,
+  news: (year) => `Category:${year} in computing`,
+};
+const TV_WIKI_UA = { 'User-Agent': 'TAKE-ONE-TV/1.0 (retro tech news research tool; contact via repo)' };
+
+async function tvFetchWikiCategoryMembers(category, limit) {
+  const url = `https://en.wikipedia.org/w/api.php?action=query&list=categorymembers&cmtitle=${encodeURIComponent(category)}&cmlimit=${limit}&format=json`;
+  const res = await fetch(url, { headers: TV_WIKI_UA });
+  if (!res.ok) return [];
+  const data = await res.json().catch(() => null);
+  const members = data && data.query && data.query.categorymembers;
+  return Array.isArray(members) ? members.filter((m) => m.ns === 0).map((m) => m.title) : [];
+}
+async function tvFetchWikiSummary(title) {
+  const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
+  const res = await fetch(url, { headers: TV_WIKI_UA });
+  if (!res.ok) return null;
+  const data = await res.json().catch(() => null);
+  if (!data || !data.extract) return null;
+  return {
+    title: data.title || title,
+    extract: data.extract,
+    pageUrl: (data.content_urls && data.content_urls.desktop && data.content_urls.desktop.page) || ('https://en.wikipedia.org/wiki/' + encodeURIComponent(title)),
+    thumbnail: data.thumbnail && data.thumbnail.source,
+  };
+}
+async function tvGatherWikipediaNews(range) {
+  const year = Number(range.start.slice(0, 4));
+  const summaries = [];
+  for (const rubric of Object.keys(TV_WIKI_CATEGORY_PATTERNS)) {
+    try {
+      const category = TV_WIKI_CATEGORY_PATTERNS[rubric](year);
+      const titles = await tvFetchWikiCategoryMembers(category, 8);
+      for (const title of titles.slice(0, 4)) {
+        try {
+          const summary = await tvFetchWikiSummary(title);
+          if (summary) summaries.push(Object.assign({ rubricHint: rubric }, summary));
+        } catch (err) { console.warn('[tv] wikipedia summary failed for', title, err.message); }
+      }
+    } catch (err) { console.warn('[tv] wikipedia category fetch failed for', rubric, err.message); }
+  }
+  if (!summaries.length) return [];
+
+  const sourceBlock = summaries.map((s, i) => `[SOURCE ${i}: rubric hint "${s.rubricHint}", real Wikipedia article "${s.title}"]\n${s.extract}`).join('\n\n');
+  const instruction = [
+    'The following are real, literally-retrieved Wikipedia article summaries about IT/technology, video games, software, or internet topics from one specific historical year.',
+    'For EACH numbered source below that describes a genuinely news-worthy event or release, produce one structured item: a short Russian title, a factual 1-3 sentence Russian summary based ONLY on the text given, and which sourceIndex it came from.',
+    'rubric must be exactly one of: news, games, soft, internet — use the rubric hint as a starting point but correct it if the actual content clearly belongs elsewhere.',
+    'Do not add any fact not present in the given text. Skip sources that are too vague to be real news-worthy items.',
+    'Respond with ONLY the JSON object, nothing else.',
+    '', sourceBlock,
+  ].join('\n');
+
+  const items = await tvCallGeminiStructuring(instruction, true);
+  return items.map((it) => {
+    const src = summaries[it.sourceIndex];
+    if (!src) return null;
+    return {
+      rubric: it.rubric, title: it.title, summary: it.summary,
+      source: 'wikipedia', sourcePrecision: 'year',
+      sourceUrl: src.pageUrl, sourceDate: null, extract: src.extract,
+      media: src.thumbnail ? [{ type: 'image', url: src.thumbnail, title: src.title }] : [],
+    };
+  }).filter(Boolean);
+}
+
 app.post('/api/tv/gather-news', async (req, res) => {
   if (!GEMINI_API_KEY) {
     return res.status(503).json({ error: 'not_configured', message: 'GEMINI_API_KEY is not set on the server yet.' });
@@ -552,69 +730,12 @@ app.post('/api/tv/gather-news', async (req, res) => {
   const { weekStart, weekEnd } = req.body || {};
   const range = (weekStart && weekEnd) ? { start: weekStart, end: weekEnd } : tvHistoricalWeekRange();
 
-  const instruction = [
-    'You are a researcher for a retro tech-news TV show. The show covers REAL, VERIFIABLE IT/games/software/internet news from one specific historical week — not a modern retrospective and not generic "on this day" trivia.',
-    'List real news stories that were reported during the week of ' + range.start + ' to ' + range.end + ' (inclusive), in the IT/technology, video games, software, or internet space.',
-    'Only include stories you are reasonably confident actually happened and were reported around that week — if you are not sure of the exact date, say so with a lower confidence value rather than inventing a specific date.',
-    'rubric must be exactly one of: news, games, soft, internet.',
-    'Keep each summary factual and neutral, 1-3 sentences, in Russian, with no invented quotes or invented specific numbers you are not confident about.',
-    'confidence must be exactly one of: high, medium, low.',
-    'Respond with ONLY the JSON object, nothing else.',
-  ].join('\n');
+  const [waybackItems, wikipediaItems] = await Promise.all([
+    tvGatherWaybackNews(range).catch((err) => { console.warn('[tv] wayback pass failed entirely:', err.message); return []; }),
+    tvGatherWikipediaNews(range).catch((err) => { console.warn('[tv] wikipedia pass failed entirely:', err.message); return []; }),
+  ]);
 
-  const responseSchema = {
-    type: 'object',
-    properties: {
-      items: {
-        type: 'array',
-        items: {
-          type: 'object',
-          properties: {
-            rubric: { type: 'string' },
-            title: { type: 'string' },
-            summary: { type: 'string' },
-            sourceDateGuess: { type: 'string' },
-            confidence: { type: 'string' },
-          },
-          required: ['rubric', 'title', 'summary'],
-        },
-      },
-    },
-    required: ['items'],
-  };
-
-  try {
-    const geminiRes = await fetch(`${GEMINI_BASE}/models/${GEMINI_MODEL}:generateContent`, {
-      method: 'POST',
-      headers: { 'x-goog-api-key': GEMINI_API_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: instruction }] }],
-        generationConfig: { responseMimeType: 'application/json', responseSchema },
-      }),
-    });
-    const data = await geminiRes.json().catch(() => null);
-    if (!geminiRes.ok) {
-      console.warn('[server] Gemini gather-news request failed:', JSON.stringify(data));
-      return res.status(502).json({ error: 'provider_error', message: (data && data.error && data.error.message) || ('Gemini rejected the request (HTTP ' + geminiRes.status + ').') });
-    }
-    const text = data && data.candidates && data.candidates[0] && data.candidates[0].content
-      && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text;
-    if (!text) {
-      console.warn('[server] Gemini returned no usable text for gather-news:', JSON.stringify(data));
-      return res.status(502).json({ error: 'provider_error', message: 'Gemini returned an empty response — it may have been blocked by a safety filter.' });
-    }
-    let parsed;
-    try { parsed = JSON.parse(text); }
-    catch (err) {
-      console.warn('[server] Gemini gather-news output was not valid JSON:', text.slice(0, 500));
-      return res.status(502).json({ error: 'provider_error', message: 'Gemini returned something that was not valid JSON.' });
-    }
-    const items = Array.isArray(parsed.items) ? parsed.items : [];
-    res.json({ items, weekStart: range.start, weekEnd: range.end });
-  } catch (err) {
-    console.error('[server] /api/tv/gather-news failed:', err);
-    res.status(500).json({ error: 'server_error', message: String(err && err.message || err) });
-  }
+  res.json({ items: [...waybackItems, ...wikipediaItems], weekStart: range.start, weekEnd: range.end });
 });
 
 app.get('/api/models', (req, res) => {

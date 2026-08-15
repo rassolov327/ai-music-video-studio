@@ -112,34 +112,50 @@ hand (no auto-upload yet).
 Every tab has ONE big "утверждено / в выпуск" button — multi-stage approval (one gate per
 tab), not per-item checkboxes scattered everywhere.
 
-## News sourcing — FREE ONLY, no paid search
+## News sourcing — FREE ONLY, no paid search — BUILT
 
 The user wants this to cost nothing beyond what's already paid for (KIE, and Gemini stays
-on its free tier). Do NOT use Gemini's paid Grounding-with-Google-Search tool. Current state:
-`POST /api/tv/gather-news` asks Gemini's own (free-tier, non-grounded) model to draft a
-candidate list from its training knowledge — explicitly a draft, tagged `source:'ai-draft'`
-and `мало материала` client-side until reviewed. The fuller pipeline described below (real
-retrieved facts, not recalled ones) is NOT YET BUILT — worth doing once the draft-based flow
-proves the rest of the pipeline (Студия → Сетка) end to end:
+on its free tier). Do NOT use Gemini's paid Grounding-with-Google-Search tool. Костян's hard
+requirement: **only real, sourced topics — no inventing** — and **strict week-level
+accuracy**, not just "some year." `POST /api/tv/gather-news` (`server.js`) now runs two
+real sources in parallel, merged, with no recall/invention fallback at all (if both come
+back empty for a week, the response is an empty list):
 
-1. **Raw facts** come from free, keyless public APIs, scoped to the target week (current
-   week's dates, year = currentYear − 25):
-   - Wikipedia API (category pages like "Category:2001 in video gaming", "on this day"
-     endpoints)
-   - Wayback Machine / archive.org CDX API (e.g.
-     `web.archive.org/cdx/search/cdx?url=cnet.com&from=20010810&to=20010816`) to find real
-     archived snapshots of period tech-news sites for that exact week
-   - Wikinews archive by date
-2. **Structuring** — feed the raw retrieved text into a normal (free) Gemini text call,
-   same JSON-schema-response pattern already used in `/api/tv/gather-news` and
-   `/api/assist/analyze-script` (`responseMimeType: application/json` + `responseSchema`),
-   to get structured `{headline, summary, rubric, sourceUrl, sourceDate}` candidates.
-   Gemini here would NOT be searching or recalling from its own training data — it would
-   only be organizing text that was actually retrieved, so it couldn't invent a fact or date
-   (unlike the current draft-only `/api/tv/gather-news`, which does rely on recall).
-3. **Images/photos for cutaways** — separate from the above, via direct free APIs:
-   Wikimedia Commons API, archive.org magazine scans, and optionally YouTube Data API for
-   video references. These photos are fine to source and use directly.
+1. **Wayback Machine (week-precise, primary)** — `tvGatherWaybackNews()`: for a curated
+   list of real period tech sites (`TV_WAYBACK_SITES` — cnet.com, zdnet.com, wired.com,
+   gamespot.com, ign.com, compulenta.ru, ixbt.com), queries the CDX API
+   (`web.archive.org/cdx/search/cdx?url=...&from=...&to=...`) for real snapshots within the
+   *exact* target week, fetches each snapshot's real page content, strips it to plain text
+   (`tvStripHtml`), then feeds it to Gemini with a strict "extract only what's literally
+   present in this text, do not add anything" instruction — this is the "Structuring" step:
+   organizing real retrieved text, never searching/recalling. Every item's `sourceUrl` is a
+   real, clickable archive.org snapshot link; `sourceDate` is the real archived date.
+2. **Wikipedia (year-precise, supplementary)** — `tvGatherWikipediaNews()`: known-stable
+   per-rubric category name patterns (`Category:{year} video games` etc.) → real category
+   member titles → real page summaries (REST `/api/rest_v1/page/summary/{title}`, includes
+   a real extract + thumbnail image) → same Gemini structuring treatment. Fills gaps Wayback
+   can't cover, but only ever at year precision (Wikipedia's category system has no week
+   granularity) — every such item is tagged `sourcePrecision:'year'` so the UI can show the
+   user which is which.
+3. **Images/photos for cutaways** — Wikipedia page summaries already include a thumbnail
+   where available (used directly). Wikimedia Commons API / archive.org magazine scans /
+   YouTube Data API remain a future upgrade for richer material, not wired in yet.
+
+**Caveat, unverified end-to-end**: `web.archive.org` was not reachable from the tooling
+used to build this (blocked in that sandbox) — the CDX query shape and page-fetch approach
+are correct per Wayback's public docs, but this genuinely needs a real run on Костян's
+machine/deployment to confirm the Wayback pass actually returns results. If it comes back
+consistently empty, the Wikipedia pass alone still keeps the feature usable (just at
+year-level precision) while that gets debugged.
+
+**Calendar**: Новости tab shows a small month-grid calendar (`tvRenderNewsCalendar()`,
+`#tvNewsCalendar`) with the target week's 7 days highlighted, computed client-side
+(`tvComputeTargetWeek()`, mirrors `server.js`'s `tvHistoricalWeekRange()`). Display-only,
+no navigation to other weeks (Костян's choice).
+
+**Expandable rows**: click a card in either pane (`renderTvNewsPickers()`) to expand it
+inline — full extract text, a real clickable source link, and any collected material
+thumbnails. Expand state is UI-only (`tvExpandedNewsIds`, a `Set`), not persisted.
 
 ## Journalist — voiceover text only, must read as human-written
 
@@ -253,9 +269,10 @@ Two parallel passes, then reconcile:
   form → 6-slot reference builder → generated turnaround sheet); full backdrop flow (same,
   plus a 5-slot independently-generated angle-shots screen, `object-card.js`/`locations.js`
   pattern); "Собрать новости" on Новости.
-- `server.js` — `POST /api/tv/gather-news` (Gemini-drafted candidate news list, stateless);
-  anchor/backdrop Character/Object Card generation reuses the existing
-  `/api/upload-reference-image` + `/api/generate-image/start`/`/status` routes.
+- `server.js` — `POST /api/tv/gather-news` (real sourcing: Wayback Machine + Wikipedia,
+  stateless — see "News sourcing"); anchor/backdrop Character/Object Card generation
+  reuses the existing `/api/upload-reference-image` + `/api/generate-image/start`/`/status`
+  routes.
 - `db.js` — no `/TV`-specific tables; Postgres here is only the shared users/login/token
   schema TAKE:ONE already had.
 - `scripts/analyze-show-format.js` — one-off Gemini video-understanding script for the
@@ -280,6 +297,10 @@ POST /api/tv/staff-chat   — natural-language edit commands for Сетка (fun
    written and wired into Сетка (see "Show format analysis" step 3). Костян still needs to
    watch the same 3 episodes and correct the template where his notes disagree with the
    AI-only draft — treat `TV_FORMAT_TEMPLATE` as provisional until that happens.
-2. News sourcing: replace `/api/tv/gather-news`'s recall-based draft with the real
-   free-API pipeline (Wikipedia/Wayback/Wikinews) described under "News sourcing" above.
-3. Journalist: generate the actual voiceover text per news item (not yet built at all).
+2. News sourcing is wired (Wayback + Wikipedia, see above) but **needs a real live test**
+   — specifically whether the Wayback pass returns anything at all (unverified — see the
+   caveat under "News sourcing"). Try "Собрать новости" for real and report what comes
+   back before trusting it.
+3. Journalist: generate the actual voiceover text per news item (not yet built at all) —
+   now has real sourced `extract` text per item to work from once this is confirmed
+   working.

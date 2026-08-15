@@ -5,7 +5,7 @@ function showTvPage(page){
   document.querySelectorAll('.tv-page-tab').forEach(t=> t.classList.toggle('active', t.dataset.tvPage===page));
   document.querySelectorAll('.tv-page').forEach(el=> el.classList.toggle('hidden', el.dataset.tvPage!==page));
   renderTvApprovalButton();
-  if(page==='news') renderTvNewsPickers();
+  if(page==='news'){ renderTvNewsCalendar(); renderTvNewsPickers(); }
   if(page==='grid') renderTvGrid();
 }
 
@@ -948,21 +948,93 @@ function tvRenderAngleTilesIfOpen(backdrop){
 }
 
 // ---- Новости tab: two-pane picker (left = proposed, right = included in episode) ----
+// ---- target week (client-side mirror of server.js's tvHistoricalWeekRange) — drives both
+// the calendar and the week sent to /api/tv/gather-news ----
+function tvComputeTargetWeek(refDate){
+  const now = refDate || new Date();
+  const day = now.getDay(); // 0=Sun..6=Sat, local time — this is a display calendar, not a server boundary
+  const monday = new Date(now);
+  monday.setHours(0,0,0,0);
+  monday.setDate(now.getDate() + ((day===0 ? -6 : 1) - day));
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  const histMonday = new Date(monday); histMonday.setFullYear(monday.getFullYear() - 25);
+  const histSunday = new Date(sunday); histSunday.setFullYear(sunday.getFullYear() - 25);
+  const fmt = (d)=> d.toISOString().slice(0,10);
+  return { start: fmt(histMonday), end: fmt(histSunday), startDate: histMonday, endDate: histSunday, year: histMonday.getFullYear() };
+}
+const TV_MONTH_NAMES = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
+// Static display only (no navigation, per Костян) — a month grid for the target week's
+// month, with that week's 7 days highlighted.
+function tvRenderNewsCalendar(){
+  const el = document.getElementById('tvNewsCalendar');
+  if(!el) return;
+  const week = tvComputeTargetWeek();
+  const monthStart = new Date(week.startDate.getFullYear(), week.startDate.getMonth(), 1);
+  const startWeekday = (monthStart.getDay() + 6) % 7; // Monday-start grid
+  const daysInMonth = new Date(monthStart.getFullYear(), monthStart.getMonth()+1, 0).getDate();
+  const inTargetWeek = (d)=> d >= week.startDate && d <= week.endDate;
+
+  let cells = '';
+  for(let i=0;i<startWeekday;i++) cells += `<div class="tv-cal-cell empty"></div>`;
+  for(let day=1; day<=daysInMonth; day++){
+    const d = new Date(monthStart.getFullYear(), monthStart.getMonth(), day);
+    cells += `<div class="tv-cal-cell${inTargetWeek(d) ? ' tv-cal-cell-active' : ''}">${day}</div>`;
+  }
+  const sameMonth = week.startDate.getMonth()===week.endDate.getMonth();
+  const label = sameMonth
+    ? `${week.startDate.getDate()}–${week.endDate.getDate()} ${TV_MONTH_NAMES[week.endDate.getMonth()]} ${week.year}`
+    : `${week.startDate.getDate()} ${TV_MONTH_NAMES[week.startDate.getMonth()]} – ${week.endDate.getDate()} ${TV_MONTH_NAMES[week.endDate.getMonth()]} ${week.year}`;
+  el.innerHTML = `
+    <div class="tv-cal-header">Неделя выпуска: ${label}</div>
+    <div class="tv-cal-weekdays">${['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(w=> `<div>${w}</div>`).join('')}</div>
+    <div class="tv-cal-grid">${cells}</div>
+  `;
+}
+
+// ---- two-pane picker, with click-to-expand (read full text + collected materials) ----
+const tvExpandedNewsIds = new Set(); // UI-only, not persisted — resets on reload
+function tvNewsPrecisionBadge(n){
+  if(n.sourcePrecision==='week') return '<span class="tv-news-flag tv-news-flag-week" title="Реальный архивный источник, датирован именно этой неделей">неделя</span>';
+  if(n.sourcePrecision==='year') return '<span class="tv-news-flag tv-news-flag-year" title="Источник — Wikipedia, точность в пределах года, не недели">год</span>';
+  return '';
+}
 function renderTvNewsPickers(){
   const leftEl = document.getElementById('tvNewsLeftPane');
   const rightEl = document.getElementById('tvNewsRightPane');
   if(!leftEl || !rightEl) return;
   const left = tvState.tvNewsItems.filter(n=> !n.included);
   const right = tvState.tvNewsItems.filter(n=> n.included);
-  const row = (n)=> `<div class="tv-news-row" data-id="${n.id}">
-    <span class="tv-news-rubric">${tvRubricLabel(n.rubric)}</span>
-    <span class="tv-news-title">${n.title}</span>
-    ${n.source==='ai-draft' ? '<span class="tv-news-flag tv-news-flag-ai" title="Черновик Gemini — проверьте факты перед использованием">ИИ-черновик</span>' : ''}
-    ${n.materialStatus==='мало материала' ? '<span class="tv-news-flag">мало материала</span>' : ''}
-    ${n.isAnniversary ? '<span class="tv-news-flag tv-news-flag-anniv">юбилей</span>' : ''}
-  </div>`;
+  const row = (n)=>{
+    const expanded = tvExpandedNewsIds.has(n.id);
+    return `<div class="tv-news-row-wrap">
+      <div class="tv-news-row" data-id="${n.id}">
+        <span class="tv-news-rubric">${tvRubricLabel(n.rubric)}</span>
+        <span class="tv-news-title">${n.title}</span>
+        ${tvNewsPrecisionBadge(n)}
+        ${n.materialStatus==='мало материала' ? '<span class="tv-news-flag">мало материала</span>' : ''}
+        ${n.isAnniversary ? '<span class="tv-news-flag tv-news-flag-anniv">юбилей</span>' : ''}
+      </div>
+      ${expanded ? `<div class="tv-news-expand">
+        ${n.summary ? `<p>${n.summary}</p>` : ''}
+        ${n.extract && n.extract!==n.summary ? `<p class="tv-news-expand-extract">${n.extract}</p>` : ''}
+        ${n.sourceUrl ? `<a href="${n.sourceUrl}" target="_blank" rel="noopener" class="tv-news-source-link">Источник${n.sourceDate ? ' · ' + n.sourceDate : ''}</a>` : ''}
+        ${n.media && n.media.length ? `<div class="tv-news-media">${n.media.map(m=> `<img src="${m.url}" title="${m.title||''}">`).join('')}</div>` : '<div class="gen-hint" style="margin:6px 0 0;">Материалов пока нет.</div>'}
+      </div>` : ''}
+    </div>`;
+  };
   leftEl.innerHTML = left.length ? left.map(row).join('') : `<div class="tv-empty-hint">Нет предложенных новостей.</div>`;
   rightEl.innerHTML = right.length ? right.map(row).join('') : `<div class="tv-empty-hint">Перетащите новости сюда, чтобы включить в выпуск.</div>`;
+  [leftEl, rightEl].forEach(pane=>{
+    pane.querySelectorAll('.tv-news-row').forEach(rowEl=>{
+      rowEl.onclick = (e)=>{
+        if(e.target.closest('a')) return;
+        const id = Number(rowEl.dataset.id);
+        if(tvExpandedNewsIds.has(id)) tvExpandedNewsIds.delete(id); else tvExpandedNewsIds.add(id);
+        renderTvNewsPickers();
+      };
+    });
+  });
 }
 
 // ---- Сетка tab: auto-populated from TV_FORMAT_TEMPLATE (see tv-state.js — draft, derived
@@ -1024,17 +1096,22 @@ function renderTvGrid(){
   el.innerHTML = `<div class="gen-hint" style="margin-bottom:10px;">Черновая оценка хронометража: ~${Math.round(totalSec/60)} мин (${totalSec} сек) — уточнится, когда появится реальная озвучка.</div><div class="tv-grid-flow">${rows}</div>`;
 }
 
-// ---- Собрать новости — Gemini drafts a candidate list for the matching week 25 years
-// ago. Never treated as ready-to-air: every item lands with source:'ai-draft',
-// included:false, materialStatus:'мало материала' until Костян reviews it and attaches
-// real material, same rule CLAUDE.md sets for scarce material in general. ----
+// ---- Собрать новости — real, sourced items only (Wayback Machine + Wikipedia, see
+// server.js's /api/tv/gather-news) for the exact target week (tvComputeTargetWeek,
+// matches the calendar shown above it). Still always lands unincluded and 'мало
+// материала' — a real, verifiable STORY isn't the same as having real photo/video
+// material for it yet; that's still a separate step, per CLAUDE.md's rule. ----
 async function tvGatherNews(){
   const btn = document.getElementById('tvGatherNewsBtn');
   const hint = document.getElementById('tvGatherNewsHint');
   if(btn){ btn.disabled = true; btn.textContent = 'Собираю…'; }
-  if(hint) hint.textContent = '';
+  if(hint) hint.textContent = 'Ищу реальные источники — это может занять минуту-другую…';
   try{
-    const res = await fetch('/api/tv/gather-news', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+    const week = tvComputeTargetWeek();
+    const res = await fetch('/api/tv/gather-news', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ weekStart: week.start, weekEnd: week.end }),
+    });
     const data = await res.json().catch(()=> null);
     if(!res.ok || !data || !Array.isArray(data.items)) throw new Error((data && data.message) || 'Не удалось собрать новости.');
     data.items.forEach(item=>{
@@ -1043,21 +1120,25 @@ async function tvGatherNews(){
         rubric: item.rubric,
         title: item.title,
         summary: item.summary,
-        sourceDate: item.sourceDateGuess || null,
-        sourceUrl: null,
-        media: [],
+        extract: item.extract || '',
+        sourceDate: item.sourceDate || null,
+        sourceUrl: item.sourceUrl || null,
+        source: item.source, // 'wayback' | 'wikipedia'
+        sourcePrecision: item.sourcePrecision, // 'week' | 'year'
+        media: Array.isArray(item.media) ? item.media : [],
         materialStatus: 'мало материала',
         isAnniversary: false,
         included: false,
         assignedAnchorId: null,
         approvedForRelease: false,
         sortOrder: 0,
-        source: 'ai-draft',
       });
     });
     renderTvNewsPickers();
     tvSaveSoon();
-    if(hint) hint.textContent = 'Добавлено: ' + data.items.length + ' (черновик, проверьте факты)';
+    hint.textContent = data.items.length
+      ? 'Добавлено: ' + data.items.length + ' (реальные источники — проверьте ссылки)'
+      : 'За эту неделю ничего не нашлось в реальных источниках. Попробуйте ещё раз позже, или добавьте новость вручную.';
   } catch(err){
     if(hint){ hint.textContent = err.message; hint.style.color = 'var(--danger)'; }
   } finally {
