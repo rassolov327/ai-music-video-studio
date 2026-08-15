@@ -259,91 +259,6 @@ app.get('/api/me', requireAuth, (req, res) => {
   res.json({ id: req.user.id, name: req.user.name, login: req.user.login, tokens: req.user.tokens, isAdmin: req.user.is_admin });
 });
 
-// ---- /TV: ведущие (anchors) — Character Card pattern, persisted server-side (tv_anchors) ----
-// Reads are public (same posture as /api/models) since nothing here is sensitive; writes
-// require auth like every other route that spends tokens or changes state.
-function tvAnchorRowToJson(row) {
-  return {
-    id: row.id,
-    name: row.name,
-    role: row.role || '',
-    description: row.description || '',
-    photo: row.photo || null,
-    voiceId: row.voice_id || '',
-    card: row.character_card || {},
-    approved: !!row.approved,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-app.get('/api/tv/anchors', async (req, res) => {
-  if (!pool) return res.status(503).json({ error: 'not_configured', message: 'Database not available.' });
-  try {
-    const result = await pool.query('SELECT * FROM tv_anchors ORDER BY id ASC');
-    res.json({ anchors: result.rows.map(tvAnchorRowToJson) });
-  } catch (err) {
-    console.error('[server] GET /api/tv/anchors failed:', err);
-    res.status(500).json({ error: 'server_error', message: 'Could not load anchors.' });
-  }
-});
-app.post('/api/tv/anchors', requireAuth, async (req, res) => {
-  if (!pool) return res.status(503).json({ error: 'not_configured', message: 'Database not available.' });
-  const { name, role, description, photo, voiceId } = req.body || {};
-  if (!name || typeof name !== 'string' || !name.trim()) {
-    return res.status(400).json({ error: 'bad_request', message: 'name is required.' });
-  }
-  try {
-    const result = await pool.query(
-      `INSERT INTO tv_anchors (name, role, description, photo, voice_id)
-       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [name.trim(), role || null, description || null, photo || null, voiceId || null]
-    );
-    res.json({ anchor: tvAnchorRowToJson(result.rows[0]) });
-  } catch (err) {
-    console.error('[server] POST /api/tv/anchors failed:', err);
-    res.status(500).json({ error: 'server_error', message: 'Could not create the anchor.' });
-  }
-});
-app.put('/api/tv/anchors/:id', requireAuth, async (req, res) => {
-  if (!pool) return res.status(503).json({ error: 'not_configured', message: 'Database not available.' });
-  const { name, role, description, photo, voiceId, card, approved } = req.body || {};
-  try {
-    const existing = await pool.query('SELECT * FROM tv_anchors WHERE id = $1', [req.params.id]);
-    if (!existing.rows.length) return res.status(404).json({ error: 'not_found', message: 'Anchor not found.' });
-    const current = existing.rows[0];
-    const result = await pool.query(
-      `UPDATE tv_anchors SET
-         name = $1, role = $2, description = $3, photo = $4, voice_id = $5,
-         character_card = $6, approved = $7, updated_at = now()
-       WHERE id = $8 RETURNING *`,
-      [
-        name !== undefined ? String(name).trim() : current.name,
-        role !== undefined ? role : current.role,
-        description !== undefined ? description : current.description,
-        photo !== undefined ? photo : current.photo,
-        voiceId !== undefined ? voiceId : current.voice_id,
-        card !== undefined ? JSON.stringify(card) : current.character_card,
-        approved !== undefined ? !!approved : current.approved,
-        req.params.id,
-      ]
-    );
-    res.json({ anchor: tvAnchorRowToJson(result.rows[0]) });
-  } catch (err) {
-    console.error('[server] PUT /api/tv/anchors/:id failed:', err);
-    res.status(500).json({ error: 'server_error', message: 'Could not update the anchor.' });
-  }
-});
-app.delete('/api/tv/anchors/:id', requireAuth, async (req, res) => {
-  if (!pool) return res.status(503).json({ error: 'not_configured', message: 'Database not available.' });
-  try {
-    await pool.query('DELETE FROM tv_anchors WHERE id = $1', [req.params.id]);
-    res.json({ ok: true });
-  } catch (err) {
-    console.error('[server] DELETE /api/tv/anchors/:id failed:', err);
-    res.status(500).json({ error: 'server_error', message: 'Could not delete the anchor.' });
-  }
-});
-
 // Same CSP shape the project already relied on (Caddyfile), with blob: explicitly present
 // in img-src and media-src — omitting it silently breaks restored photos/audio with no
 // console error, which cost a lot of debugging time earlier in this project.
@@ -608,6 +523,96 @@ app.post('/api/assist/analyze-script', async (req, res) => {
     res.json({ proposal: parsed });
   } catch (err) {
     console.error('[server] /api/assist/analyze-script failed:', err);
+    res.status(500).json({ error: 'server_error', message: String(err && err.message || err) });
+  }
+});
+
+// ---- /TV: "Собрать новости" — Gemini drafts a candidate list of real news from the
+// matching calendar week 25 years ago. No auth/DB needed (same posture as the other
+// Gemini text routes above) — /TV persists this client-side, this route is stateless.
+// The result is explicitly a DRAFT: the client tags every item 'мало материала' and
+// unincluded until Костян reviews the facts and attaches real material, per CLAUDE.md's
+// rule that scarce/unverified material is never silently treated as ready.
+function tvHistoricalWeekRange(refDate) {
+  const now = refDate || new Date();
+  const day = now.getUTCDay(); // 0=Sun..6=Sat
+  const monday = new Date(now);
+  monday.setUTCDate(now.getUTCDate() + ((day === 0 ? -6 : 1) - day));
+  const sunday = new Date(monday);
+  sunday.setUTCDate(monday.getUTCDate() + 6);
+  const histMonday = new Date(monday); histMonday.setUTCFullYear(monday.getUTCFullYear() - 25);
+  const histSunday = new Date(sunday); histSunday.setUTCFullYear(sunday.getUTCFullYear() - 25);
+  const fmt = (d) => d.toISOString().slice(0, 10);
+  return { start: fmt(histMonday), end: fmt(histSunday) };
+}
+app.post('/api/tv/gather-news', async (req, res) => {
+  if (!GEMINI_API_KEY) {
+    return res.status(503).json({ error: 'not_configured', message: 'GEMINI_API_KEY is not set on the server yet.' });
+  }
+  const { weekStart, weekEnd } = req.body || {};
+  const range = (weekStart && weekEnd) ? { start: weekStart, end: weekEnd } : tvHistoricalWeekRange();
+
+  const instruction = [
+    'You are a researcher for a retro tech-news TV show. The show covers REAL, VERIFIABLE IT/games/software/internet news from one specific historical week — not a modern retrospective and not generic "on this day" trivia.',
+    'List real news stories that were reported during the week of ' + range.start + ' to ' + range.end + ' (inclusive), in the IT/technology, video games, software, or internet space.',
+    'Only include stories you are reasonably confident actually happened and were reported around that week — if you are not sure of the exact date, say so with a lower confidence value rather than inventing a specific date.',
+    'rubric must be exactly one of: news, games, soft, internet.',
+    'Keep each summary factual and neutral, 1-3 sentences, in Russian, with no invented quotes or invented specific numbers you are not confident about.',
+    'confidence must be exactly one of: high, medium, low.',
+    'Respond with ONLY the JSON object, nothing else.',
+  ].join('\n');
+
+  const responseSchema = {
+    type: 'object',
+    properties: {
+      items: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            rubric: { type: 'string' },
+            title: { type: 'string' },
+            summary: { type: 'string' },
+            sourceDateGuess: { type: 'string' },
+            confidence: { type: 'string' },
+          },
+          required: ['rubric', 'title', 'summary'],
+        },
+      },
+    },
+    required: ['items'],
+  };
+
+  try {
+    const geminiRes = await fetch(`${GEMINI_BASE}/models/${GEMINI_MODEL}:generateContent`, {
+      method: 'POST',
+      headers: { 'x-goog-api-key': GEMINI_API_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: instruction }] }],
+        generationConfig: { responseMimeType: 'application/json', responseSchema },
+      }),
+    });
+    const data = await geminiRes.json().catch(() => null);
+    if (!geminiRes.ok) {
+      console.warn('[server] Gemini gather-news request failed:', JSON.stringify(data));
+      return res.status(502).json({ error: 'provider_error', message: (data && data.error && data.error.message) || ('Gemini rejected the request (HTTP ' + geminiRes.status + ').') });
+    }
+    const text = data && data.candidates && data.candidates[0] && data.candidates[0].content
+      && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text;
+    if (!text) {
+      console.warn('[server] Gemini returned no usable text for gather-news:', JSON.stringify(data));
+      return res.status(502).json({ error: 'provider_error', message: 'Gemini returned an empty response — it may have been blocked by a safety filter.' });
+    }
+    let parsed;
+    try { parsed = JSON.parse(text); }
+    catch (err) {
+      console.warn('[server] Gemini gather-news output was not valid JSON:', text.slice(0, 500));
+      return res.status(502).json({ error: 'provider_error', message: 'Gemini returned something that was not valid JSON.' });
+    }
+    const items = Array.isArray(parsed.items) ? parsed.items : [];
+    res.json({ items, weekStart: range.start, weekEnd: range.end });
+  } catch (err) {
+    console.error('[server] /api/tv/gather-news failed:', err);
     res.status(500).json({ error: 'server_error', message: String(err && err.message || err) });
   }
 });

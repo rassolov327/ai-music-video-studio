@@ -107,24 +107,26 @@ function tvBuildCardSheetPrompt(anchor, basePrompt, extra){
   ].filter(Boolean).join(', ');
 }
 
-// ---- server persistence ----
-async function tvSaveAnchor(payload, id){
-  const res = await fetch(id ? '/api/tv/anchors/' + id : '/api/tv/anchors', {
-    method: id ? 'PUT' : 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  const data = await res.json().catch(()=> null);
-  if(res.status===401) throw new Error('Нужно войти в аккаунт — откройте / и авторизуйтесь, затем вернитесь на /tv.');
-  if(!res.ok || !data || !data.anchor) throw new Error((data && data.message) || 'Не удалось сохранить ведущего.');
-  return data.anchor;
+// ---- local persistence (js/tv-persistence.js) ----
+// Anchors live in tvState only — saving means writing the workspace (disk folder or
+// IndexedDB), not talking to a server. Binary fields (photo, generated card sheet) are
+// captured as separate blob assets at the moment they're picked/generated (see
+// tvOpenAnchorForm's save handler and tvRunCreateCard) — tvSaveAnchorLocal() just merges
+// the plain fields and triggers the workspace save.
+function tvSaveAnchorLocal(payload, existing){
+  if(existing){
+    Object.assign(existing, payload);
+    tvSaveSoon();
+    return existing;
+  }
+  const anchor = Object.assign({ id: tvAnchorSeq++, card: null, approved: false, _assetFiles: {} }, payload);
+  tvState.tvAnchors.push(anchor);
+  tvSaveSoon();
+  return anchor;
 }
-async function tvDeleteAnchorOnServer(id){
-  await fetch('/api/tv/anchors/' + id, { method: 'DELETE' });
-}
-async function tvLoadAnchors(){
-  const data = await tvFetchJson('/api/tv/anchors');
-  if(data && Array.isArray(data.anchors)) tvState.tvAnchors = data.anchors;
+function tvDeleteAnchorLocal(id){
+  tvState.tvAnchors = tvState.tvAnchors.filter(a=> a.id!==id);
+  tvSaveSoon();
 }
 
 // ---- status (red = incomplete basics, yellow = basics done but no card yet, green = card built) ----
@@ -188,10 +190,9 @@ function tvOpenAnchorDetail(anchor){
   document.getElementById('tvAnchorBack').onclick = tvCloseModal;
   document.getElementById('tvAnchorEdit').onclick = ()=> tvOpenAnchorForm(anchor);
   document.getElementById('tvAnchorBuildBtn').onclick = ()=> tvOpenAnchorCardBuilder(anchor);
-  document.getElementById('tvAnchorDelete').onclick = async ()=>{
+  document.getElementById('tvAnchorDelete').onclick = ()=>{
     if(!confirm('Удалить ведущего «' + anchor.name + '»?')) return;
-    await tvDeleteAnchorOnServer(anchor.id);
-    tvState.tvAnchors = tvState.tvAnchors.filter(a=> a.id!==anchor.id);
+    tvDeleteAnchorLocal(anchor.id);
     renderTvAnchors();
     tvCloseModal();
   };
@@ -251,28 +252,28 @@ function tvOpenAnchorForm(existing){
     const name = nameInput.value.trim();
     if(!name) return;
     saveBtn.disabled = true; saveBtn.textContent = 'Сохранение…';
+    // A freshly picked file comes through as a data: URL (from loadImageAsDataURL); an
+    // unchanged/restored photo is already a blob: URL from a persisted asset — only the
+    // former needs (re-)persisting.
+    const isNewPhoto = photoDataUrl && photoDataUrl.indexOf('data:')===0;
     const payload = {
       name,
       role: document.getElementById('tvAnchorRole').value.trim(),
       description: document.getElementById('tvAnchorDesc').value.trim(),
       voiceId: document.getElementById('tvAnchorVoice').value.trim(),
-      photo: photoDataUrl,
     };
-    try{
-      const saved = await tvSaveAnchor(payload, existing ? existing.id : null);
-      if(existing){
-        Object.assign(existing, saved);
-        renderTvAnchors();
-        tvOpenAnchorDetail(existing);
-      } else {
-        tvState.tvAnchors.push(saved);
-        renderTvAnchors();
-        tvOpenAnchorDetail(saved);
-      }
-    } catch(err){
-      alert('Не удалось сохранить: ' + err.message);
-      saveBtn.disabled = false; saveBtn.textContent = existing ? 'Сохранить' : 'Добавить';
+    if(!isNewPhoto) payload.photo = photoDataUrl;
+    const anchor = tvSaveAnchorLocal(payload, existing || null);
+    if(isNewPhoto){
+      const result = await tvPersistLocalImageAsset('anchor:' + anchor.id + ':photo', photoDataUrl);
+      anchor.photo = result ? result.url : photoDataUrl;
+      anchor._assetFiles = anchor._assetFiles || {};
+      anchor._assetFiles.photo = !!result;
+      anchor._assetFiles.photoFile = result ? result.fileName : undefined;
+      tvSaveSoon();
     }
+    renderTvAnchors();
+    tvOpenAnchorDetail(anchor);
   };
   tvOpenModal();
 }
@@ -417,11 +418,16 @@ async function tvRunCreateCard(anchor){
     if(res.status===401) throw new Error('Нужно войти в аккаунт — откройте / и авторизуйтесь, затем вернитесь на /tv.');
     if(!res.ok || !data || !data.taskId) throw new Error((data && data.message) || 'Не удалось запустить генерацию.');
     const imageUrl = await tvPollGenerationSlot(data.taskId);
+    // KIE's URL is temp-hosted — download it once and keep a durable local copy, same as
+    // every other generation in this app.
+    const persisted = await tvPersistRemoteImageAsset('anchor:' + anchor.id + ':sheet', imageUrl);
     anchor.card.images.sheet = anchor.card.images.sheet || {};
-    anchor.card.images.sheet.url = imageUrl;
+    anchor.card.images.sheet.url = persisted ? persisted.url : imageUrl;
+    anchor._assetFiles = anchor._assetFiles || {};
+    anchor._assetFiles.sheet = !!persisted;
+    anchor._assetFiles.sheetFile = persisted ? persisted.fileName : undefined;
     delete anchor.card._pending.sheet;
-    const saved = await tvSaveAnchor({ card: anchor.card }, anchor.id);
-    Object.assign(anchor, saved);
+    tvSaveSoon();
   } catch(err){
     console.warn('[tv] failed to generate the anchor card:', err);
     alert('Не удалось создать Character Card: ' + err.message);
@@ -459,6 +465,7 @@ function renderTvNewsPickers(){
   const row = (n)=> `<div class="tv-news-row" data-id="${n.id}">
     <span class="tv-news-rubric">${tvRubricLabel(n.rubric)}</span>
     <span class="tv-news-title">${n.title}</span>
+    ${n.source==='ai-draft' ? '<span class="tv-news-flag tv-news-flag-ai" title="Черновик Gemini — проверьте факты перед использованием">ИИ-черновик</span>' : ''}
     ${n.materialStatus==='мало материала' ? '<span class="tv-news-flag">мало материала</span>' : ''}
     ${n.isAnniversary ? '<span class="tv-news-flag tv-news-flag-anniv">юбилей</span>' : ''}
   </div>`;
@@ -484,25 +491,90 @@ function renderTvGrid(){
   }).join('');
 }
 
-// ---- Boot: load whatever /api/tv/* endpoints already exist, defensively — those routes
-// are being built out separately, so a 404 here must not break the page. ----
-async function tvFetchJson(url){
+// ---- Собрать новости — Gemini drafts a candidate list for the matching week 25 years
+// ago. Never treated as ready-to-air: every item lands with source:'ai-draft',
+// included:false, materialStatus:'мало материала' until Костян reviews it and attaches
+// real material, same rule CLAUDE.md sets for scarce material in general. ----
+async function tvGatherNews(){
+  const btn = document.getElementById('tvGatherNewsBtn');
+  const hint = document.getElementById('tvGatherNewsHint');
+  if(btn){ btn.disabled = true; btn.textContent = 'Собираю…'; }
+  if(hint) hint.textContent = '';
   try{
-    const res = await fetch(url);
-    if(!res.ok) return null;
-    return await res.json();
+    const res = await fetch('/api/tv/gather-news', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+    const data = await res.json().catch(()=> null);
+    if(!res.ok || !data || !Array.isArray(data.items)) throw new Error((data && data.message) || 'Не удалось собрать новости.');
+    data.items.forEach(item=>{
+      tvState.tvNewsItems.push({
+        id: tvNewsItemSeq++,
+        rubric: item.rubric,
+        title: item.title,
+        summary: item.summary,
+        sourceDate: item.sourceDateGuess || null,
+        sourceUrl: null,
+        media: [],
+        materialStatus: 'мало материала',
+        isAnniversary: false,
+        included: false,
+        assignedAnchorId: null,
+        approvedForRelease: false,
+        sortOrder: 0,
+        source: 'ai-draft',
+      });
+    });
+    renderTvNewsPickers();
+    tvSaveSoon();
+    if(hint) hint.textContent = 'Добавлено: ' + data.items.length + ' (черновик, проверьте факты)';
   } catch(err){
-    console.warn('[tv] could not reach', url, err);
-    return null;
+    if(hint){ hint.textContent = err.message; hint.style.color = 'var(--danger)'; }
+  } finally {
+    if(btn){ btn.disabled = false; btn.textContent = 'Собрать новости'; }
   }
 }
-async function loadTvData(){
-  const news = await tvFetchJson('/api/tv/news');
-  if(news && Array.isArray(news.items)) tvState.tvNewsItems = news.items;
-  const grid = await tvFetchJson('/api/tv/grid');
-  if(grid && Array.isArray(grid.blocks)) tvState.tvGridBlocks = grid.blocks;
-  const anniversary = await tvFetchJson('/api/tv/anniversary');
-  if(anniversary && Array.isArray(anniversary.events)) tvState.tvAnniversaryEvents = anniversary.events;
+
+// ---- KIE.ai credits indicator (bottom-right) — same endpoint/logic as js/credits.js ----
+let tvCreditsRefreshTimer = null;
+function tvWireCreditsIndicator(){
+  const el = document.getElementById('tvCreditsIndicator');
+  if(!el) return;
+  el.onclick = tvRefreshCredits;
+  tvRefreshCredits();
+  if(tvCreditsRefreshTimer) clearInterval(tvCreditsRefreshTimer);
+  tvCreditsRefreshTimer = setInterval(tvRefreshCredits, 5 * 60 * 1000);
+}
+async function tvRefreshCredits(){
+  const el = document.getElementById('tvCreditsIndicator');
+  const dot = document.getElementById('tvCreditsDot');
+  const value = document.getElementById('tvCreditsValue');
+  const spinner = document.getElementById('tvCreditsSpinner');
+  if(!el || !dot || !value || !spinner) return;
+  spinner.classList.remove('hidden');
+  try{
+    const res = await fetch('/api/my-balance');
+    const data = await res.json().catch(()=> null);
+    if(!res.ok || !data || typeof data.credits !== 'number'){
+      const notConfigured = data && data.error==='not_configured';
+      dot.className = 'credits-dot grey';
+      value.textContent = notConfigured ? 'не настроено' : (data && data.error==='not_authenticated' ? 'нужен вход' : 'ошибка');
+      el.title = (data && data.message) || 'Не удалось связаться с сервером — нажмите, чтобы повторить';
+      return;
+    }
+    const imagesRemaining = data.imagesRemaining;
+    let cls = 'grey';
+    if(imagesRemaining===0) cls = 'red';
+    else if(imagesRemaining!==null && imagesRemaining!==undefined && imagesRemaining < 20) cls = 'yellow';
+    else if(imagesRemaining!==null && imagesRemaining!==undefined) cls = 'green';
+    dot.className = 'credits-dot ' + cls;
+    const unit = data.isAdmin ? ' кр' : ' токенов';
+    value.textContent = data.credits + unit;
+    el.title = 'Баланс KIE.ai: ' + data.credits + unit + ' — нажмите, чтобы обновить';
+  } catch(err){
+    dot.className = 'credits-dot red';
+    value.textContent = 'ошибка';
+    el.title = 'Не удалось связаться с сервером — нажмите, чтобы повторить';
+  } finally {
+    spinner.classList.add('hidden');
+  }
 }
 
 function wireTvPageTabs(){
@@ -517,15 +589,20 @@ function wireTvPageTabs(){
   if(addBackdropBtn) addBackdropBtn.onclick = addTvBackdrop;
   const modalBackdrop = document.getElementById('tvAnchorModalBackdrop');
   if(modalBackdrop) modalBackdrop.onclick = tvCloseModal;
+  const folderBtn = document.getElementById('tvConnectFolderBtn');
+  if(folderBtn) folderBtn.onclick = tvHandleFolderButtonClick;
+  const gatherNewsBtn = document.getElementById('tvGatherNewsBtn');
+  if(gatherNewsBtn) gatherNewsBtn.onclick = tvGatherNews;
 }
 
 (async function(){
   wireTvPageTabs();
   showTvPage('work');
+  tvWireCreditsIndicator();
+  await Promise.all([tvLoadModelList(), tvLoadWorkspace()]);
+  tvStartAutosave();
   renderTvAnchors();
   renderTvBackdrops();
-  await Promise.all([tvLoadModelList(), tvLoadAnchors(), loadTvData()]);
-  renderTvAnchors();
   renderTvNewsPickers();
   renderTvGrid();
 })();

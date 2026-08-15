@@ -31,6 +31,9 @@ if (process.env.DATABASE_URL) {
 }
 
 // Called once at server startup. Safe to call even if `pool` is null (just skips).
+// Note: /TV (the retro tech news show) does NOT use Postgres — it's browser-driven and
+// persists locally (disk folder/IndexedDB via js/tv-persistence.js), same as TAKE:ONE's
+// own projects. This users table is the only schema this app needs.
 async function initDb() {
   if (!pool) return;
   try {
@@ -49,114 +52,6 @@ async function initDb() {
     console.log('[db] connected — users table ready');
   } catch (err) {
     console.error('[db] could not initialize the database (login features will be unavailable):', err);
-  }
-  await initTvSchema();
-}
-
-// /TV (retro tech news show) schema — separate from the users table above on purpose,
-// wrapped in its own try/catch so a problem here never takes down login. Unlike the main
-// TAKE:ONE app (which keeps all project data client-side), /TV needs server-side
-// persistence because its pipeline is meant to run on a schedule with no browser open.
-async function initTvSchema() {
-  if (!pool) return;
-  try {
-    // Ведущие (Character Card pattern, reused from characters.js). `character_card` holds
-    // { inputSlots: {front, threeQuarterLeft, ...}, prompt, images: { sheet: { url } } } —
-    // the same shape characters.js builds, just persisted server-side instead of in the
-    // client project file.
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS tv_anchors (
-        id SERIAL PRIMARY KEY,
-        name TEXT NOT NULL,
-        role TEXT,
-        description TEXT,
-        photo TEXT,
-        voice_id TEXT,
-        character_card JSONB NOT NULL DEFAULT '{}',
-        approved BOOLEAN NOT NULL DEFAULT FALSE,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-      );
-    `);
-    // Idempotent for a table that may already exist from an earlier deploy of this schema
-    // (before these columns were added) — ADD COLUMN IF NOT EXISTS is a no-op otherwise.
-    await pool.query(`
-      ALTER TABLE tv_anchors
-        ADD COLUMN IF NOT EXISTS role TEXT,
-        ADD COLUMN IF NOT EXISTS description TEXT,
-        ADD COLUMN IF NOT EXISTS photo TEXT,
-        ADD COLUMN IF NOT EXISTS voice_id TEXT;
-    `);
-
-    // One row per weekly episode — ties news items and grid blocks together, and is the
-    // target row the Monday cron job assembles into.
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS tv_episodes (
-        id SERIAL PRIMARY KEY,
-        week_start_date DATE NOT NULL,
-        source_week_start_date DATE NOT NULL,
-        status TEXT NOT NULL DEFAULT 'draft',
-        render_url TEXT,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-      );
-    `);
-
-    // Real news items sourced for the matching week 25 years ago. `material_status` of
-    // 'мало материала' means the item waits for the user to supply material or explicitly
-    // request AI generation — never auto-generated or silently dropped.
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS tv_news_items (
-        id SERIAL PRIMARY KEY,
-        episode_id INTEGER REFERENCES tv_episodes(id) ON DELETE CASCADE,
-        rubric TEXT NOT NULL,
-        title TEXT NOT NULL,
-        summary TEXT,
-        source_date DATE,
-        source_url TEXT,
-        media JSONB NOT NULL DEFAULT '[]',
-        material_status TEXT NOT NULL DEFAULT 'ok',
-        is_anniversary BOOLEAN NOT NULL DEFAULT FALSE,
-        included BOOLEAN NOT NULL DEFAULT FALSE,
-        assigned_anchor_id INTEGER REFERENCES tv_anchors(id),
-        approved_for_release BOOLEAN NOT NULL DEFAULT FALSE,
-        sort_order INTEGER NOT NULL DEFAULT 0,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-      );
-    `);
-
-    // Сетка — the assembled timeline. Rubrics air as grouped blocks, so sort_order only
-    // needs to order items within a rubric, never across rubrics.
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS tv_grid_blocks (
-        id SERIAL PRIMARY KEY,
-        episode_id INTEGER REFERENCES tv_episodes(id) ON DELETE CASCADE,
-        news_item_id INTEGER REFERENCES tv_news_items(id) ON DELETE CASCADE,
-        rubric TEXT NOT NULL,
-        sort_order INTEGER NOT NULL DEFAULT 0,
-        vo_track JSONB NOT NULL DEFAULT '{}',
-        cutaways JSONB NOT NULL DEFAULT '[]',
-        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-      );
-    `);
-
-    // Calendar of known "big anniversary" events (e.g. PS2 launch) used to auto-flag
-    // especially notable stories in the Новости picker.
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS tv_anniversary_events (
-        id SERIAL PRIMARY KEY,
-        event_date DATE NOT NULL,
-        title TEXT NOT NULL,
-        description TEXT,
-        rubric TEXT,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-      );
-    `);
-    console.log('[db] /TV schema ready');
-  } catch (err) {
-    console.error('[db] could not initialize the /TV schema (/TV features will be unavailable):', err);
   }
 }
 

@@ -33,9 +33,13 @@ manual generation work.
 - Lives at `/TV` route in the SAME app as TAKE:ONE (same GitHub repo, same Railway project,
   same KIE account/key) — branch isolation (`dev`) is the safety mechanism, not a separate
   repo/service.
-- Unlike TAKE:ONE (which stores all project data client-side, IndexedDB/disk — a human
-  drives every generation manually), `/TV` needs SERVER-SIDE persistence (Postgres) because
-  the pipeline must run on a schedule with no browser open.
+- `/TV` is browser-driven, exactly like TAKE:ONE — no scheduler, no unattended runs. The
+  user logs in, presses a button (e.g. "Собрать новости"), and it runs while the browser
+  is open. Storage is local disk/IndexedDB, via `js/tv-persistence.js` — a single-workspace
+  adaptation of TAKE:ONE's own `js/persistence.js` pattern (folder picker, "Saved" status
+  pill, diff-based autosave, blob assets on disk with an IndexedDB fallback). This was a
+  deliberate reversal of an earlier server-side-Postgres plan; Postgres (`db.js`) is only
+  used for the shared login/token/credits system now, not for `/TV`'s own content data.
 - Reuses TAKE:ONE's proven engine pieces directly: KIE.ai generation wrappers in `server.js`
   (model catalogs, field-name quirks per model — see comments in `server.js`, hard-won via
   real trial and error, do not re-derive from scratch), Character Card / Object Card builder
@@ -78,8 +82,11 @@ tab), not per-item checkboxes scattered everywhere.
 
 ## Automation
 
-- The episode assembly runs automatically every Monday, on a schedule — no manual trigger
-  needed in normal operation.
+- No scheduler/cron — every stage (news gathering, episode assembly, animation) is
+  triggered manually from the browser while logged in (e.g. a "Собрать новости" button on
+  Новости), not run unattended. This was a deliberate reversal of an earlier
+  scheduled-Monday-cron plan — the user's role is still limited to approvals/adjustments
+  rather than doing generation steps by hand, but nothing runs without the browser open.
 - Real archival photos/screenshots (Wikimedia Commons, official press kits, archive.org
   magazine scans) are fine to source directly and use freely.
 - Real YouTube video footage is explicitly OK to clip and use too — the user has accepted
@@ -88,29 +95,40 @@ tab), not per-item checkboxes scattered everywhere.
   do not add extra copyright-safety gating beyond that approval flag; this was a deliberate
   user decision after being warned of the risk once, not something to relitigate.
 - YouTube upload stays manual for now — download the finished render, no auto-upload yet.
-- Everything (reference search, episode assembly, animation) should run automatically with
-  minimal manual involvement — the user's role is limited to approvals, not doing steps
-  by hand.
 
 ## Already scaffolded (as of this file's writing)
 
-- `tv.html` — entry page, 7-tab structure (placeholders for most tabs so far)
+- `tv.html` — entry page, 7-tab structure (placeholders for most tabs so far), top-right
+  save-status pill + "connect folder" button, bottom-right KIE credits indicator.
 - `js/tv-state.js` — client state shape: `tvAnchors`, `tvNewsItems`, `tvGridBlocks`, etc.
-- `js/tv-app.js` — tab-switching logic
-- `db.js` — draft Postgres schema added (or pending — check the file): `tv_anchors`,
-  `tv_episodes`, `tv_news_items`, `tv_grid_blocks`, `tv_anniversary_events`
+- `js/tv-persistence.js` — local disk/IndexedDB workspace persistence (see Architecture).
+- `js/tv-app.js` — tab-switching logic, the full anchor Character Card flow in **Work**
+  (gallery → detail → quick form → 6-slot reference-photo builder → generated turnaround
+  sheet, reusing `characters.js`'s pattern and prompt template), "Собрать новости" on
+  **Новости**.
+- `server.js` — `POST /api/tv/gather-news` (Gemini-drafted candidate news list); anchor
+  Character Card generation reuses the existing `/api/upload-reference-image` +
+  `/api/generate-image/start`/`/status` routes, same as TAKE:ONE's characters.
+- `db.js` — no `/TV`-specific tables; Postgres here is only the shared users/login/token
+  schema TAKE:ONE already had.
 
-## New routes to build (none exist yet — check before assuming duplicates)
+## New routes to build (check before assuming duplicates — this list is what's still
+## genuinely missing, not what exists)
 
 ```
-GET/POST /api/tv/news              — aggregation + two-pane picker data
-POST     /api/tv/news/:id/assign   — assign a news item to an anchor
-GET/POST /api/tv/grid              — read/build the episode's Сетка timeline
-POST     /api/tv/episode/generate  — kick off automated episode assembly (cron target)
-GET      /api/tv/anniversary       — anniversary-event calendar
+POST     /api/tv/news/:id/assign   — assign a news item to an anchor (client-side only
+                                      for now — could stay that way if it never needs a
+                                      server role)
 ```
+Everything else planned in the original routes list (`GET/POST /api/tv/news`,
+`GET/POST /api/tv/grid`, `POST /api/tv/episode/generate`, `GET /api/tv/anniversary`) was
+premised on server-side Postgres storage and no longer applies — that data now lives in
+the local workspace (`js/tv-persistence.js`), read/written client-side. Only add a server
+route here for something that genuinely needs the server (an external call, like
+`/api/tv/gather-news` already is).
 
 ## Next planned step
 
-Build out the anchor Character Card flow in **Work**, reusing `characters.js` +
-`object-card.js` as the direct template.
+Build out the studio-backdrop Object Card flow in **Work** (reusing `object-card.js` +
+`locations.js`'s angle-shot pattern), same shape as the anchor flow above but for
+`tvBackdrops`.

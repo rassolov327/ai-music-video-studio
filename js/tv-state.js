@@ -1,8 +1,8 @@
 // ---------- /TV state ----------
 // Client state for the /TV retro tech-news show. Separate from the main app's `state`
-// (js/state.js) on purpose — /TV persists server-side (Postgres, see db.js) since its
-// pipeline runs on a schedule with no browser open; this object is just the in-memory
-// mirror the UI renders from, refreshed from /api/tv/* endpoints.
+// (js/state.js) on purpose. Browser-driven, just like TAKE:ONE — no scheduler, no
+// server-side data store. `tvState` IS the source of truth; js/tv-persistence.js loads it
+// from and saves it to a local disk folder or IndexedDB (see that file's header comment).
 const TV_RUBRICS = [
   { key:'news',     label:'Новости'  },
   { key:'games',     label:'Игры'     },
@@ -38,10 +38,9 @@ const tvState = {
   activeTab: 'work',
 
   // Work tab — anchors (Character Card pattern) and studio backdrops (Object Card pattern).
-  // Anchors are persisted server-side (tv_anchors table) via /api/tv/anchors, not in this
-  // in-memory mirror alone — this array is refreshed from the server on load and after
-  // every save.
-  tvAnchors: [],    // [{ id, name, role, description, photo, voiceId, card:{inputSlots,prompt,images:{sheet:{url}}}, approved }]
+  // Persisted locally (disk folder/IndexedDB, js/tv-persistence.js) — this array IS the
+  // source of truth, restored from the workspace on load and saved after every change.
+  tvAnchors: [],    // [{ id, name, role, description, photo, voiceId, card:{inputSlots,prompt,images:{sheet:{url}}}, approved, _assetFiles }]
   tvBackdrops: [],  // [{ id, name, cardInputSlots, cardOutputSlots, angleShots, approved }]
 
   // Новости tab — two-pane picker: proposed items (left) vs items dragged into the episode
@@ -70,9 +69,7 @@ const tvState = {
   approvals: { work:false, news:false, studio:false, grid:false, tasks:false, archive:false, air:false },
 };
 
-// tvAnchors get their id from the server (tv_anchors.id, SERIAL) once saved — no client
-// sequence needed for them. The rest are still client-only placeholders.
-let tvBackdropSeq = 1, tvNewsItemSeq = 1, tvGridBlockSeq = 1, tvTaskSeq = 1, tvArchiveSeq = 1;
+let tvAnchorSeq = 1, tvBackdropSeq = 1, tvNewsItemSeq = 1, tvGridBlockSeq = 1, tvTaskSeq = 1, tvArchiveSeq = 1;
 
 function tvRubricLabel(key){
   const r = TV_RUBRICS.find(r=> r.key===key);

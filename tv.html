@@ -66,6 +66,7 @@
   .tv-news-title{ flex:1; color:var(--text-1); }
   .tv-news-flag{ font-size:10px; color:var(--warn); border:1px solid var(--warn); border-radius:4px; padding:1px 6px; }
   .tv-news-flag-anniv{ color:var(--accent-text); border-color:var(--accent); }
+  .tv-news-flag-ai{ color:var(--text-2); border:1px solid var(--line); border-radius:4px; padding:1px 6px; font-size:10px; }
   .tv-news-rubric-filters{ display:flex; gap:6px; margin-bottom:10px; }
 
   .tv-studio-list{ border:1px solid var(--line); border-radius:8px; background:var(--bg-panel-2); }
@@ -101,6 +102,8 @@
     <div class="tv-page-tab" data-tv-page="air">Эфир</div>
   </div>
   <div class="tv-topbar-spacer"></div>
+  <span class="save-status" id="tvSaveStatus" title="Статус автосохранения"></span>
+  <button class="tbtn" id="tvConnectFolderBtn" style="display:none;" title="Хранить /TV как настоящие файлы на диске">Сохранить в папку на диске</button>
   <button id="tvApproveBtn">Утвердить в выпуск</button>
 </div>
 
@@ -128,6 +131,10 @@
     <div>
       <div class="tv-page-title">Новости</div>
       <div class="tv-page-desc">Новости той же недели 25 лет назад. Перетащите слева направо, чтобы включить в выпуск.</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span class="gen-hint" id="tvGatherNewsHint" style="margin:0;"></span>
+      <button class="tv-btn primary" id="tvGatherNewsBtn">Собрать новости</button>
     </div>
   </div>
   <div class="tv-news-rubric-filters" id="tvNewsRubricFilters"></div>
@@ -205,9 +212,16 @@
   <div class="tv-modal-panel" id="tvAnchorModalBody"></div>
 </div>
 
+<div class="credits-indicator" id="tvCreditsIndicator" title="KIE.ai credits — click to refresh">
+  <span class="credits-dot" id="tvCreditsDot"></span>
+  <span class="credits-value" id="tvCreditsValue">—</span>
+  <span class="credits-spinner hidden" id="tvCreditsSpinner"></span>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/utif@3.1.0/UTIF.js"></script>
 <script src="js/helpers.js"></script>
 <script src="js/tv-state.js"></script>
+<script src="js/tv-persistence.js"></script>
 <script src="js/tv-app.js"></script>
 </body>
 </html>
