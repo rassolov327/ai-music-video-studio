@@ -34,6 +34,29 @@ function tvEmptyCardInputSlots(){
 const TV_CARD_SHEET_WIDTH = 1600;
 const TV_CARD_SHEET_HEIGHT = 900;
 
+// Studio backdrops (Object Card pattern, same idea as Locations/Props in object-card.js —
+// 4 reference-photo input slots, one generated turnaround sheet used as the consistency
+// reference for everything else).
+const TV_OBJECT_CARD_INPUT_SLOTS = [
+  { key:'front', label:'Спереди', hint:'Вид прямо на декорацию' },
+  { key:'left',  label:'Слева',   hint:'Вид с левой стороны' },
+  { key:'right', label:'Справа',  hint:'Вид с правой стороны' },
+  { key:'back',  label:'Сзади',   hint:'Вид сзади' },
+];
+function tvEmptyObjectCardInputSlots(){
+  const obj = {};
+  TV_OBJECT_CARD_INPUT_SLOTS.forEach(s=> obj[s.key]=null);
+  return obj;
+}
+
+// Angle shots (locations.js's LOCATION_ANGLE_KEYS pattern) — five independently generated,
+// actually-usable establishing-shot images of the backdrop, each one using every OTHER
+// already-filled angle as a reference so the model sees the set from multiple sides at
+// once instead of guessing a new one from text alone every time.
+const TV_ANGLE_KEYS = ['wide', 'front', 'reverse', 'left', 'right'];
+const TV_ANGLE_UI_LABELS = { wide:'Общий план', front:'Спереди', reverse:'Разворот назад', left:'Слева', right:'Справа' };
+const TV_ANGLE_PROMPT_LABELS = { wide:'a wide establishing shot', front:'a front-facing shot', reverse:'the reverse angle, looking back the other way', left:'the camera turned to the left', right:'the camera turned to the right' };
+
 const tvState = {
   activeTab: 'work',
 
@@ -41,7 +64,7 @@ const tvState = {
   // Persisted locally (disk folder/IndexedDB, js/tv-persistence.js) — this array IS the
   // source of truth, restored from the workspace on load and saved after every change.
   tvAnchors: [],    // [{ id, name, role, description, photo, voiceId, card:{inputSlots,prompt,images:{sheet:{url}}}, approved, _assetFiles }]
-  tvBackdrops: [],  // [{ id, name, cardInputSlots, cardOutputSlots, angleShots, approved }]
+  tvBackdrops: [],  // [{ id, name, description, photo, card:{inputSlots,prompt,images:{sheet:{url}}}, angleShots:{wide,front,reverse,left,right:{photo}}, approved, _assetFiles }]
 
   // Новости tab — two-pane picker: proposed items (left) vs items dragged into the episode
   // (right, `included:true`). `materialStatus` is 'ok' or 'мало материала' — when scarce,

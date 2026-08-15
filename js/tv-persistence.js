@@ -228,11 +228,27 @@ function tvSerialize(){
     if(copy.card) delete copy.card._pending;
     return copy;
   });
+  const backdrops = tvState.tvBackdrops.map(b=>{
+    const copy = JSON.parse(JSON.stringify(b));
+    if(copy._assetFiles && copy._assetFiles.photo) copy.photo = null;
+    if(copy._assetFiles && copy._assetFiles.sheet && copy.card && copy.card.images && copy.card.images.sheet){
+      copy.card.images.sheet.url = null;
+    }
+    if(copy.angleShots){
+      Object.keys(copy.angleShots).forEach(k=>{
+        if(copy._assetFiles && copy._assetFiles['angle_' + k] && copy.angleShots[k]) copy.angleShots[k].photo = null;
+      });
+    }
+    delete copy._pending;
+    delete copy._pendingAngles;
+    if(copy.card) delete copy.card._pending;
+    return copy;
+  });
   return {
     version: 1,
     savedAt: Date.now(),
     tvAnchors: anchors,
-    tvBackdrops: tvState.tvBackdrops,
+    tvBackdrops: backdrops,
     tvNewsItems: tvState.tvNewsItems,
     tvGridBlocks: tvState.tvGridBlocks,
     tvTaskQueue: tvState.tvTaskQueue,
@@ -303,6 +319,24 @@ async function tvRestoreAnchorAssets(anchor){
     if(url) anchor.card.images.sheet.url = url;
   }
 }
+async function tvRestoreBackdropAssets(backdrop){
+  if(backdrop._assetFiles && backdrop._assetFiles.photo){
+    const url = await tvLoadBlobAsset('backdrop:' + backdrop.id + ':photo', backdrop._assetFiles.photoFile);
+    if(url) backdrop.photo = url;
+  }
+  if(backdrop._assetFiles && backdrop._assetFiles.sheet && backdrop.card && backdrop.card.images && backdrop.card.images.sheet){
+    const url = await tvLoadBlobAsset('backdrop:' + backdrop.id + ':sheet', backdrop._assetFiles.sheetFile);
+    if(url) backdrop.card.images.sheet.url = url;
+  }
+  if(backdrop.angleShots){
+    for(const key of Object.keys(backdrop.angleShots)){
+      if(backdrop._assetFiles && backdrop._assetFiles['angle_' + key]){
+        const url = await tvLoadBlobAsset('backdrop:' + backdrop.id + ':angle:' + key, backdrop._assetFiles['angle_' + key + 'File']);
+        if(url && backdrop.angleShots[key]) backdrop.angleShots[key].photo = url;
+      }
+    }
+  }
+}
 async function tvApplyWorkspaceData(data){
   if(Array.isArray(data.tvAnchors)) tvState.tvAnchors = data.tvAnchors;
   if(Array.isArray(data.tvBackdrops)) tvState.tvBackdrops = data.tvBackdrops;
@@ -323,7 +357,9 @@ async function tvApplyWorkspaceData(data){
     tvArchiveSeq = Math.max(tvArchiveSeq, data.seq.tvArchiveSeq || 1);
   }
   for(const anchor of tvState.tvAnchors) await tvRestoreAnchorAssets(anchor);
+  for(const backdrop of tvState.tvBackdrops) await tvRestoreBackdropAssets(backdrop);
   if(typeof renderTvAnchors==='function') renderTvAnchors();
+  if(typeof renderTvBackdrops==='function') renderTvBackdrops();
   if(typeof renderTvNewsPickers==='function') renderTvNewsPickers();
   if(typeof renderTvGrid==='function') renderTvGrid();
   if(typeof tvSyncOwedInput==='function') tvSyncOwedInput();
