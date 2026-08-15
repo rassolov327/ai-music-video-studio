@@ -532,12 +532,29 @@ async function tvGatherNews(){
   }
 }
 
-// ---- KIE.ai credits indicator (bottom-right) — same endpoint/logic as js/credits.js ----
+// ---- KIE.ai credits indicator (bottom-right) — same live-balance endpoint as
+// js/credits.js, but the "owed to users" subtraction can't come from dev's own DB (dev
+// and main deliberately use separate Postgres instances — see CLAUDE.md), so it's read
+// from tvState.tvOwedToUsers, a number Костян updates by hand from main's admin panel. ----
 let tvCreditsRefreshTimer = null;
+let tvLastBalanceData = null; // re-used to redraw instantly when the "owed" input changes, without a refetch
+
+function tvSyncOwedInput(){
+  const input = document.getElementById('tvOwedInput');
+  if(!input) return;
+  input.value = tvState.tvOwedToUsers || 0;
+  input.oninput = ()=>{
+    tvState.tvOwedToUsers = Math.max(0, Number(input.value) || 0);
+    tvSaveSoon();
+    tvRenderCreditsIndicator();
+  };
+}
+
 function tvWireCreditsIndicator(){
   const el = document.getElementById('tvCreditsIndicator');
   if(!el) return;
   el.onclick = tvRefreshCredits;
+  tvSyncOwedInput();
   tvRefreshCredits();
   if(tvCreditsRefreshTimer) clearInterval(tvCreditsRefreshTimer);
   tvCreditsRefreshTimer = setInterval(tvRefreshCredits, 5 * 60 * 1000);
@@ -545,42 +562,56 @@ function tvWireCreditsIndicator(){
 async function tvRefreshCredits(){
   const el = document.getElementById('tvCreditsIndicator');
   const dot = document.getElementById('tvCreditsDot');
-  const value = document.getElementById('tvCreditsValue');
   const spinner = document.getElementById('tvCreditsSpinner');
-  if(!el || !dot || !value || !spinner) return;
+  if(!el || !dot || !spinner) return;
   spinner.classList.remove('hidden');
   try{
     const res = await fetch('/api/my-balance');
     const data = await res.json().catch(()=> null);
-    if(!res.ok || !data || typeof data.credits !== 'number'){
+    tvLastBalanceData = (res.ok && data && typeof data.credits === 'number') ? data : null;
+    if(!tvLastBalanceData){
       const notConfigured = data && data.error==='not_configured';
       dot.className = 'credits-dot grey';
-      value.textContent = notConfigured ? 'не настроено' : (data && data.error==='not_authenticated' ? 'нужен вход' : 'ошибка');
+      document.getElementById('tvCreditsValue').textContent = notConfigured ? 'не настроено' : (data && data.error==='not_authenticated' ? 'нужен вход' : 'ошибка');
       el.title = (data && data.message) || 'Не удалось связаться с сервером — нажмите, чтобы повторить';
       return;
     }
-    // Admins: show the PERSONAL balance (KIE credits minus what's currently owed to
-    // non-admin users' token balances), same number TAKE:ONE's second bottom-right pill
-    // shows — not the raw KIE account total, since that includes tokens already promised
-    // to users. Falls back to the plain balance for non-admin accounts.
-    const hasPersonal = data.isAdmin && typeof data.personalBalance === 'number';
-    const shownCredits = hasPersonal ? data.personalBalance : data.credits;
-    const imagesRemaining = hasPersonal ? data.personalImagesRemaining : data.imagesRemaining;
-    let cls = 'grey';
-    if(imagesRemaining===0) cls = 'red';
-    else if(imagesRemaining!==null && imagesRemaining!==undefined && imagesRemaining < 20) cls = 'yellow';
-    else if(imagesRemaining!==null && imagesRemaining!==undefined) cls = 'green';
-    dot.className = 'credits-dot ' + cls;
-    const unit = data.isAdmin ? ' кр' : ' токенов';
-    value.textContent = shownCredits + unit;
-    el.title = (hasPersonal ? 'Личный баланс (KIE минус выданное пользователям): ' : 'Баланс KIE.ai: ') + shownCredits + unit + ' — нажмите, чтобы обновить';
+    tvRenderCreditsIndicator();
   } catch(err){
+    tvLastBalanceData = null;
     dot.className = 'credits-dot red';
-    value.textContent = 'ошибка';
+    document.getElementById('tvCreditsValue').textContent = 'ошибка';
     el.title = 'Не удалось связаться с сервером — нажмите, чтобы повторить';
   } finally {
     spinner.classList.add('hidden');
   }
+}
+// Redraws from the last-fetched balance — called both after a fresh fetch and instantly
+// when the manual "owed to users" input changes, so editing it doesn't need a network round-trip.
+function tvRenderCreditsIndicator(){
+  const el = document.getElementById('tvCreditsIndicator');
+  const dot = document.getElementById('tvCreditsDot');
+  const value = document.getElementById('tvCreditsValue');
+  const data = tvLastBalanceData;
+  if(!el || !dot || !value || !data) return;
+  // The raw KIE balance (data.credits, for admins) is live and DB-independent — only the
+  // "minus what's owed to users" part needs the manually-entered number, since dev's own
+  // DB has no record of main's real users.
+  const hasOwed = data.isAdmin && tvState.tvOwedToUsers > 0;
+  const shownCredits = hasOwed ? Math.max(0, data.credits - tvState.tvOwedToUsers) : data.credits;
+  let imagesRemaining = data.imagesRemaining;
+  if(hasOwed && data.imagesRemaining && data.credits){
+    const creditsPerImage = data.credits / data.imagesRemaining;
+    imagesRemaining = creditsPerImage > 0 ? Math.floor(shownCredits / creditsPerImage) : null;
+  }
+  let cls = 'grey';
+  if(imagesRemaining===0) cls = 'red';
+  else if(imagesRemaining!==null && imagesRemaining!==undefined && imagesRemaining < 20) cls = 'yellow';
+  else if(imagesRemaining!==null && imagesRemaining!==undefined) cls = 'green';
+  dot.className = 'credits-dot ' + cls;
+  const unit = data.isAdmin ? ' кр' : ' токенов';
+  value.textContent = shownCredits + unit;
+  el.title = (hasOwed ? 'Личный баланс (KIE минус вручную указанное "роздано"): ' : 'Баланс KIE.ai: ') + shownCredits + unit + ' — нажмите, чтобы обновить';
 }
 
 function wireTvPageTabs(){

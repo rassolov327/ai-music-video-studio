@@ -240,6 +240,7 @@ function tvSerialize(){
     tvAnniversaryEvents: tvState.tvAnniversaryEvents,
     tvEpisode: tvState.tvEpisode,
     approvals: tvState.approvals,
+    tvOwedToUsers: tvState.tvOwedToUsers,
     seq: { tvAnchorSeq, tvBackdropSeq, tvNewsItemSeq, tvGridBlockSeq, tvTaskSeq, tvArchiveSeq },
   };
 }
@@ -312,6 +313,7 @@ async function tvApplyWorkspaceData(data){
   if(Array.isArray(data.tvAnniversaryEvents)) tvState.tvAnniversaryEvents = data.tvAnniversaryEvents;
   if(data.tvEpisode) tvState.tvEpisode = data.tvEpisode;
   if(data.approvals) Object.assign(tvState.approvals, data.approvals);
+  if(typeof data.tvOwedToUsers === 'number') tvState.tvOwedToUsers = data.tvOwedToUsers;
   if(data.seq){
     tvAnchorSeq = Math.max(tvAnchorSeq, data.seq.tvAnchorSeq || 1);
     tvBackdropSeq = Math.max(tvBackdropSeq, data.seq.tvBackdropSeq || 1);
@@ -324,6 +326,8 @@ async function tvApplyWorkspaceData(data){
   if(typeof renderTvAnchors==='function') renderTvAnchors();
   if(typeof renderTvNewsPickers==='function') renderTvNewsPickers();
   if(typeof renderTvGrid==='function') renderTvGrid();
+  if(typeof tvSyncOwedInput==='function') tvSyncOwedInput();
+  if(typeof tvRenderCreditsIndicator==='function') tvRenderCreditsIndicator();
 }
 async function tvLoadWorkspace(){
   if(TV_SUPPORTS_DISK_FOLDER){

@@ -67,6 +67,14 @@ const tvState = {
 
   // One approval flag per tab — the "утверждено / в выпуск" gate.
   approvals: { work:false, news:false, studio:false, grid:false, tasks:false, archive:false, air:false },
+
+  // dev has its own, separate Postgres DB from main (deliberate isolation — see
+  // CLAUDE.md) — so /TV can't compute "KIE credits minus tokens owed to users" the way
+  // TAKE:ONE's admin panel does, since dev genuinely has no record of main's other users.
+  // The raw KIE balance itself IS live and accurate (same KIE key, no DB involved), so the
+  // only missing piece is this one number — Костян checks main's admin panel and updates
+  // it here himself, no DB connection between dev and main needed.
+  tvOwedToUsers: 0,
 };
 
 let tvAnchorSeq = 1, tvBackdropSeq = 1, tvNewsItemSeq = 1, tvGridBlockSeq = 1, tvTaskSeq = 1, tvArchiveSeq = 1;

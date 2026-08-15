@@ -86,6 +86,23 @@
   .tv-modal.hidden{ display:none; }
   .tv-modal-backdrop{ position:absolute; inset:0; background:rgba(0,0,0,0.6); }
   .tv-modal-panel{ position:relative; width:100%; max-width:680px; max-height:calc(100vh - 48px); overflow-y:auto; display:flex; justify-content:center; }
+
+  /* Manual "owed to users" input — dev has its own DB, isolated from main, so this number
+     can't be computed automatically here; Костян checks main's admin panel and updates it
+     by hand. Sits just above the credits indicator, same position TAKE:ONE's second
+     (personal-balance) pill uses. */
+  .tv-owed-wrap{
+    position:fixed; right:12px; bottom:44px; z-index:900;
+    display:flex; align-items:center; gap:6px;
+    background:var(--bg-panel); border:1px solid var(--line); border-radius:14px;
+    padding:5px 10px; font-family:var(--font-mono); font-size:11px; color:var(--text-3);
+    box-shadow:0 4px 14px rgba(0,0,0,.3);
+  }
+  .tv-owed-wrap input{
+    width:70px; background:var(--bg-elevated); border:1px solid var(--line); color:var(--text-1);
+    border-radius:5px; padding:2px 6px; font-size:11px; font-family:var(--font-mono);
+  }
+  .tv-owed-wrap input:focus{ outline:none; border-color:var(--accent); }
 </style>
 </head>
 <body class="tv-body">
@@ -212,6 +229,9 @@
   <div class="tv-modal-panel" id="tvAnchorModalBody"></div>
 </div>
 
+<div class="tv-owed-wrap" title="Роздано пользователям на main — смотрите в админке TAKE:ONE и вписывайте сюда вручную (dev не видит базу main)">
+  Роздано: <input type="number" id="tvOwedInput" step="1" min="0" placeholder="0">
+</div>
 <div class="credits-indicator" id="tvCreditsIndicator" title="KIE.ai credits — click to refresh">
   <span class="credits-dot" id="tvCreditsDot"></span>
   <span class="credits-value" id="tvCreditsValue">—</span>
