@@ -259,6 +259,91 @@ app.get('/api/me', requireAuth, (req, res) => {
   res.json({ id: req.user.id, name: req.user.name, login: req.user.login, tokens: req.user.tokens, isAdmin: req.user.is_admin });
 });
 
+// ---- /TV: ведущие (anchors) — Character Card pattern, persisted server-side (tv_anchors) ----
+// Reads are public (same posture as /api/models) since nothing here is sensitive; writes
+// require auth like every other route that spends tokens or changes state.
+function tvAnchorRowToJson(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    role: row.role || '',
+    description: row.description || '',
+    photo: row.photo || null,
+    voiceId: row.voice_id || '',
+    card: row.character_card || {},
+    approved: !!row.approved,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+app.get('/api/tv/anchors', async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'not_configured', message: 'Database not available.' });
+  try {
+    const result = await pool.query('SELECT * FROM tv_anchors ORDER BY id ASC');
+    res.json({ anchors: result.rows.map(tvAnchorRowToJson) });
+  } catch (err) {
+    console.error('[server] GET /api/tv/anchors failed:', err);
+    res.status(500).json({ error: 'server_error', message: 'Could not load anchors.' });
+  }
+});
+app.post('/api/tv/anchors', requireAuth, async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'not_configured', message: 'Database not available.' });
+  const { name, role, description, photo, voiceId } = req.body || {};
+  if (!name || typeof name !== 'string' || !name.trim()) {
+    return res.status(400).json({ error: 'bad_request', message: 'name is required.' });
+  }
+  try {
+    const result = await pool.query(
+      `INSERT INTO tv_anchors (name, role, description, photo, voice_id)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [name.trim(), role || null, description || null, photo || null, voiceId || null]
+    );
+    res.json({ anchor: tvAnchorRowToJson(result.rows[0]) });
+  } catch (err) {
+    console.error('[server] POST /api/tv/anchors failed:', err);
+    res.status(500).json({ error: 'server_error', message: 'Could not create the anchor.' });
+  }
+});
+app.put('/api/tv/anchors/:id', requireAuth, async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'not_configured', message: 'Database not available.' });
+  const { name, role, description, photo, voiceId, card, approved } = req.body || {};
+  try {
+    const existing = await pool.query('SELECT * FROM tv_anchors WHERE id = $1', [req.params.id]);
+    if (!existing.rows.length) return res.status(404).json({ error: 'not_found', message: 'Anchor not found.' });
+    const current = existing.rows[0];
+    const result = await pool.query(
+      `UPDATE tv_anchors SET
+         name = $1, role = $2, description = $3, photo = $4, voice_id = $5,
+         character_card = $6, approved = $7, updated_at = now()
+       WHERE id = $8 RETURNING *`,
+      [
+        name !== undefined ? String(name).trim() : current.name,
+        role !== undefined ? role : current.role,
+        description !== undefined ? description : current.description,
+        photo !== undefined ? photo : current.photo,
+        voiceId !== undefined ? voiceId : current.voice_id,
+        card !== undefined ? JSON.stringify(card) : current.character_card,
+        approved !== undefined ? !!approved : current.approved,
+        req.params.id,
+      ]
+    );
+    res.json({ anchor: tvAnchorRowToJson(result.rows[0]) });
+  } catch (err) {
+    console.error('[server] PUT /api/tv/anchors/:id failed:', err);
+    res.status(500).json({ error: 'server_error', message: 'Could not update the anchor.' });
+  }
+});
+app.delete('/api/tv/anchors/:id', requireAuth, async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'not_configured', message: 'Database not available.' });
+  try {
+    await pool.query('DELETE FROM tv_anchors WHERE id = $1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[server] DELETE /api/tv/anchors/:id failed:', err);
+    res.status(500).json({ error: 'server_error', message: 'Could not delete the anchor.' });
+  }
+});
+
 // Same CSP shape the project already relied on (Caddyfile), with blob: explicitly present
 // in img-src and media-src — omitting it silently breaks restored photos/audio with no
 // console error, which cost a lot of debugging time earlier in this project.

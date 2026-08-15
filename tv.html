@@ -76,6 +76,15 @@
   .tv-grid-block{ width:120px; height:64px; border:1px solid var(--line); border-radius:6px; background:var(--bg-panel-2); }
 
   .tv-placeholder-box{ border:1px dashed var(--line); border-radius:8px; padding:24px; text-align:center; color:var(--text-3); font-size:12.5px; }
+
+  /* Anchor detail/form/Character-Card-builder modal — content inside reuses styles.css's
+     .char-tile/.char-card/.char-form/.angle-slot/.card-output-grid classes verbatim (the
+     same markup shapes characters.js produces), just wrapped in a plain overlay here since
+     /TV's Work tab keeps its grid visible instead of swapping a whole preview pane. */
+  .tv-modal{ position:fixed; inset:0; z-index:50; display:flex; align-items:center; justify-content:center; padding:24px; }
+  .tv-modal.hidden{ display:none; }
+  .tv-modal-backdrop{ position:absolute; inset:0; background:rgba(0,0,0,0.6); }
+  .tv-modal-panel{ position:relative; width:100%; max-width:680px; max-height:calc(100vh - 48px); overflow-y:auto; display:flex; justify-content:center; }
 </style>
 </head>
 <body class="tv-body">
@@ -191,6 +200,13 @@
   <div class="tv-placeholder-box" id="tvAirBox">Выпуск ещё не собран.</div>
 </div>
 
+<div class="tv-modal hidden" id="tvAnchorModal">
+  <div class="tv-modal-backdrop" id="tvAnchorModalBackdrop"></div>
+  <div class="tv-modal-panel" id="tvAnchorModalBody"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/utif@3.1.0/UTIF.js"></script>
+<script src="js/helpers.js"></script>
 <script src="js/tv-state.js"></script>
 <script src="js/tv-app.js"></script>
 </body>

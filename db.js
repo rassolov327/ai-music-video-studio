@@ -60,16 +60,32 @@ async function initDb() {
 async function initTvSchema() {
   if (!pool) return;
   try {
-    // Ведущие (Character Card pattern, reused from characters.js).
+    // Ведущие (Character Card pattern, reused from characters.js). `character_card` holds
+    // { inputSlots: {front, threeQuarterLeft, ...}, prompt, images: { sheet: { url } } } —
+    // the same shape characters.js builds, just persisted server-side instead of in the
+    // client project file.
     await pool.query(`
       CREATE TABLE IF NOT EXISTS tv_anchors (
         id SERIAL PRIMARY KEY,
         name TEXT NOT NULL,
+        role TEXT,
+        description TEXT,
+        photo TEXT,
+        voice_id TEXT,
         character_card JSONB NOT NULL DEFAULT '{}',
         approved BOOLEAN NOT NULL DEFAULT FALSE,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
       );
+    `);
+    // Idempotent for a table that may already exist from an earlier deploy of this schema
+    // (before these columns were added) — ADD COLUMN IF NOT EXISTS is a no-op otherwise.
+    await pool.query(`
+      ALTER TABLE tv_anchors
+        ADD COLUMN IF NOT EXISTS role TEXT,
+        ADD COLUMN IF NOT EXISTS description TEXT,
+        ADD COLUMN IF NOT EXISTS photo TEXT,
+        ADD COLUMN IF NOT EXISTS voice_id TEXT;
     `);
 
     // One row per weekly episode — ties news items and grid blocks together, and is the

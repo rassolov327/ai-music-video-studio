@@ -14,11 +14,34 @@ const TV_RUBRICS = [
 // not per-item checkboxes scattered around.
 const TV_TABS = ['work', 'news', 'studio', 'grid', 'tasks', 'archive', 'air'];
 
+// Character Card input slots for anchors — same 6-angle set characters.js uses
+// (js/state.js CARD_INPUT_SLOTS), duplicated here since tv.html doesn't load state.js.
+const TV_CARD_INPUT_SLOTS = [
+  { key:'front',            label:'Анфас',        hint:'Нейтральное лицо, прямо в камеру' },
+  { key:'threeQuarterLeft', label:'3/4 слева',     hint:'Голова повёрнута на ~45° влево' },
+  { key:'threeQuarterRight',label:'3/4 справа',    hint:'Голова повёрнута на ~45° вправо' },
+  { key:'profileLeft',      label:'Профиль слева', hint:'Полный вид сбоку, лицом влево' },
+  { key:'profileRight',     label:'Профиль справа',hint:'Полный вид сбоку, лицом вправо' },
+  { key:'back',             label:'Затылок',       hint:'Вид сзади' },
+];
+function tvEmptyCardInputSlots(){
+  const obj = {};
+  TV_CARD_INPUT_SLOTS.forEach(s=> obj[s.key]=null);
+  return obj;
+}
+// Fixed, wide turnaround-sheet output size — independent of the episode's own video
+// format, same reasoning as CARD_SHEET_WIDTH/HEIGHT in state.js.
+const TV_CARD_SHEET_WIDTH = 1600;
+const TV_CARD_SHEET_HEIGHT = 900;
+
 const tvState = {
   activeTab: 'work',
 
   // Work tab — anchors (Character Card pattern) and studio backdrops (Object Card pattern).
-  tvAnchors: [],    // [{ id, name, cardInputSlots, cardOutputSlots, approved }]
+  // Anchors are persisted server-side (tv_anchors table) via /api/tv/anchors, not in this
+  // in-memory mirror alone — this array is refreshed from the server on load and after
+  // every save.
+  tvAnchors: [],    // [{ id, name, role, description, photo, voiceId, card:{inputSlots,prompt,images:{sheet:{url}}}, approved }]
   tvBackdrops: [],  // [{ id, name, cardInputSlots, cardOutputSlots, angleShots, approved }]
 
   // Новости tab — two-pane picker: proposed items (left) vs items dragged into the episode
@@ -47,7 +70,9 @@ const tvState = {
   approvals: { work:false, news:false, studio:false, grid:false, tasks:false, archive:false, air:false },
 };
 
-let tvAnchorSeq = 1, tvBackdropSeq = 1, tvNewsItemSeq = 1, tvGridBlockSeq = 1, tvTaskSeq = 1, tvArchiveSeq = 1;
+// tvAnchors get their id from the server (tv_anchors.id, SERIAL) once saved — no client
+// sequence needed for them. The rest are still client-only placeholders.
+let tvBackdropSeq = 1, tvNewsItemSeq = 1, tvGridBlockSeq = 1, tvTaskSeq = 1, tvArchiveSeq = 1;
 
 function tvRubricLabel(key){
   const r = TV_RUBRICS.find(r=> r.key===key);

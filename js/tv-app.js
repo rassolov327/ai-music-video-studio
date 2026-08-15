@@ -23,28 +23,424 @@ function toggleTvApproval(){
   renderTvApprovalButton();
 }
 
-// ---- Work tab: anchors + backdrops (placeholders — Character/Object Card flow TBD) ----
+// ---- shared modal (anchor detail / form / Character Card builder swap into this) ----
+function tvOpenModal(){
+  document.getElementById('tvAnchorModal').classList.remove('hidden');
+}
+function tvCloseModal(){
+  document.getElementById('tvAnchorModal').classList.add('hidden');
+  document.getElementById('tvAnchorModalBody').innerHTML = '';
+  tvAnchorCardBuilderOpenId = null;
+}
+
+// ---- reference-capable model list (for Character Card generation) ----
+let tvModelOptions = [];
+async function tvLoadModelList(){
+  try{
+    const res = await fetch('/api/models');
+    const data = await res.json().catch(()=> null);
+    tvModelOptions = (data && data.models) || [];
+  } catch(err){
+    tvModelOptions = [];
+  }
+}
+function tvPickReferenceCapableModel(){
+  return tvModelOptions.find(m=> m.supportsReferenceImage) || null;
+}
+
+// ---- generation infra — same endpoints the main app's Character Card builder uses ----
+async function tvUploadReferencePhoto(photoUrl){
+  let dataUrl = photoUrl;
+  if(photoUrl.indexOf('blob:')===0){
+    const blob = await (await fetch(photoUrl)).blob();
+    dataUrl = await new Promise((resolve, reject)=>{
+      const fr = new FileReader();
+      fr.onload = ()=> resolve(fr.result);
+      fr.onerror = reject;
+      fr.readAsDataURL(blob);
+    });
+  }
+  const res = await fetch('/api/upload-reference-image', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dataUrl }),
+  });
+  const data = await res.json().catch(()=> null);
+  if(!res.ok || !data || !data.url){
+    console.warn('[tv] could not upload reference photo, generating without it:', data && data.message);
+    return undefined;
+  }
+  return data.url;
+}
+async function tvPollGenerationSlot(taskId){
+  const deadline = Date.now() + 5 * 60 * 1000;
+  while(Date.now() < deadline){
+    await new Promise(r=> setTimeout(r, 3000));
+    const res = await fetch('/api/generate-image/status?taskId=' + encodeURIComponent(taskId));
+    const data = await res.json().catch(()=> null);
+    if(!res.ok || !data) throw new Error('Lost contact with the server.');
+    if(data.status==='success' && data.imageUrl) return data.imageUrl;
+    if(data.status==='failed') throw new Error(data.message || 'Generation failed.');
+  }
+  throw new Error('Timed out — check the TASKS tab, it may still finish.');
+}
+function tvGatherReferencePhotos(anchor){
+  const photos = TV_CARD_INPUT_SLOTS.map(s=> anchor.card.inputSlots[s.key]).filter(Boolean);
+  if(photos.length===0 && anchor.photo) photos.push(anchor.photo);
+  return photos;
+}
+// Same turnaround-sheet prompt template characters.js uses — generic enough (any person,
+// any wardrobe) to apply to a TV anchor without changes.
+function tvBuildCardSheetPrompt(anchor, basePrompt, extra){
+  return [
+    basePrompt || anchor.description || '',
+    'character reference turnaround sheet, two rows of four panels each, the exact same person with identical face, hair, build, and outfit in every panel',
+    'top row, panel 1 (full body): facing straight at the camera, front view',
+    'top row, panel 2 (full body): body and face turned so the person is looking toward the LEFT edge of the frame — their right cheek and right ear are hidden from view',
+    'top row, panel 3 (full body): the mirror opposite of panel 2 — body and face turned so the person is looking toward the RIGHT edge of the frame instead — their left cheek and left ear are hidden from view. Panels 2 and 3 must face opposite directions from each other, not the same direction',
+    'top row, panel 4 (full body): viewed from directly behind, back of the head and body, face not visible',
+    'bottom row, panel 1 (close-up portrait): facing straight at the camera, matching panel 1 above',
+    'bottom row, panel 2 (close-up portrait): looking toward the LEFT edge of the frame, matching the turn direction of panel 2 above',
+    'bottom row, panel 3 (close-up portrait): the mirror opposite of bottom panel 2 — looking toward the RIGHT edge of the frame instead, matching the turn direction of panel 3 above. Bottom panels 2 and 3 must face opposite directions from each other, not the same direction',
+    'bottom row, panel 4 (close-up): back of the head only, matching panel 4 above',
+    extra,
+    'plain neutral background, even studio lighting, photoreal, highly detailed, no text, no labels, no panel borders',
+  ].filter(Boolean).join(', ');
+}
+
+// ---- server persistence ----
+async function tvSaveAnchor(payload, id){
+  const res = await fetch(id ? '/api/tv/anchors/' + id : '/api/tv/anchors', {
+    method: id ? 'PUT' : 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json().catch(()=> null);
+  if(res.status===401) throw new Error('Нужно войти в аккаунт — откройте / и авторизуйтесь, затем вернитесь на /tv.');
+  if(!res.ok || !data || !data.anchor) throw new Error((data && data.message) || 'Не удалось сохранить ведущего.');
+  return data.anchor;
+}
+async function tvDeleteAnchorOnServer(id){
+  await fetch('/api/tv/anchors/' + id, { method: 'DELETE' });
+}
+async function tvLoadAnchors(){
+  const data = await tvFetchJson('/api/tv/anchors');
+  if(data && Array.isArray(data.anchors)) tvState.tvAnchors = data.anchors;
+}
+
+// ---- status (red = incomplete basics, yellow = basics done but no card yet, green = card built) ----
+function tvAnchorStatus(a){
+  if(!a.name || !a.photo || !a.role || !a.description) return 'red';
+  const hasSheet = !!(a.card && a.card.images && a.card.images.sheet && a.card.images.sheet.url);
+  return hasSheet ? 'green' : 'yellow';
+}
+
+// ---- Work tab: anchors gallery ----
 function renderTvAnchors(){
   const el = document.getElementById('tvAnchorsGrid');
   if(!el) return;
-  el.innerHTML = tvState.tvAnchors.length
-    ? tvState.tvAnchors.map(a=> `<div class="tv-card-tile"><div class="tv-card-tile-name">${a.name}</div></div>`).join('')
-    : `<div class="tv-empty-hint">Ведущих пока нет — нажмите «+ Ведущий».</div>`;
+  if(!tvState.tvAnchors.length){
+    el.innerHTML = `<div class="tv-empty-hint">Ведущих пока нет — нажмите «+ Ведущий».</div>`;
+    return;
+  }
+  el.innerHTML = tvState.tvAnchors.map(a=> `
+    <div class="char-tile" data-id="${a.id}">
+      <div class="char-tile-photo">${a.photo ? `<img src="${a.photo}">` : '<i class="ti ti-user"></i>'}</div>
+      <div class="char-tile-status status-${tvAnchorStatus(a)}"></div>
+      <div class="char-tile-name">${a.name}</div>
+      ${a.role ? `<div class="char-tile-role">${a.role}</div>` : ''}
+    </div>`).join('');
+  el.querySelectorAll('.char-tile').forEach(tile=>{
+    tile.onclick = ()=>{
+      const anchor = tvState.tvAnchors.find(a=> String(a.id)===tile.dataset.id);
+      if(anchor) tvOpenAnchorDetail(anchor);
+    };
+  });
 }
+
+// ---- anchor detail view (modal) ----
+function tvOpenAnchorDetail(anchor){
+  const hasSheet = !!(anchor.card && anchor.card.images && anchor.card.images.sheet && anchor.card.images.sheet.url);
+  const body = document.getElementById('tvAnchorModalBody');
+  body.innerHTML = `
+    <div class="char-card">
+      <div class="char-card-photo">
+        ${anchor.photo ? `<img src="${anchor.photo}">` : '<i class="ti ti-user" style="font-size:40px;"></i>'}
+      </div>
+      <div class="char-card-body">
+        <p class="char-card-name">${anchor.name}</p>
+        ${anchor.role ? `<span class="char-card-role">${anchor.role}</span>` : ''}
+        ${anchor.description ? `<p class="char-card-desc">${anchor.description}</p>` : ''}
+        ${anchor.voiceId ? `<div class="gen-hint" style="margin-top:-8px;margin-bottom:14px;">Голос: ${anchor.voiceId}</div>` : ''}
+        <div class="char-card-section-title">Character Card</div>
+        ${hasSheet
+          ? `<div class="char-card-angles"><div class="char-card-angle" style="width:100%;height:90px;"><img src="${anchor.card.images.sheet.url}"></div></div>`
+          : `<div class="gen-hint" style="margin-top:0;">Лист ещё не создан — на нём держится каждая генерация этого ведущего.</div>`}
+        <div class="char-card-actions">
+          <button class="cf-btn" id="tvAnchorBack">Закрыть</button>
+          <div style="display:flex;gap:8px;">
+            <button class="cf-btn" id="tvAnchorEdit">Изменить</button>
+            <button class="cf-btn" id="tvAnchorDelete" style="color:var(--danger);">Удалить</button>
+          </div>
+        </div>
+        <button class="cf-btn primary" id="tvAnchorBuildBtn" style="width:100%;margin-top:12px;">${hasSheet ? 'Изменить Character Card' : 'Создать Character Card'}</button>
+      </div>
+    </div>`;
+  document.getElementById('tvAnchorBack').onclick = tvCloseModal;
+  document.getElementById('tvAnchorEdit').onclick = ()=> tvOpenAnchorForm(anchor);
+  document.getElementById('tvAnchorBuildBtn').onclick = ()=> tvOpenAnchorCardBuilder(anchor);
+  document.getElementById('tvAnchorDelete').onclick = async ()=>{
+    if(!confirm('Удалить ведущего «' + anchor.name + '»?')) return;
+    await tvDeleteAnchorOnServer(anchor.id);
+    tvState.tvAnchors = tvState.tvAnchors.filter(a=> a.id!==anchor.id);
+    renderTvAnchors();
+    tvCloseModal();
+  };
+  tvOpenModal();
+}
+
+// ---- anchor create/edit form (the lightweight "step 1" card) ----
+function tvOpenAnchorForm(existing){
+  const body = document.getElementById('tvAnchorModalBody');
+  body.innerHTML = `
+    <div class="char-form">
+      <h3>${existing ? 'Изменить ведущего' : 'Новый ведущий'}</h3>
+      <p class="sub">${existing ? 'Обновите данные ведущего.' : 'Имя, специализация, описание, голос, одно фото. После сохранения можно собрать полную Character Card.'}</p>
+      <div class="cf-field"><label>Имя</label><input type="text" id="tvAnchorName" placeholder="например, Анна Соколова" value="${existing ? existing.name : ''}"></div>
+      <div class="cf-field"><label>Специализация</label><input type="text" id="tvAnchorRole" placeholder="например, ведёт рубрику Игры" value="${existing && existing.role ? existing.role : ''}"></div>
+      <div class="cf-field"><label>Описание / характер</label><textarea id="tvAnchorDesc" placeholder="Внешность, манера, что важно помнить">${existing && existing.description ? existing.description : ''}</textarea></div>
+      <div class="cf-field"><label>Голос (TTS id) <span style="color:var(--text-3);font-weight:400;">— пригодится во вкладке Студия</span></label><input type="text" id="tvAnchorVoice" placeholder="пока свободный текст" value="${existing && existing.voiceId ? existing.voiceId : ''}"></div>
+      <div class="cf-field">
+        <label>Фото</label>
+        <label class="photo-drop${existing && existing.photo ? ' has-photo' : ''}" id="tvAnchorPhotoDrop">
+          ${existing && existing.photo ? `<img src="${existing.photo}">` : ''}
+          <span class="photo-drop-plus"><i class="ti ti-plus"></i></span><span class="photo-drop-text">Добавить фото</span>
+          <input type="file" id="tvAnchorPhotoInput" accept="image/*" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;">
+        </label>
+      </div>
+      <div class="cf-actions">
+        <button class="cf-btn" id="tvAnchorCancel">Отмена</button>
+        <button class="cf-btn primary" id="tvAnchorSave" ${existing && existing.name ? '' : 'disabled'}>${existing ? 'Сохранить' : 'Добавить'}</button>
+      </div>
+    </div>`;
+
+  const photoDrop = document.getElementById('tvAnchorPhotoDrop');
+  let photoInput = document.getElementById('tvAnchorPhotoInput');
+  let photoDataUrl = existing ? existing.photo || null : null;
+  photoDrop.onclick = (e)=>{ if(!e.target.closest('input')) photoInput.click(); };
+  function wirePhotoInput(){
+    photoInput = document.getElementById('tvAnchorPhotoInput');
+    photoInput.onchange = async ()=>{
+      const file = photoInput.files[0];
+      if(!file) return;
+      try{
+        photoDataUrl = await loadImageAsDataURL(file);
+        photoDrop.classList.add('has-photo');
+        photoDrop.innerHTML = `<img src="${photoDataUrl}"><span class="photo-drop-plus"><i class="ti ti-plus"></i></span><span class="photo-drop-text">Добавить фото</span><input type="file" id="tvAnchorPhotoInput" accept="image/*" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;">`;
+        wirePhotoInput();
+      } catch(err){}
+    };
+  }
+  wirePhotoInput();
+
+  const nameInput = document.getElementById('tvAnchorName');
+  const saveBtn = document.getElementById('tvAnchorSave');
+  nameInput.addEventListener('input', ()=>{ saveBtn.disabled = nameInput.value.trim().length===0; });
+
+  document.getElementById('tvAnchorCancel').onclick = ()=> existing ? tvOpenAnchorDetail(existing) : tvCloseModal();
+  saveBtn.onclick = async ()=>{
+    const name = nameInput.value.trim();
+    if(!name) return;
+    saveBtn.disabled = true; saveBtn.textContent = 'Сохранение…';
+    const payload = {
+      name,
+      role: document.getElementById('tvAnchorRole').value.trim(),
+      description: document.getElementById('tvAnchorDesc').value.trim(),
+      voiceId: document.getElementById('tvAnchorVoice').value.trim(),
+      photo: photoDataUrl,
+    };
+    try{
+      const saved = await tvSaveAnchor(payload, existing ? existing.id : null);
+      if(existing){
+        Object.assign(existing, saved);
+        renderTvAnchors();
+        tvOpenAnchorDetail(existing);
+      } else {
+        tvState.tvAnchors.push(saved);
+        renderTvAnchors();
+        tvOpenAnchorDetail(saved);
+      }
+    } catch(err){
+      alert('Не удалось сохранить: ' + err.message);
+      saveBtn.disabled = false; saveBtn.textContent = existing ? 'Сохранить' : 'Добавить';
+    }
+  };
+  tvOpenModal();
+}
+
+// ---- Character Card builder — the real, generation-driving reference set ----
+let tvAnchorCardBuilderOpenId = null;
+
+function tvOpenAnchorCardBuilder(anchor){
+  tvAnchorCardBuilderOpenId = anchor.id;
+  if(!anchor.card) anchor.card = { inputSlots: tvEmptyCardInputSlots(), prompt: anchor.description || '', images: {} };
+  if(!anchor.card.inputSlots) anchor.card.inputSlots = tvEmptyCardInputSlots();
+  if(!anchor.card.images) anchor.card.images = {};
+  if(!anchor.card.inputSlots.front && anchor.photo) anchor.card.inputSlots.front = anchor.photo;
+
+  const hasSheet = !!(anchor.card.images.sheet && anchor.card.images.sheet.url);
+  const body = document.getElementById('tvAnchorModalBody');
+  body.innerHTML = `
+    <div class="char-form card-builder">
+      <h3>Character Card — ${anchor.name}</h3>
+      <p class="sub">На этой карте держится каждая генерация ${anchor.name}. Добавьте, что есть — хватит и одного фото — опишите ведущего и создайте полный набор.</p>
+      <div class="cf-field">
+        <label>Референс-фото <span style="color:var(--text-3);font-weight:400;">— опционально, больше — лучше</span></label>
+        <div class="angle-slots-grid" id="tvCardInputGrid"></div>
+        <input type="file" id="tvCardSlotFileInput" accept="image/*" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;">
+      </div>
+      <div class="cf-field">
+        <label>Описание <span style="color:var(--text-3);font-weight:400;">— промпт для карты</span></label>
+        <textarea id="tvCardPromptInput" style="min-height:80px;" placeholder="Внешность, одежда, отличительные черты...">${anchor.card.prompt || anchor.description || ''}</textarea>
+      </div>
+      <button class="cf-btn primary" id="tvCardCreateBtn" style="width:100%;">${hasSheet ? 'Пересоздать карту' : 'Создать карту'}</button>
+      <div class="gen-hint" id="tvCardModelHint" style="margin-top:6px;"></div>
+      <div class="char-card-section-title" style="margin-top:16px;">Изображения карты</div>
+      <div class="card-output-grid" id="tvCardOutputGrid" style="grid-template-columns:1fr;"></div>
+      <div class="cf-actions" style="margin-top:16px;">
+        <button class="cf-btn" id="tvCardBuilderBack">Назад к ведущему</button>
+      </div>
+    </div>`;
+
+  tvRenderCardInputGrid(anchor);
+  tvRenderCardOutputGrid(anchor);
+
+  const model = tvPickReferenceCapableModel();
+  const modelHint = document.getElementById('tvCardModelHint');
+  if(!model){
+    modelHint.textContent = 'Нет подключённой модели с поддержкой референс-фото (например, Nano Banana Pro).';
+    modelHint.style.color = 'var(--danger)';
+    document.getElementById('tvCardCreateBtn').disabled = true;
+  } else {
+    modelHint.textContent = 'Генерация через ' + model.label + ' (использует ваши референс-фото напрямую).';
+  }
+
+  document.getElementById('tvCardPromptInput').addEventListener('input', (e)=>{ anchor.card.prompt = e.target.value; });
+  document.getElementById('tvCardCreateBtn').onclick = ()=> tvRunCreateCard(anchor);
+  document.getElementById('tvCardBuilderBack').onclick = ()=>{
+    tvAnchorCardBuilderOpenId = null;
+    tvOpenAnchorDetail(anchor);
+  };
+  tvOpenModal();
+}
+
+function tvRenderCardInputGrid(anchor){
+  const grid = document.getElementById('tvCardInputGrid');
+  if(!grid) return;
+  const slotFileInput = document.getElementById('tvCardSlotFileInput');
+  let activeSlotKey = null;
+  grid.innerHTML = TV_CARD_INPUT_SLOTS.map(s=>{
+    const src = anchor.card.inputSlots[s.key];
+    return `<div class="angle-slot${src?' filled':' optional'}" data-slot="${s.key}" title="${s.hint}">
+      ${src ? `<img src="${src}"><div class="slot-remove" data-remove="${s.key}"><i class="ti ti-x" style="font-size:10px;"></i></div>` : `<span class="slot-plus"><i class="ti ti-plus"></i></span>`}
+      <span class="slot-label">${s.label}</span>
+    </div>`;
+  }).join('');
+  grid.querySelectorAll('.angle-slot').forEach(el=>{
+    el.onclick = (e)=>{
+      if(e.target.closest('.slot-remove')) return;
+      activeSlotKey = el.dataset.slot;
+      slotFileInput.click();
+    };
+  });
+  grid.querySelectorAll('.slot-remove').forEach(btn=>{
+    btn.onclick = (e)=>{
+      e.stopPropagation();
+      anchor.card.inputSlots[btn.dataset.remove] = null;
+      tvRenderCardInputGrid(anchor);
+    };
+  });
+  slotFileInput.onchange = async ()=>{
+    const file = slotFileInput.files[0];
+    if(!file || !activeSlotKey) return;
+    try{
+      const dataUrl = await loadImageAsDataURL(file);
+      anchor.card.inputSlots[activeSlotKey] = dataUrl;
+      tvRenderCardInputGrid(anchor);
+    } catch(err){}
+    slotFileInput.value = '';
+  };
+}
+
+function tvRenderCardOutputGrid(anchor){
+  const grid = document.getElementById('tvCardOutputGrid');
+  if(!grid) return;
+  const entry = anchor.card.images.sheet;
+  const pending = anchor.card._pending && anchor.card._pending.sheet;
+  let inner;
+  if(entry && entry.url) inner = `<img src="${entry.url}">`;
+  else if(pending) inner = `<div class="task-tile-spin"></div>`;
+  else inner = `<span class="card-output-empty">Ещё не сгенерировано</span>`;
+  grid.innerHTML = `<div class="card-sheet-tile">${inner}</div>`;
+}
+function tvRenderCardOutputGridIfOpen(anchor){
+  if(tvAnchorCardBuilderOpenId===anchor.id) tvRenderCardOutputGrid(anchor);
+}
+
+async function tvRunCreateCard(anchor){
+  const model = tvPickReferenceCapableModel();
+  if(!model) return;
+  const btn = document.getElementById('tvCardCreateBtn');
+  if(btn){ btn.disabled = true; btn.textContent = 'Генерация…'; }
+  const promptText = document.getElementById('tvCardPromptInput').value.trim();
+  anchor.card.prompt = promptText;
+  anchor.card._pending = anchor.card._pending || {};
+  anchor.card._pending.sheet = true;
+  tvRenderCardOutputGridIfOpen(anchor);
+
+  try{
+    const photos = tvGatherReferencePhotos(anchor);
+    const referenceImageUrls = [];
+    for(const p of photos){
+      const url = await tvUploadReferencePhoto(p);
+      if(url) referenceImageUrls.push(url);
+    }
+    const prompt = tvBuildCardSheetPrompt(anchor, promptText);
+    const res = await fetch('/api/generate-image/start', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt, width: TV_CARD_SHEET_WIDTH, height: TV_CARD_SHEET_HEIGHT, model: model.id,
+        referenceImageUrl: referenceImageUrls,
+        meta: { kind: 'tv-anchor-card', anchorId: anchor.id, anchorName: anchor.name },
+      }),
+    });
+    const data = await res.json().catch(()=> null);
+    if(res.status===401) throw new Error('Нужно войти в аккаунт — откройте / и авторизуйтесь, затем вернитесь на /tv.');
+    if(!res.ok || !data || !data.taskId) throw new Error((data && data.message) || 'Не удалось запустить генерацию.');
+    const imageUrl = await tvPollGenerationSlot(data.taskId);
+    anchor.card.images.sheet = anchor.card.images.sheet || {};
+    anchor.card.images.sheet.url = imageUrl;
+    delete anchor.card._pending.sheet;
+    const saved = await tvSaveAnchor({ card: anchor.card }, anchor.id);
+    Object.assign(anchor, saved);
+  } catch(err){
+    console.warn('[tv] failed to generate the anchor card:', err);
+    alert('Не удалось создать Character Card: ' + err.message);
+  } finally {
+    if(anchor.card._pending) delete anchor.card._pending.sheet;
+    tvRenderCardOutputGridIfOpen(anchor);
+  }
+
+  if(btn){ btn.disabled = false; btn.textContent = (anchor.card.images.sheet && anchor.card.images.sheet.url) ? 'Пересоздать карту' : 'Создать карту'; }
+  renderTvAnchors();
+}
+
+// ---- Work tab: studio backdrops (placeholder — Object Card flow reused from locations.js is next) ----
 function renderTvBackdrops(){
   const el = document.getElementById('tvBackdropsGrid');
   if(!el) return;
   el.innerHTML = tvState.tvBackdrops.length
     ? tvState.tvBackdrops.map(b=> `<div class="tv-card-tile"><div class="tv-card-tile-name">${b.name}</div></div>`).join('')
     : `<div class="tv-empty-hint">Декораций студии пока нет — нажмите «+ Декорация».</div>`;
-}
-function addTvAnchor(){
-  const name = prompt('Имя ведущего:');
-  if(!name) return;
-  // Card input/output slots start empty — the actual Character Card build-out (reusing
-  // characters.js + object-card.js as the template) is the next planned step, per CLAUDE.md.
-  tvState.tvAnchors.push({ id: tvAnchorSeq++, name, cardInputSlots: {}, cardOutputSlots: {}, approved:false });
-  renderTvAnchors();
 }
 function addTvBackdrop(){
   const name = prompt('Название декорации:');
@@ -116,9 +512,11 @@ function wireTvPageTabs(){
   const approveBtn = document.getElementById('tvApproveBtn');
   if(approveBtn) approveBtn.onclick = toggleTvApproval;
   const addAnchorBtn = document.getElementById('tvAddAnchorBtn');
-  if(addAnchorBtn) addAnchorBtn.onclick = addTvAnchor;
+  if(addAnchorBtn) addAnchorBtn.onclick = ()=> tvOpenAnchorForm(null);
   const addBackdropBtn = document.getElementById('tvAddBackdropBtn');
   if(addBackdropBtn) addBackdropBtn.onclick = addTvBackdrop;
+  const modalBackdrop = document.getElementById('tvAnchorModalBackdrop');
+  if(modalBackdrop) modalBackdrop.onclick = tvCloseModal;
 }
 
 (async function(){
@@ -126,7 +524,8 @@ function wireTvPageTabs(){
   showTvPage('work');
   renderTvAnchors();
   renderTvBackdrops();
-  await loadTvData();
+  await Promise.all([tvLoadModelList(), tvLoadAnchors(), loadTvData()]);
+  renderTvAnchors();
   renderTvNewsPickers();
   renderTvGrid();
 })();
