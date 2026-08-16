@@ -148,7 +148,7 @@ machine/deployment to confirm the Wayback pass actually returns results. If it c
 consistently empty, the Wikipedia pass alone still keeps the feature usable (just at
 year-level precision) while that gets debugged.
 
-**Calendar**: Новости tab shows a small month-grid calendar (`tvRenderNewsCalendar()`,
+**Calendar**: Новости tab shows a small month-grid calendar (`renderTvNewsCalendar()`,
 `#tvNewsCalendar`) with the target week's 7 days highlighted, computed client-side
 (`tvComputeTargetWeek()`, mirrors `server.js`'s `tvHistoricalWeekRange()`). Display-only,
 no navigation to other weeks (Костян's choice).

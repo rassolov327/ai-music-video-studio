@@ -979,7 +979,7 @@ function tvComputeTargetWeek(refDate){
 const TV_MONTH_NAMES = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
 // Static display only (no navigation, per Костян) — a month grid for the target week's
 // month, with that week's 7 days highlighted.
-function tvRenderNewsCalendar(){
+function renderTvNewsCalendar(){
   const el = document.getElementById('tvNewsCalendar');
   if(!el) return;
   const week = tvComputeTargetWeek();
