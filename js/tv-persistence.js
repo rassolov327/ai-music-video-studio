@@ -131,6 +131,11 @@ async function tvMigrateAssetsToDisk(){
     if(newsItem._assetFiles && newsItem._assetFiles.voice){
       await tvCopyAssetToDisk('newsitem:' + newsItem.id + ':voice', newsItem._assetFiles.voiceFile);
     }
+    if(newsItem._assetFiles && Array.isArray(newsItem._assetFiles.media)){
+      for(const entry of newsItem._assetFiles.media){
+        await tvCopyAssetToDisk('newsitem:' + newsItem.id + ':media:' + entry.id, entry.fileName);
+      }
+    }
   }
   for(const block of tvState.tvGridBlocks){
     if(block._assetFiles && block._assetFiles.voice){
@@ -304,9 +309,15 @@ function tvSerialize(){
     return copy;
   });
   const newsItems = tvState.tvNewsItems.map(n=>{
-    if(!n._assetFiles || !n._assetFiles.voice) return n;
+    const hasVoiceAsset = n._assetFiles && n._assetFiles.voice;
+    const hasMediaAssets = n._assetFiles && Array.isArray(n._assetFiles.media) && n._assetFiles.media.length;
+    if(!hasVoiceAsset && !hasMediaAssets) return n;
     const copy = JSON.parse(JSON.stringify(n));
-    copy.voiceUrl = null;
+    if(hasVoiceAsset) copy.voiceUrl = null;
+    if(hasMediaAssets){
+      const localIds = new Set(n._assetFiles.media.map(m=> m.id));
+      copy.media = (copy.media||[]).map(m=> localIds.has(m.id) ? Object.assign({}, m, { url:null }) : m);
+    }
     return copy;
   });
   const gridBlocks = tvState.tvGridBlocks.map(b=>{
@@ -405,6 +416,18 @@ async function tvRestoreNewsItemVoiceAsset(newsItem){
     if(url) newsItem.voiceUrl = url;
   }
 }
+// Manually-uploaded photos on a hand-added news item (see tvOpenManualNewsForm, js/tv-app.js)
+// — same asset-backed treatment as the voice recording, keyed per-photo since a news item
+// can carry any number of them.
+async function tvRestoreNewsItemMediaAssets(newsItem){
+  if(!newsItem._assetFiles || !Array.isArray(newsItem._assetFiles.media) || !Array.isArray(newsItem.media)) return;
+  for(const entry of newsItem._assetFiles.media){
+    const m = newsItem.media.find(x=> x.id===entry.id);
+    if(!m) continue;
+    const url = await tvLoadBlobAsset('newsitem:' + newsItem.id + ':media:' + entry.id, entry.fileName);
+    if(url) m.url = url;
+  }
+}
 async function tvRestoreGridBlockVoiceAsset(block){
   if(block._assetFiles && block._assetFiles.voice){
     const url = await tvLoadBlobAsset('gridblock:' + block.id + ':voice', block._assetFiles.voiceFile);
@@ -432,7 +455,7 @@ async function tvApplyWorkspaceData(data){
   }
   for(const anchor of tvState.tvAnchors) await tvRestoreAnchorAssets(anchor);
   for(const studio of tvState.tvStudios) await tvRestoreStudioAssets(studio);
-  for(const newsItem of tvState.tvNewsItems) await tvRestoreNewsItemVoiceAsset(newsItem);
+  for(const newsItem of tvState.tvNewsItems){ await tvRestoreNewsItemVoiceAsset(newsItem); await tvRestoreNewsItemMediaAssets(newsItem); }
   for(const block of tvState.tvGridBlocks) await tvRestoreGridBlockVoiceAsset(block);
   if(typeof renderTvAnchors==='function') renderTvAnchors();
   if(typeof renderTvStudios==='function') renderTvStudios();

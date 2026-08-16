@@ -65,6 +65,11 @@
   .tv-news-panes{ display:flex; gap:14px; }
   .tv-news-pane{ flex:1; min-width:0; border:1px solid var(--line); border-radius:8px; background:var(--bg-panel-2); min-height:340px; }
   .tv-news-pane-head{ font-size:11.5px; color:var(--text-2); padding:8px 10px; border-bottom:1px solid var(--line); }
+  .tv-news-add-btn{
+    width:20px; height:20px; line-height:18px; padding:0; border-radius:5px; text-align:center;
+    background:transparent; border:1px solid var(--warn); color:var(--warn); font-size:15px; font-weight:600; cursor:pointer;
+  }
+  .tv-news-add-btn:hover{ background:rgba(224,178,60,.16); }
   .tv-news-row{
     display:flex; align-items:center; gap:8px; padding:7px 10px; border-bottom:1px solid var(--line-soft);
     font-size:12.5px;
@@ -300,7 +305,10 @@
         </div>
       </div>
       <div class="tv-news-pane">
-        <div class="tv-news-pane-head">В выпуске</div>
+        <div class="tv-news-pane-head" style="display:flex;align-items:center;justify-content:space-between;">
+          <span>В выпуске</span>
+          <button class="tv-news-add-btn" id="tvAddManualNewsBtn" title="Добавить новость вручную">+</button>
+        </div>
         <div id="tvNewsRightPane"></div>
       </div>
     </div>

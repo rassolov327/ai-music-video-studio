@@ -929,6 +929,7 @@ function renderTvNewsArchive(){
 // ---- two-pane picker, with click-to-expand (read full text + collected materials) ----
 const tvExpandedNewsIds = new Set(); // UI-only, not persisted — resets on reload
 function tvNewsPrecisionBadge(n){
+  if(n.source==='manual') return '<span class="tv-news-flag" style="color:var(--accent-text);border-color:var(--accent);" title="Добавлено вручную, не из автоматического поиска">вручную</span>';
   if(n.sourcePrecision==='week') return '<span class="tv-news-flag tv-news-flag-week" title="Реальный архивный источник, датирован именно этой неделей">неделя</span>';
   if(n.sourcePrecision==='month') return '<span class="tv-news-flag tv-news-flag-month" title="Для этой рубрики за точную неделю ничего не нашлось — источник реальный, но датирован в пределах месяца">месяц</span>';
   if(n.sourcePrecision==='year') return '<span class="tv-news-flag tv-news-flag-year" title="Источник — Wikipedia, точность в пределах года, не недели">год</span>';
@@ -1008,6 +1009,118 @@ function renderTvNewsPickers(){
     };
   });
   tvUpdateNewsBulkButtons();
+}
+
+// ---- manual news item creation — yellow "+" above the "В выпуске" pane. Костян can add a
+// story himself (title, rubric, content, his own photos) and it lands straight in the
+// episode, bypassing Wayback/Wikipedia sourcing entirely — for stories he already knows
+// about and has material for. Tagged source:'manual' so tvNewsPrecisionBadge shows
+// "вручную" instead of a week/month/year precision badge (there's no source URL to be
+// precise about). ----
+let tvManualNewsPhotos = []; // [{ id, url }] — local to the open modal, not saved until Save
+function tvOpenManualNewsForm(){
+  tvManualNewsPhotos = [];
+  const body = document.getElementById('tvAnchorModalBody');
+  body.innerHTML = `
+    <div class="char-form">
+      <h3>Новость вручную</h3>
+      <p class="sub">Добавьте свою новость напрямую — сразу «В выпуске», без поиска по архивам.</p>
+      <div class="cf-field"><label>Тема</label><input type="text" id="tvManualNewsTitle" placeholder="Например, вышла новая версия ICQ"></div>
+      <div class="cf-field"><label>Рубрика</label><select id="tvManualNewsRubric">
+        ${TV_RUBRICS.map(r=> `<option value="${r.key}">${r.label}</option>`).join('')}
+      </select></div>
+      <div class="cf-field"><label>Содержание</label><textarea id="tvManualNewsContent" placeholder="О чём новость — коротко перескажите суть"></textarea></div>
+      <div class="cf-field">
+        <label>Фотографии</label>
+        <div class="angle-slots-grid" id="tvManualNewsPhotoGrid"></div>
+        <input type="file" id="tvManualNewsPhotoInput" accept="image/*" multiple style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;">
+      </div>
+      <div class="cf-actions">
+        <button class="cf-btn" id="tvManualNewsCancel">Отмена</button>
+        <button class="cf-btn primary" id="tvManualNewsSave" disabled>Сохранить</button>
+      </div>
+    </div>`;
+
+  tvRenderManualNewsPhotoGrid();
+
+  const titleInput = document.getElementById('tvManualNewsTitle');
+  const saveBtn = document.getElementById('tvManualNewsSave');
+  titleInput.addEventListener('input', ()=>{ saveBtn.disabled = titleInput.value.trim().length===0; });
+
+  document.getElementById('tvManualNewsCancel').onclick = tvCloseModal;
+  saveBtn.onclick = ()=> tvSaveManualNewsItem();
+  tvOpenModal();
+}
+function tvRenderManualNewsPhotoGrid(){
+  const grid = document.getElementById('tvManualNewsPhotoGrid');
+  const input = document.getElementById('tvManualNewsPhotoInput');
+  if(!grid || !input) return;
+  grid.innerHTML = tvManualNewsPhotos.map(p=> `
+      <div class="angle-slot filled" data-photo-tile="${p.id}">
+        <img src="${p.url}"><div class="slot-remove" data-remove-photo="${p.id}"><i class="ti ti-x" style="font-size:10px;"></i></div>
+      </div>`).join('')
+    + `<div class="angle-slot optional" id="tvManualNewsAddPhotoTile"><span class="slot-plus"><i class="ti ti-plus"></i></span><span class="slot-label">Добавить фото</span></div>`;
+  document.getElementById('tvManualNewsAddPhotoTile').onclick = ()=> input.click();
+  grid.querySelectorAll('[data-remove-photo]').forEach(btn=>{
+    btn.onclick = (e)=>{
+      e.stopPropagation();
+      tvManualNewsPhotos = tvManualNewsPhotos.filter(p=> p.id!==btn.dataset.removePhoto);
+      tvRenderManualNewsPhotoGrid();
+    };
+  });
+  input.onchange = async ()=>{
+    const files = Array.from(input.files || []);
+    for(const file of files){
+      try{
+        const dataUrl = await loadImageAsDataURL(file);
+        tvManualNewsPhotos.push({ id: 'm' + Date.now() + Math.random().toString(36).slice(2), url: dataUrl });
+      } catch(err){}
+    }
+    input.value = '';
+    tvRenderManualNewsPhotoGrid();
+  };
+}
+async function tvSaveManualNewsItem(){
+  const title = document.getElementById('tvManualNewsTitle').value.trim();
+  if(!title) return;
+  const rubric = document.getElementById('tvManualNewsRubric').value;
+  const content = document.getElementById('tvManualNewsContent').value.trim();
+  const week = tvComputeTargetWeek();
+  const id = tvNewsItemSeq++;
+  const media = [];
+  const mediaAssetFiles = [];
+  for(const photo of tvManualNewsPhotos){
+    const result = await tvPersistLocalImageAsset('newsitem:' + id + ':media:' + photo.id, photo.url);
+    media.push({ type:'image', url: result ? result.url : photo.url, title:'', id: photo.id });
+    if(result) mediaAssetFiles.push({ id: photo.id, fileName: result.fileName });
+  }
+  tvState.tvNewsItems.push({
+    id,
+    rubric,
+    title,
+    summary: content,
+    extract: content,
+    sourceDate: null,
+    sourceUrl: null,
+    source: 'manual',
+    sourcePrecision: null,
+    media,
+    materialStatus: media.length ? 'ok' : 'мало материала',
+    isAnniversary: false,
+    included: true,
+    archived: false,
+    archivedAt: null,
+    gatheredForWeek: week.start,
+    assignedAnchorId: null,
+    approvedForRelease: false,
+    sortOrder: 0,
+    _assetFiles: mediaAssetFiles.length ? { media: mediaAssetFiles } : undefined,
+  });
+  tvManualNewsPhotos = [];
+  tvCloseModal();
+  renderTvNewsPickers();
+  renderTvNewsSubTabs();
+  tvSaveSoon();
 }
 
 // ---- Редакция tab (data-tv-page="studio", renamed in the UI — "Студия" was ambiguous
@@ -1849,6 +1962,8 @@ function wireTvPageTabs(){
   if(folderBtn) folderBtn.onclick = tvHandleFolderButtonClick;
   const gatherNewsBtn = document.getElementById('tvGatherNewsBtn');
   if(gatherNewsBtn) gatherNewsBtn.onclick = tvGatherNews;
+  const addManualNewsBtn = document.getElementById('tvAddManualNewsBtn');
+  if(addManualNewsBtn) addManualNewsBtn.onclick = ()=> tvOpenManualNewsForm();
   const autoPopulateGridBtn = document.getElementById('tvAutoPopulateGridBtn');
   if(autoPopulateGridBtn) autoPopulateGridBtn.onclick = tvAutoPopulateGrid;
   const sendToWritingBtn = document.getElementById('tvSendToWritingBtn');

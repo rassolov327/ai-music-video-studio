@@ -151,7 +151,14 @@ const tvState = {
   // the item waits for the user to upload material or explicitly request AI generation;
   // it is never auto-generated or silently dropped. Every item is REAL — sourced from
   // Wayback Machine (sourcePrecision:'week') or Wikipedia (sourcePrecision:'year') via
-  // /api/tv/gather-news, never recalled/invented (see server.js's comment there).
+  // /api/tv/gather-news, never recalled/invented (see server.js's comment there) — OR
+  // added directly by Костян himself (source:'manual', sourcePrecision:null, no
+  // sourceUrl/sourceDate, tvOpenManualNewsForm in tv-app.js) via the "+" above the "В
+  // выпуске" pane, for stories he already knows about with his own photos; lands
+  // `included:true` immediately, skipping the left "Предложено" pane entirely. Manual
+  // media entries carry a stable `id` (asset key suffix — see tvRestoreNewsItemMediaAssets/
+  // tvSerialize in tv-persistence.js) since, unlike wikipedia thumbnails, they're real
+  // uploaded files that need disk/IndexedDB persistence like any other asset.
   // `gatheredForWeek` (ISO week-start date) tags which target week an item was fetched
   // for — tvGatherNews() archives non-included items whose week no longer matches instead
   // of letting stale proposals pile up. Archived items (`archived:true`) are deleted for
@@ -163,8 +170,8 @@ const tvState = {
   // spoken-audio step (Микрофонная tab), voiceUrl null means "not voiced yet" (crossed-out
   // speaker icon in the UI).
   tvNewsItems: [], // [{ id, rubric, title, summary, extract, sourceDate, sourceUrl,
-                    //    source:'wayback'|'wikipedia', sourcePrecision:'week'|'month'|'year',
-                    //    media:[{type,url,title}], materialStatus, isAnniversary, included,
+                    //    source:'wayback'|'wikipedia'|'manual', sourcePrecision:'week'|'month'|'year'|null,
+                    //    media:[{type,url,title,id}], materialStatus, isAnniversary, included,
                     //    archived, archivedAt, gatheredForWeek, assignedAnchorId,
                     //    assignedStudioId, articleText, articleTaskId, voiceUrl, voiceTaskId,
                     //    _assetFiles, approvedForRelease, sortOrder }]
