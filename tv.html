@@ -140,6 +140,15 @@
   .tv-modal.hidden{ display:none; }
   .tv-modal-backdrop{ position:absolute; inset:0; background:rgba(0,0,0,0.6); }
   .tv-modal-panel{ position:relative; width:100%; max-width:680px; max-height:calc(100vh - 48px); overflow-y:auto; display:flex; justify-content:center; }
+  /* .char-form/.char-card (styles.css, shared with the main app) cap their OWN height and
+     scroll internally — correct there, since they normally sit inside a definite-height
+     flex container. Nested inside .tv-modal-panel's own max-height+overflow-y:auto, that
+     creates two independent scroll regions: the outer one (visibly scrollable) can hit its
+     end while the inner one still has un-scrolled content below the fold. Neutralize the
+     inner scroll/height-cap here only — .tv-modal-panel becomes the single scroll owner. */
+  .tv-modal-panel .char-form, .tv-modal-panel .card-builder{ max-height:none; overflow-y:visible; }
+  .tv-modal-panel .char-card{ max-height:none; }
+  .tv-modal-panel .char-card-body{ overflow-y:visible; }
 
   /* Manual "owed to users" input — dev has its own DB, isolated from main, so this number
      can't be computed automatically here; Костян checks main's admin panel and updates it
