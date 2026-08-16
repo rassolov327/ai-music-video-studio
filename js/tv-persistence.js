@@ -127,6 +127,11 @@ async function tvMigrateAssetsToDisk(){
       }
     }
   }
+  for(const newsItem of tvState.tvNewsItems){
+    if(newsItem._assetFiles && newsItem._assetFiles.voice){
+      await tvCopyAssetToDisk('newsitem:' + newsItem.id + ':voice', newsItem._assetFiles.voiceFile);
+    }
+  }
 }
 
 // Always just WRITES current state into the freshly chosen folder — never loads from it —
@@ -183,6 +188,8 @@ function tvExtFromMime(mime){
   if(mime.indexOf('png')>=0) return '.png';
   if(mime.indexOf('webp')>=0) return '.webp';
   if(mime.indexOf('gif')>=0) return '.gif';
+  if(mime.indexOf('wav')>=0) return '.wav';
+  if(mime.indexOf('mpeg')>=0 || mime.indexOf('mp3')>=0) return '.mp3';
   return '.png';
 }
 async function tvPersistBlobAsset(assetKey, blob, ext){
@@ -227,6 +234,18 @@ async function tvPersistRemoteImageAsset(assetKey, remoteUrl){
     return { url: URL.createObjectURL(blob), fileName };
   } catch(err){
     console.warn('[tv-persistence] could not persist remote image', assetKey, err);
+    return null;
+  }
+}
+// When the caller already has a real Blob in hand (e.g. straight from a fetch() response,
+// like /api/tv/generate-voice's audio bytes) — skips the fetch(dataOrBlobUrl) round trip
+// tvPersistLocalImageAsset needs, so there's no data:-URL CSP concern here at all.
+async function tvPersistBlobAssetDirect(assetKey, blob, ext){
+  try{
+    const fileName = (await tvPersistBlobAsset(assetKey, blob, ext || tvExtFromMime(blob.type))) || (assetKey.replace(/[:]/g,'_') + (ext || tvExtFromMime(blob.type)));
+    return { url: URL.createObjectURL(blob), fileName };
+  } catch(err){
+    console.warn('[tv-persistence] could not persist blob asset', assetKey, err);
     return null;
   }
 }
@@ -279,12 +298,18 @@ function tvSerialize(){
     }
     return copy;
   });
+  const newsItems = tvState.tvNewsItems.map(n=>{
+    if(!n._assetFiles || !n._assetFiles.voice) return n;
+    const copy = JSON.parse(JSON.stringify(n));
+    copy.voiceUrl = null;
+    return copy;
+  });
   return {
     version: 1,
     savedAt: Date.now(),
     tvAnchors: anchors,
     tvStudios: studios,
-    tvNewsItems: tvState.tvNewsItems,
+    tvNewsItems: newsItems,
     tvGridBlocks: tvState.tvGridBlocks,
     tvTaskQueue: tvState.tvTaskQueue,
     tvArchive: tvState.tvArchive,
@@ -363,6 +388,12 @@ async function tvRestoreStudioAssets(studio){
     }
   }
 }
+async function tvRestoreNewsItemVoiceAsset(newsItem){
+  if(newsItem._assetFiles && newsItem._assetFiles.voice){
+    const url = await tvLoadBlobAsset('newsitem:' + newsItem.id + ':voice', newsItem._assetFiles.voiceFile);
+    if(url) newsItem.voiceUrl = url;
+  }
+}
 async function tvApplyWorkspaceData(data){
   if(Array.isArray(data.tvAnchors)) tvState.tvAnchors = data.tvAnchors;
   if(Array.isArray(data.tvStudios)) tvState.tvStudios = data.tvStudios;
@@ -384,9 +415,13 @@ async function tvApplyWorkspaceData(data){
   }
   for(const anchor of tvState.tvAnchors) await tvRestoreAnchorAssets(anchor);
   for(const studio of tvState.tvStudios) await tvRestoreStudioAssets(studio);
+  for(const newsItem of tvState.tvNewsItems) await tvRestoreNewsItemVoiceAsset(newsItem);
   if(typeof renderTvAnchors==='function') renderTvAnchors();
   if(typeof renderTvStudios==='function') renderTvStudios();
   if(typeof renderTvNewsPickers==='function') renderTvNewsPickers();
+  if(typeof renderTvRedaktsiya==='function') renderTvRedaktsiya();
+  if(typeof renderTvMic==='function') renderTvMic();
+  if(typeof renderTvTasks==='function') renderTvTasks();
   if(typeof renderTvGrid==='function') renderTvGrid();
   if(typeof tvSyncOwedInput==='function') tvSyncOwedInput();
   if(typeof tvRenderCreditsIndicator==='function') tvRenderCreditsIndicator();

@@ -48,6 +48,10 @@ const KIE_BASE = 'https://api.kie.ai';
 // job (text, not paid image/video generation).
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const GEMINI_MODEL = 'gemini-3.6-flash'; // Google retires these fast — if this 404s again, check ai.google.dev/gemini-api/docs/models for the current GA Flash model and update just this line
+// Best-guess model id for Gemini's native-audio TTS — genuinely unverified (no live test ran
+// against it while building this; same caution as GEMINI_MODEL above, Google's TTS-specific
+// model names churn just as fast). Override via env if this 404s rather than editing here.
+const GEMINI_TTS_MODEL = process.env.GEMINI_TTS_MODEL || 'gemini-2.5-flash-preview-tts';
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 // Railway sets this automatically; needed to build a callBackUrl KIE can reach.
 const PUBLIC_URL = process.env.RAILWAY_PUBLIC_DOMAIN
@@ -787,6 +791,141 @@ app.post('/api/tv/gather-news', async (req, res) => {
   }));
 
   res.json({ items, weekStart: range.start, weekEnd: range.end });
+});
+
+// ---- text-writing (Journalist) — turns a sourced news item into the anchor's on-air read,
+// in that specific host's voice. Only Gemini for now (free tier, same key already used for
+// gather-news) — Claude/GPT via KIE.ai would be a real paid alternative but their exact
+// createTask request shape for text/chat completion hasn't been verified against KIE's docs
+// yet (unlike the image/video/lipsync models above, whose field names were confirmed the
+// hard way — see LIPSYNC_MODELS's comment). Don't add one here without a real, confirmed
+// request shape; a guessed one would just fail the same way those did on the first attempt. ----
+const TV_TEXT_MODELS = [
+  { id: 'gemini-text', label: 'Gemini (бесплатно)', costUsd: 0, blurb: 'Тот же ключ и тир, что уже используется для сбора новостей' },
+];
+app.get('/api/tv/text-models', (req, res) => {
+  res.json({ models: TV_TEXT_MODELS });
+});
+// No requireAuth — same call as here as /api/tv/gather-news makes: free-tier Gemini, $0
+// cost, nothing to bill or track per-user. Add requireAuth + checkUserCanAfford back only
+// once a real paid model (e.g. Claude/GPT via KIE) is wired into TV_TEXT_MODELS.
+app.post('/api/tv/write-article', async (req, res) => {
+  if (!GEMINI_API_KEY) {
+    return res.status(503).json({ error: 'not_configured', message: 'GEMINI_API_KEY is not set on the server yet.' });
+  }
+  const { title, summary, extract, rubric, sourceDate, personaContext, model } = req.body || {};
+  if (!title || !personaContext) {
+    return res.status(400).json({ error: 'bad_request', message: 'title and personaContext are both required.' });
+  }
+  const matched = TV_TEXT_MODELS.find(m => m.id === model) || TV_TEXT_MODELS[0];
+  const year = (sourceDate && parseInt(String(sourceDate).slice(0, 4), 10)) || (new Date().getUTCFullYear() - 25);
+
+  const prompt = [
+    `Ты пишешь текст, который ведущий прочитает в кадре в эфире российской телепередачи про технологии, выходящей в ${year} году. Это не статья — это устная речь для эфира.`,
+    `Тема сюжета: «${title}».`,
+    summary ? `Краткое содержание: ${summary}` : '',
+    extract ? `Реальный исходный текст по теме (используй только факты отсюда, ничего не выдумывай):\n${extract}` : '',
+    `Рубрика: ${rubric || 'не указана'}.`,
+    `Вот кто ведёт эту рубрику — пиши строго от его лица, с его манерой и характером:`,
+    personaContext,
+    `Требования:`,
+    `- Только реальные факты из исходного текста выше — ничего не придумывай и не домысливай.`,
+    `- Никаких понятий и технологий, которых ещё не существовало на момент ${year} года.`,
+    `- Никаких списков, подзаголовков, канцелярских оборотов, штампов вроде "подводя итог" или искусственной "сбалансированности". Живая устная речь для эфира — с ритмом, характерными для ведущего словами-паразитами и репликами, реальным мнением, а не нейтральным пересказом.`,
+    `- Длина — на 20-40 секунд эфирного времени (примерно 50-100 слов).`,
+    `Ответь только самим текстом для эфира, без пояснений и без кавычек вокруг него.`,
+  ].filter(Boolean).join('\n\n');
+
+  try {
+    const geminiRes = await fetch(`${GEMINI_BASE}/models/${GEMINI_MODEL}:generateContent`, {
+      method: 'POST',
+      headers: { 'x-goog-api-key': GEMINI_API_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }] }] }),
+    });
+    const data = await geminiRes.json().catch(() => null);
+    if (!geminiRes.ok) throw new Error((data && data.error && data.error.message) || ('Gemini rejected the request (HTTP ' + geminiRes.status + ').'));
+    const text = data && data.candidates && data.candidates[0] && data.candidates[0].content
+      && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text;
+    if (!text) throw new Error('Gemini returned an empty response — it may have been blocked by a safety filter.');
+    res.json({ text: text.trim(), model: matched.id });
+  } catch (err) {
+    console.error('[server] /api/tv/write-article failed:', err);
+    res.status(500).json({ error: 'server_error', message: String(err && err.message || err) });
+  }
+});
+
+// ---- voicing — turns approved article text into audio (Микрофонная tab). Gemini TTS
+// (native audio output, same generateContent shape as everything else Gemini here, just
+// with responseModalities:['AUDIO']) returns raw PCM inline as base64 — wrapped into a
+// standard WAV header below so the browser's <audio> element can actually play it without
+// needing a separate decoder. ElevenLabs via KIE.ai would be the paid alternative (better
+// emotional range) but — same caveat as TV_TEXT_MODELS above — its createTask request shape
+// hasn't been confirmed against KIE's real docs, so it's not wired here yet. ----
+const TV_VOICE_MODELS = [
+  { id: 'gemini-tts', label: 'Gemini TTS (бесплатно)', costUsd: 0, blurb: 'Тот же ключ, что и для текста — нативная генерация речи' },
+];
+app.get('/api/tv/voice-models', (req, res) => {
+  res.json({ models: TV_VOICE_MODELS });
+});
+function tvPcmToWav(pcmBuffer, sampleRate, numChannels, bitsPerSample) {
+  const byteRate = sampleRate * numChannels * bitsPerSample / 8;
+  const blockAlign = numChannels * bitsPerSample / 8;
+  const dataSize = pcmBuffer.length;
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0, 'ascii');
+  header.writeUInt32LE(36 + dataSize, 4);
+  header.write('WAVE', 8, 'ascii');
+  header.write('fmt ', 12, 'ascii');
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20); // PCM
+  header.writeUInt16LE(numChannels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(byteRate, 28);
+  header.writeUInt16LE(blockAlign, 32);
+  header.writeUInt16LE(bitsPerSample, 34);
+  header.write('data', 36, 'ascii');
+  header.writeUInt32LE(dataSize, 40);
+  return Buffer.concat([header, pcmBuffer]);
+}
+// No requireAuth — same reasoning as write-article above: free-tier Gemini TTS, $0 cost.
+app.post('/api/tv/generate-voice', async (req, res) => {
+  if (!GEMINI_API_KEY) {
+    return res.status(503).json({ error: 'not_configured', message: 'GEMINI_API_KEY is not set on the server yet.' });
+  }
+  const { text, voiceName, model } = req.body || {};
+  if (!text) {
+    return res.status(400).json({ error: 'bad_request', message: 'text is required.' });
+  }
+  const matched = TV_VOICE_MODELS.find(m => m.id === model) || TV_VOICE_MODELS[0];
+  try {
+    const geminiRes = await fetch(`${GEMINI_BASE}/models/${GEMINI_TTS_MODEL}:generateContent`, {
+      method: 'POST',
+      headers: { 'x-goog-api-key': GEMINI_API_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text }] }],
+        generationConfig: {
+          responseModalities: ['AUDIO'],
+          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voiceName || 'Kore' } } },
+        },
+      }),
+    });
+    const data = await geminiRes.json().catch(() => null);
+    if (!geminiRes.ok) throw new Error((data && data.error && data.error.message) || ('Gemini rejected the request (HTTP ' + geminiRes.status + ').'));
+    const part = data && data.candidates && data.candidates[0] && data.candidates[0].content
+      && data.candidates[0].content.parts && data.candidates[0].content.parts[0];
+    const inline = part && part.inlineData;
+    if (!inline || !inline.data) throw new Error('Gemini returned no audio — it may have been blocked by a safety filter.');
+    const rateMatch = /rate=(\d+)/.exec(inline.mimeType || '');
+    const sampleRate = rateMatch ? parseInt(rateMatch[1], 10) : 24000;
+    const pcmBuffer = Buffer.from(inline.data, 'base64');
+    const wavBuffer = tvPcmToWav(pcmBuffer, sampleRate, 1, 16);
+    res.set('Content-Type', 'audio/wav');
+    res.set('X-TV-Voice-Model', matched.id);
+    res.send(wavBuffer);
+  } catch (err) {
+    console.error('[server] /api/tv/generate-voice failed:', err);
+    res.status(500).json({ error: 'server_error', message: String(err && err.message || err) });
+  }
 });
 
 app.get('/api/models', (req, res) => {

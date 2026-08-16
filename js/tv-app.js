@@ -19,6 +19,9 @@ function showTvPage(page){
     renderTvNewsSubTabs();
     renderTvNewsPickers();
   }
+  if(page==='studio') renderTvRedaktsiya();
+  if(page==='mic') renderTvMic();
+  if(page==='tasks') renderTvTasks();
   if(page==='grid') renderTvGrid();
 }
 
@@ -44,6 +47,7 @@ function tvCloseModal(){
   document.getElementById('tvAnchorModal').classList.add('hidden');
   document.getElementById('tvAnchorModalBody').innerHTML = '';
   tvAnchorCardBuilderOpenId = null;
+  tvMicPanelOpenAnchorId = null;
 }
 
 // ---- fullscreen image lightbox (Character Card / Object Card sheet preview) ----
@@ -69,6 +73,22 @@ async function tvLoadModelList(){
 }
 function tvPickReferenceCapableModel(){
   return tvModelOptions.find(m=> m.supportsReferenceImage) || null;
+}
+
+// ---- text-writing / voicing model lists (TASKS tile pickers) ----
+let tvTextModelOptions = [];
+let tvVoiceModelOptions = [];
+async function tvLoadTaskModelLists(){
+  try{
+    const [textRes, voiceRes] = await Promise.all([fetch('/api/tv/text-models'), fetch('/api/tv/voice-models')]);
+    const textData = await textRes.json().catch(()=> null);
+    const voiceData = await voiceRes.json().catch(()=> null);
+    tvTextModelOptions = (textData && textData.models) || [];
+    tvVoiceModelOptions = (voiceData && voiceData.models) || [];
+  } catch(err){
+    tvTextModelOptions = [];
+    tvVoiceModelOptions = [];
+  }
 }
 
 // ---- generation infra — same endpoints the main app's Character Card builder uses ----
@@ -913,6 +933,342 @@ function renderTvNewsPickers(){
   tvUpdateNewsBulkButtons();
 }
 
+// ---- Редакция tab (data-tv-page="studio", renamed in the UI — "Студия" was ambiguous
+// against the Студии entity gallery on Work) — assign anchor + studio per included news
+// item, then send fully-assigned items off as article-writing tasks. Auto-assigns the
+// rubric's own anchor/studio whenever the match is unambiguous ("тот, кто обычно отвечает
+// за рубрику"); ambiguous or missing matches stay unassigned (red) for a manual pick, on
+// every render — not just once — so adding an anchor/studio later fills gaps automatically. ----
+function tvRedaktsiyaItemStatus(item){
+  if(item.assignedAnchorId && item.assignedStudioId) return 'green';
+  if(item.assignedAnchorId || item.assignedStudioId) return 'yellow';
+  return 'red';
+}
+function tvAutoAssignRedaktsiyaDefaults(){
+  const included = tvState.tvNewsItems.filter(n=> n.included && !n.archived);
+  let changed = false;
+  included.forEach(item=>{
+    if(!item.assignedAnchorId){
+      const matches = tvState.tvAnchors.filter(a=> a.rubric===item.rubric);
+      if(matches.length===1){ item.assignedAnchorId = matches[0].id; changed = true; }
+    }
+    if(!item.assignedStudioId){
+      const anchor = item.assignedAnchorId ? tvState.tvAnchors.find(a=> a.id===item.assignedAnchorId) : null;
+      const targetRubric = anchor ? anchor.rubric : item.rubric;
+      const matches = tvState.tvStudios.filter(s=> s.rubric===targetRubric);
+      if(matches.length===1){ item.assignedStudioId = matches[0].id; changed = true; }
+    }
+  });
+  if(changed) tvSaveSoon();
+}
+function tvUpdateSendToWritingButton(){
+  const btn = document.getElementById('tvSendToWritingBtn');
+  if(!btn) return;
+  const included = tvState.tvNewsItems.filter(n=> n.included && !n.archived);
+  const ready = included.filter(n=> tvRedaktsiyaItemStatus(n)==='green' && !n.articleTaskId && !n.articleText);
+  btn.disabled = ready.length===0;
+  btn.textContent = ready.length ? ('Отправить на написание статей (' + ready.length + ')') : 'Отправить на написание статей';
+}
+function renderTvRedaktsiya(){
+  const el = document.getElementById('tvStudioList');
+  if(!el) return;
+  tvAutoAssignRedaktsiyaDefaults();
+  const included = tvState.tvNewsItems.filter(n=> n.included && !n.archived);
+  if(!included.length){
+    el.innerHTML = `<div class="tv-empty-hint">Нет новостей, включённых в выпуск — добавьте их на вкладке «Новости».</div>`;
+    tvUpdateSendToWritingButton();
+    return;
+  }
+  const rubricOrder = TV_RUBRICS.map(r=> r.key);
+  const groups = [...new Set(included.map(n=> n.rubric))].sort((a,b)=> rubricOrder.indexOf(a)-rubricOrder.indexOf(b));
+  el.innerHTML = groups.map(rubricKey=>{
+    const items = included.filter(n=> n.rubric===rubricKey).sort((a,b)=> (a.sortOrder||0)-(b.sortOrder||0));
+    const rows = items.map(item=>{
+      const status = tvRedaktsiyaItemStatus(item);
+      const sentLabel = item.articleText ? 'текст готов' : item.articleTaskId ? 'отправлено' : '';
+      return `<div class="tv-news-row" data-id="${item.id}">
+        <span class="tv-redak-status-dot status-${status}"></span>
+        <span class="tv-news-title">${item.title}</span>
+        <select class="tv-redak-select" data-anchor-for="${item.id}">
+          <option value="">— ведущий —</option>
+          ${tvState.tvAnchors.map(a=> `<option value="${a.id}"${item.assignedAnchorId===a.id?' selected':''}>${a.name}</option>`).join('')}
+        </select>
+        <select class="tv-redak-select" data-studio-for="${item.id}">
+          <option value="">— студия —</option>
+          ${tvState.tvStudios.map(s=> `<option value="${s.id}"${item.assignedStudioId===s.id?' selected':''}>${s.name}</option>`).join('')}
+        </select>
+        ${sentLabel ? `<span class="tv-redak-sent-badge">${sentLabel}</span>` : ''}
+      </div>`;
+    }).join('');
+    return `<div class="tv-redak-rubric-title">${tvRubricLabel(rubricKey)}</div>${rows}`;
+  }).join('');
+
+  el.querySelectorAll('[data-anchor-for]').forEach(sel=>{
+    sel.onchange = ()=>{
+      const item = tvState.tvNewsItems.find(n=> n.id===Number(sel.dataset.anchorFor));
+      if(!item) return;
+      item.assignedAnchorId = sel.value ? Number(sel.value) : null;
+      tvSaveSoon();
+      renderTvRedaktsiya();
+    };
+  });
+  el.querySelectorAll('[data-studio-for]').forEach(sel=>{
+    sel.onchange = ()=>{
+      const item = tvState.tvNewsItems.find(n=> n.id===Number(sel.dataset.studioFor));
+      if(!item) return;
+      item.assignedStudioId = sel.value ? Number(sel.value) : null;
+      tvSaveSoon();
+      renderTvRedaktsiya();
+    };
+  });
+  tvUpdateSendToWritingButton();
+}
+// Queues a text-writing TASKS entry for every fully-assigned item that isn't already
+// written or already queued — the actual Gemini call happens later, from the TASKS tile
+// itself, once Костян picks a model and clicks Generate (never auto-started).
+function tvSendToWriting(){
+  const included = tvState.tvNewsItems.filter(n=> n.included && !n.archived);
+  const ready = included.filter(n=> tvRedaktsiyaItemStatus(n)==='green' && !n.articleTaskId && !n.articleText);
+  if(!ready.length) return;
+  ready.forEach(item=>{
+    const task = { id: tvTaskSeq++, kind:'article', newsItemId: item.id, model:null, status:'draft', createdAt: Date.now() };
+    tvState.tvTaskQueue.push(task);
+    item.articleTaskId = task.id;
+  });
+  tvSaveSoon();
+  renderTvRedaktsiya();
+  renderTvTasks();
+  const hint = document.getElementById('tvRedaktsiyaHint');
+  if(hint){
+    hint.textContent = 'Отправлено в TASKS: ' + ready.length;
+    setTimeout(()=>{ if(hint.textContent==='Отправлено в TASKS: ' + ready.length) hint.textContent=''; }, 4000);
+  }
+}
+
+// ---- TASKS tab — two-phase tiles, same lifecycle as js/tasks.js's own queue: 'draft' (model
+// not chosen/sent yet) -> 'running' (sent, waiting on the provider) -> 'done'/'failed'. Never
+// auto-starts — a draft tile just sits there until Костян picks a model and clicks Generate. ----
+function tvTaskModelOptions(kind){
+  return kind==='article' ? tvTextModelOptions : tvVoiceModelOptions;
+}
+function tvFormatCost(costUsd){
+  return costUsd ? ('$' + costUsd.toFixed(2)) : 'бесплатно';
+}
+function renderTvTasks(){
+  const el = document.getElementById('tvTasksBox');
+  if(!el) return;
+  if(!tvState.tvTaskQueue.length){
+    el.innerHTML = `<div class="tv-empty-hint">Задач пока нет.</div>`;
+    return;
+  }
+  el.innerHTML = tvState.tvTaskQueue.map(t=>{
+    const item = tvState.tvNewsItems.find(n=> n.id===t.newsItemId);
+    const kindLabel = t.kind==='article' ? 'Текст' : 'Озвучка';
+    const title = item ? item.title : '— новость удалена —';
+    if(t.status==='draft'){
+      const options = tvTaskModelOptions(t.kind);
+      const modelHtml = options.length
+        ? `<select class="tv-redak-select" data-task-model="${t.id}" style="width:100%;">
+             <option value="">Выберите модель</option>
+             ${options.map(m=> `<option value="${m.id}"${t.model===m.id?' selected':''}>${m.label} — ${tvFormatCost(m.costUsd)}</option>`).join('')}
+           </select>`
+        : `<div class="gen-hint" style="margin:0;">Модели недоступны.</div>`;
+      return `<div class="task-tile draft" data-task-id="${t.id}">
+        <div class="task-tile-body">
+          <div class="task-tile-scene">${kindLabel}</div>
+          <div class="task-tile-shot">${title}</div>
+          <div class="tv-task-model-row">${modelHtml}</div>
+          <button class="cf-btn primary task-tile-send-btn" style="width:100%;margin-top:8px;" data-run="${t.id}" ${t.model?'':'disabled'}>Сгенерировать</button>
+          <button class="cf-btn" style="width:100%;margin-top:6px;" data-remove="${t.id}">Убрать из очереди</button>
+        </div>
+      </div>`;
+    }
+    const statusLabel = t.status==='running' ? 'генерация…' : t.status==='done' ? 'готово' : t.status==='failed' ? 'ошибка' : t.status;
+    return `<div class="task-tile" data-task-id="${t.id}">
+      <div class="task-tile-body">
+        <div class="task-tile-scene">${kindLabel}</div>
+        <div class="task-tile-shot">${title}</div>
+        <div class="task-tile-status ${t.status}">${statusLabel}</div>
+        ${t.status==='running' ? `<div class="task-tile-spin"></div>` : ''}
+        ${t.status==='failed' ? `<div class="task-tile-error">${(t.errorMessage||'').replace(/</g,'&lt;')}</div>` : ''}
+        <button class="cf-btn" style="width:100%;margin-top:8px;" data-remove="${t.id}">Убрать из очереди</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  el.querySelectorAll('[data-task-model]').forEach(sel=>{
+    sel.onchange = ()=>{
+      const task = tvState.tvTaskQueue.find(t=> t.id===Number(sel.dataset.taskModel));
+      if(task){ task.model = sel.value || null; tvSaveSoon(); renderTvTasks(); }
+    };
+  });
+  el.querySelectorAll('[data-run]').forEach(btn=>{
+    btn.onclick = ()=> tvRunTvTask(Number(btn.dataset.run));
+  });
+  el.querySelectorAll('[data-remove]').forEach(btn=>{
+    btn.onclick = ()=>{
+      const id = Number(btn.dataset.remove);
+      const task = tvState.tvTaskQueue.find(t=> t.id===id);
+      if(task){
+        const item = tvState.tvNewsItems.find(n=> n.id===task.newsItemId);
+        if(item){
+          if(item.articleTaskId===id) item.articleTaskId = null;
+          if(item.voiceTaskId===id) item.voiceTaskId = null;
+        }
+      }
+      tvState.tvTaskQueue = tvState.tvTaskQueue.filter(t=> t.id!==id);
+      tvSaveSoon();
+      renderTvTasks();
+      renderTvRedaktsiya();
+    };
+  });
+}
+// Actually runs a task against the server — the ONLY place either Gemini route gets called
+// from. Writes the result straight onto the news item (articleText/voiceUrl); the task tile
+// itself just flips to 'done'/'failed' and stays until dismissed.
+async function tvRunTvTask(taskId){
+  const task = tvState.tvTaskQueue.find(t=> t.id===taskId);
+  if(!task || !task.model) return;
+  const item = tvState.tvNewsItems.find(n=> n.id===task.newsItemId);
+  if(!item){ task.status = 'failed'; task.errorMessage = 'Новость удалена.'; renderTvTasks(); return; }
+  task.status = 'running';
+  renderTvTasks();
+  try{
+    if(task.kind==='article'){
+      const anchor = tvState.tvAnchors.find(a=> a.id===item.assignedAnchorId);
+      if(!anchor) throw new Error('Ведущий не назначен.');
+      const personaContext = tvBuildAnchorVoiceContext(anchor);
+      const res = await fetch('/api/tv/write-article', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: item.title, summary: item.summary, extract: item.extract, rubric: item.rubric, sourceDate: item.sourceDate, personaContext, model: task.model }),
+      });
+      const data = await res.json().catch(()=> null);
+      if(res.status===401) throw new Error('Нужно войти в аккаунт — откройте / и авторизуйтесь, затем вернитесь на /tv.');
+      if(!res.ok || !data || !data.text) throw new Error((data && data.message) || 'Не удалось написать текст.');
+      item.articleText = data.text;
+      item.articleTaskId = null;
+    } else if(task.kind==='voice'){
+      if(!item.articleText) throw new Error('Текст ещё не написан.');
+      const anchor = tvState.tvAnchors.find(a=> a.id===item.assignedAnchorId);
+      const res = await fetch('/api/tv/generate-voice', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: item.articleText, voiceName: anchor && anchor.voiceId, model: task.model }),
+      });
+      if(res.status===401) throw new Error('Нужно войти в аккаунт — откройте / и авторизуйтесь, затем вернитесь на /tv.');
+      if(!res.ok){
+        const data = await res.json().catch(()=> null);
+        throw new Error((data && data.message) || 'Не удалось озвучить текст.');
+      }
+      const blob = await res.blob();
+      const persisted = await tvPersistBlobAssetDirect('newsitem:' + item.id + ':voice', blob, '.wav');
+      item.voiceUrl = persisted ? persisted.url : URL.createObjectURL(blob);
+      item._assetFiles = item._assetFiles || {};
+      item._assetFiles.voice = !!persisted;
+      item._assetFiles.voiceFile = persisted ? persisted.fileName : undefined;
+      item.voiceTaskId = null;
+    }
+    task.status = 'done';
+    tvSaveSoon();
+  } catch(err){
+    task.status = 'failed';
+    task.errorMessage = err.message;
+  }
+  renderTvTasks();
+  renderTvRedaktsiya();
+  renderTvMic();
+  if(tvMicPanelOpenAnchorId===item.assignedAnchorId) tvRenderMicItemsList(item.assignedAnchorId);
+}
+
+// ---- Микрофонная tab — anchor tiles; each opens a panel listing the items written for
+// that anchor (Редакция -> TASKS 'article' pipeline), with a crossed-out/solid speaker icon
+// per item and an "Озвучить" button that queues a 'voice' TASKS entry. ----
+function renderTvMic(){
+  const el = document.getElementById('tvMicGrid');
+  if(!el) return;
+  const anchorsWithWork = tvState.tvAnchors.filter(a=>
+    tvState.tvNewsItems.some(n=> n.assignedAnchorId===a.id && n.articleText));
+  if(!anchorsWithWork.length){
+    el.innerHTML = `<div class="tv-empty-hint">Пока нечего озвучивать — сначала назначьте новости и отправьте на написание статей в «Редакции».</div>`;
+    return;
+  }
+  el.innerHTML = anchorsWithWork.map(a=>{
+    const items = tvState.tvNewsItems.filter(n=> n.assignedAnchorId===a.id && n.articleText);
+    const unvoiced = items.filter(n=> !n.voiceUrl).length;
+    return `
+    <div class="char-tile" data-id="${a.id}">
+      <div class="char-tile-photo">${a.photo ? `<img src="${a.photo}">` : '<i class="ti ti-user"></i>'}</div>
+      <div class="char-tile-name">${a.name}</div>
+      ${unvoiced ? `<div class="gen-hint" style="margin:2px 0 0;text-align:center;">не озвучено: ${unvoiced}</div>` : ''}
+    </div>`;
+  }).join('');
+  el.querySelectorAll('.char-tile').forEach(tile=>{
+    tile.onclick = ()=>{
+      const anchor = tvState.tvAnchors.find(a=> String(a.id)===tile.dataset.id);
+      if(anchor) tvOpenMicPanel(anchor);
+    };
+  });
+}
+let tvMicPanelOpenAnchorId = null;
+function tvOpenMicPanel(anchor){
+  tvMicPanelOpenAnchorId = anchor.id;
+  const body = document.getElementById('tvAnchorModalBody');
+  body.innerHTML = `
+    <div class="char-form">
+      <h3>${anchor.name}</h3>
+      <p class="sub">Тексты, подготовленные для этого ведущего.</p>
+      <div id="tvMicItemsList"></div>
+      <div class="cf-actions" style="margin-top:16px;">
+        <button class="cf-btn" id="tvMicBack">Закрыть</button>
+      </div>
+    </div>`;
+  tvRenderMicItemsList(anchor.id);
+  document.getElementById('tvMicBack').onclick = tvCloseModal;
+  tvOpenModal();
+}
+function tvRenderMicItemsList(anchorId){
+  const listEl = document.getElementById('tvMicItemsList');
+  if(!listEl) return;
+  const items = tvState.tvNewsItems.filter(n=> n.assignedAnchorId===anchorId && n.articleText);
+  if(!items.length){
+    listEl.innerHTML = `<div class="gen-hint" style="margin-top:0;">Текстов пока нет.</div>`;
+    return;
+  }
+  listEl.innerHTML = items.map(item=>{
+    const voiced = !!item.voiceUrl;
+    const pending = item.voiceTaskId != null;
+    return `<div class="tv-mic-item" data-item-id="${item.id}">
+      <div class="tv-mic-item-title">${item.title}</div>
+      <div class="tv-mic-item-text">${item.articleText}</div>
+      <div class="tv-mic-item-row">
+        <span class="tv-mic-speaker ${voiced?'voiced':'unvoiced'}" title="${voiced?'Озвучено':'Не озвучено'}">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.5 8.5a5 5 0 0 1 0 7"></path></svg>
+        </span>
+        ${voiced
+          ? `<audio class="tv-mic-audio" controls src="${item.voiceUrl}"></audio>`
+          : pending
+            ? `<span class="gen-hint" style="margin:0;">Отправлено в TASKS</span>`
+            : `<button class="cf-btn" data-voice-item="${item.id}">ОЗВУЧИТЬ</button>`}
+      </div>
+    </div>`;
+  }).join('');
+  listEl.querySelectorAll('[data-voice-item]').forEach(btn=>{
+    btn.onclick = ()=>{
+      tvSendToVoicing(Number(btn.dataset.voiceItem));
+      tvRenderMicItemsList(anchorId);
+    };
+  });
+}
+function tvSendToVoicing(itemId){
+  const item = tvState.tvNewsItems.find(n=> n.id===itemId);
+  if(!item || !item.articleText || item.voiceUrl || item.voiceTaskId) return;
+  const task = { id: tvTaskSeq++, kind:'voice', newsItemId: item.id, model:null, status:'draft', createdAt: Date.now() };
+  tvState.tvTaskQueue.push(task);
+  item.voiceTaskId = task.id;
+  tvSaveSoon();
+  renderTvTasks();
+  renderTvMic();
+}
+
 // ---- Сетка tab: auto-populated from TV_FORMAT_TEMPLATE (see tv-state.js — draft, derived
 // from scripts/analyze-show-format.js's analysis of 3 real reference episodes) ----
 const TV_GRID_FIXED_LABELS = { intro:'Заставка', host_intro:'Выход ведущего', jingle:'Джингл', outro:'Аутро' };
@@ -1146,6 +1502,8 @@ function wireTvPageTabs(){
   if(gatherNewsBtn) gatherNewsBtn.onclick = tvGatherNews;
   const autoPopulateGridBtn = document.getElementById('tvAutoPopulateGridBtn');
   if(autoPopulateGridBtn) autoPopulateGridBtn.onclick = tvAutoPopulateGrid;
+  const sendToWritingBtn = document.getElementById('tvSendToWritingBtn');
+  if(sendToWritingBtn) sendToWritingBtn.onclick = tvSendToWriting;
   document.querySelectorAll('#tvNewsSubTabs .tv-subtab').forEach(tab=>{
     tab.onclick = ()=> tvSwitchNewsSubTab(tab.dataset.subtab);
   });
@@ -1159,11 +1517,14 @@ function wireTvPageTabs(){
   wireTvPageTabs();
   showTvPage('work');
   tvWireCreditsIndicator();
-  await Promise.all([tvLoadModelList(), tvLoadWorkspace()]);
+  await Promise.all([tvLoadModelList(), tvLoadTaskModelLists(), tvLoadWorkspace()]);
   tvStartAutosave();
   tvPruneOldArchive();
   renderTvAnchors();
   renderTvStudios();
   renderTvNewsPickers();
+  renderTvRedaktsiya();
+  renderTvMic();
+  renderTvTasks();
   renderTvGrid();
 })();

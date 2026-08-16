@@ -106,14 +106,23 @@ hand (no auto-upload yet).
    explicitly requests AI generation for that item. "Собрать новости" button exists and
    calls Gemini for a draft candidate list (`POST /api/tv/gather-news`) — see "News
    sourcing" below for the fuller, not-yet-built free-API pipeline this should grow into.
-3. **Студия** — assign each chosen news item to a specific anchor (defaults to that item's
-   rubric's anchor); sends it off for voice (TTS) generation. Per the studio-design
-   discussion (see "Studios + virtual editor" below), this same assignment step must also
-   assign a **studio** — usually the one matching the anchor's rubric, but a picker if more
-   than one studio shares that rubric ("ведущий живёт в своей студии" — Костян's framing).
-   NOT YET BUILT — this tab is currently a placeholder; building it is Stage B of the staged
-   plan below, after Stage A (studios themselves) is done.
-4. **Сетка** — the real editing timeline (NLE-style), auto-populated per the show's
+3. **Редакция** (nav tab id stays `studio` internally — renamed in the UI only, since
+   "Студия" clashed with the Студии entity gallery on Work; BUILT) — every included news
+   item as a row, grouped by rubric block. Each row: anchor `<select>` and studio `<select>`
+   (`tvOpenStudioForm`'s rubric picker's sibling pattern), both auto-filled whenever the
+   match is unambiguous ("тот, кто обычно отвечает за рубрику" — Костян's framing) and
+   re-checked on every render, not just once, so adding an anchor/studio later fills gaps.
+   Status dot: red (nothing assigned), yellow (one of two), green (both). "Отправить на
+   написание статей" queues a `kind:'article'` TASKS entry for every green item that isn't
+   already written/queued (`tvSendToWriting()`, `js/tv-app.js`) — writing itself happens
+   from the TASKS tile, never auto-started.
+4. **Микрофонная** (BUILT) — new tab, sits between Редакция and Сетка. Anchor tile gallery
+   (only anchors with at least one written item show up); clicking one opens a panel listing
+   everything written for them — text, and a speaker icon that's crossed out until voiced.
+   "ОЗВУЧИТЬ" queues a `kind:'voice'` TASKS entry (`tvSendToVoicing()`); once done, the icon
+   turns solid/green and an inline `<audio>` player appears. Same non-auto-start rule as
+   Редакция — voicing only runs when picked up from a TASKS tile.
+5. **Сетка** — the real editing timeline (NLE-style), auto-populated per the show's
    broadcast algorithm (a fixed template extracted from the reference show — see "Show
    format analysis" below, not re-derived by AI each week). Holds the VO track (from
    Студия), music, and color-coded blocks per rubric. **Rubrics air as grouped blocks** (all
@@ -126,9 +135,13 @@ hand (no auto-upload yet).
    anchor animated for the whole segment. Fixed jingles/station stings (a FIXED set reused
    every week, like a real recurring show — not regenerated per episode). Future additions
    planned: volume mixers, possibly ad blocks.
-5. **TASKS** — generation queue with model selection, direct analog of TAKE:ONE's TASKS.
-6. **Архив** — direct analog of TAKE:ONE's Archive.
-7. **Эфир** — final render/output of the finished episode.
+6. **TASKS** (BUILT for `kind:'article'`/`'voice'`, same two-phase tile lifecycle as
+   `js/tasks.js`: draft — model picker with cost shown, waits for a manual "Сгенерировать"
+   click — never auto-starts — then running/done/failed) — generation queue with model
+   selection. Other kinds (image/video/lipsync for Сетка's shots) are a future extension of
+   the same tile pattern, not built yet.
+7. **Архив** — direct analog of TAKE:ONE's Archive.
+8. **Эфир** — final render/output of the finished episode.
 
 ## Approval mechanic
 
@@ -183,28 +196,57 @@ thumbnails. Expand state is UI-only (`tvExpandedNewsIds`, a `Set`), not persiste
 ## Journalist — voiceover text only, must read as human-written
 
 Only ONE text output is needed per news item: what the anchor reads aloud. No separate
-print-article version. NOT YET BUILT — but each anchor's Персона fields (see Work tab
-above, `tvBuildAnchorVoiceContext()`) already give this step real per-host material to
-work from once it exists: age/archetype/character, catchphrase, delivery style, on-camera
-habits, speech patterns, and real sample lines — so voiceover text can sound like THIS
-specific host, not a single undifferentiated "narrator" voice.
+print-article version. **v1 BUILT** (`POST /api/tv/write-article`, `server.js`) — Gemini
+only, free tier, no `requireAuth` (same reasoning as `/api/tv/gather-news`: $0 cost, nothing
+to bill). Client sends title/summary/extract/rubric/sourceDate plus
+`tvBuildAnchorVoiceContext(anchor)`'s assembled persona text; the server prompt tells Gemini
+which real year it's writing for (derived from `sourceDate`) and to use only the facts in
+`extract`. Dispatched from a TASKS tile (`kind:'article'`), never auto-started — see
+Редакция above for how a task gets queued.
 
 The generation must be indistinguishable from a real human writer of that era. This is a
-prompting/context problem, not a model-choice problem:
+prompting/context problem, not a model-choice problem — v1's prompt covers the anachronism
+and AI-tell rules below via instruction only:
 
-- **Few-shot with real period text.** Pull 3-5 real excerpts from period Russian tech press
-  (Компьютерра, Мир ПК, Игромания, Хакер, Compulenta, iXBT — reachable via the Wayback
-  Machine) and include them directly in the prompt as style examples. A generic "write like
-  it's 2001" instruction produces generic retro-flavored text; showing the model real period
-  sentences produces text that actually mimics real phrasing, sentence length, and clichés
-  of the era.
-- **Explicit anachronism blocklist** in the prompt — call out specific words/concepts that
-  didn't exist yet in the target year (period-appropriate list needs to shift with the
-  rolling year offset) and instruct the model to avoid them.
+- **Few-shot with real period text — NOT YET in the v1 prompt.** Pulling 3-5 real excerpts
+  from period Russian tech press (Компьютерра, Мир ПК, Игромания, Хакер, Compulenta, iXBT —
+  reachable via the Wayback Machine) and including them as style examples would sharpen this
+  further; deferred as a follow-up polish pass rather than blocking v1, since a generic
+  "write like it's 2001" instruction still produces usable if less sharply period-accurate
+  text than showing the model real sentences would.
+- **Explicit anachronism blocklist** — v1 tells the model the real target year (from the
+  item's `sourceDate`) and instructs it to avoid anything that didn't exist yet, rather than
+  maintaining a hardcoded per-year word list.
 - **Explicit AI-tell blocklist** in the prompt — no bullet lists, no subheadings, no stock
   "Подводя итог..." closers, no artificially "balanced" both-sides hedging. Explicitly allow
   and encourage: continuous running prose, a real subjective opinion, varied sentence
   rhythm, the kind of clichés real 2000s TV journalism actually used.
+- **Paid text-model alternative (Claude/GPT via KIE.ai)** — deliberately NOT wired. KIE.ai
+  does proxy these, but their exact createTask request shape for text/chat wasn't confirmed
+  against real docs while building this (unlike the image/video/lipsync models, whose field
+  names were confirmed the hard way — see `LIPSYNC_MODELS`'s comment in `server.js`). Add it
+  to `TV_TEXT_MODELS` only once that shape is confirmed for real, not guessed.
+
+## Voicing (Микрофонная tab) — v1 BUILT
+
+`POST /api/tv/generate-voice` (`server.js`) — Gemini's native-audio TTS, same free tier/no
+`requireAuth` reasoning as writing above. Takes approved `articleText` + the anchor's
+`voiceId` field (already existed, doubles as the Gemini voice name — e.g. `Kore`) and
+returns raw WAV bytes directly (Gemini's response is base64 PCM; `tvPcmToWav()` wraps it
+with a real WAV header so `<audio>` can play it, no separate decoder needed). Dispatched
+from a TASKS tile (`kind:'voice'`), same non-auto-start rule.
+
+**Two things genuinely unverified — no real `GEMINI_API_KEY` was available while building
+this, so neither route has run against the real API yet:**
+- `GEMINI_TTS_MODEL` (`server.js`) is a best-guess model id (`gemini-2.5-flash-preview-tts`),
+  overridable via env without a code change — Google's TTS-specific model names churn fast,
+  same caveat as `GEMINI_MODEL`'s own comment. If this 404s, that's the first thing to check.
+  Error-handling itself IS verified — a real 503 "not configured" round-trips correctly
+  through the TASKS tile UI when no key is set at all.
+- **Paid voice alternative (ElevenLabs via KIE.ai)** — same story as the paid text model:
+  KIE.ai does list ElevenLabs TTS models, but the real createTask request shape wasn't
+  confirmed, so it's not wired into `TV_VOICE_MODELS`. Confirm the field names for real
+  before adding it, not guessing.
 
 ## Studios + virtual editor (planned, staged)
 
@@ -334,20 +376,30 @@ Two parallel passes, then reconcile:
 
 ## Already built (as of this file's writing — verify current state, may be stale)
 
-- `tv.html` — entry page, 7-tab structure. Top-right: save-status pill + "connect folder"
-  button. Bottom-right: KIE credits indicator (personal balance = live KIE balance minus a
-  manually-entered "roздано пользователям" number, since dev's Postgres has no record of
-  main's real users — see `js/tv-app.js`'s `tvSyncOwedInput`/`tvRenderCreditsIndicator`).
-- `js/tv-state.js` — client state shape: `tvAnchors`, `tvStudios`, `tvNewsItems`,
-  `tvGridBlocks`, etc. `tvState` IS the source of truth (no server mirror).
-- `js/tv-persistence.js` — local disk/IndexedDB workspace persistence (see Architecture).
+- `tv.html` — entry page, 8-tab structure (Work, Новости, Редакция, Микрофонная, Сетка,
+  TASKS, Архив, Эфир). Top-right: save-status pill + "connect folder" button. Bottom-right:
+  KIE credits indicator (personal balance = live KIE balance minus a manually-entered
+  "roздано пользователям" number, since dev's Postgres has no record of main's real users —
+  see `js/tv-app.js`'s `tvSyncOwedInput`/`tvRenderCreditsIndicator`).
+- `js/tv-state.js` — client state shape: `tvAnchors`, `tvStudios`, `tvNewsItems` (now with
+  `assignedAnchorId`/`assignedStudioId`/`articleText`/`articleTaskId`/`voiceUrl`/
+  `voiceTaskId`), `tvGridBlocks`, `tvTaskQueue`, etc. `tvState` IS the source of truth (no
+  server mirror).
+- `js/tv-persistence.js` — local disk/IndexedDB workspace persistence (see Architecture);
+  `tvPersistBlobAssetDirect()` persists a Blob already in hand (e.g. straight from a fetch
+  response) without the `fetch(dataUrl)` round trip local-upload photos need.
 - `js/tv-app.js` — tab-switching; full anchor Character Card flow (gallery → detail → quick
   form → 6-slot reference builder → generated turnaround sheet) plus a Персона screen
   (character-bible fields — age/archetype/catchphrase/speech quirks/sample lines, see Work
   tab above); studios flow (gallery → detail → form with 4 manually-uploaded angle slots, no
-  generation — see "Studios + virtual editor" above, Stage A); "Собрать новости" on Новости.
+  generation — see "Studios + virtual editor" above, Stage A); "Собрать новости" on Новости;
+  Редакция assignment UI + "Отправить на написание статей"; real TASKS tile rendering
+  (`renderTvTasks()`, `tvRunTvTask()`) for `kind:'article'`/`'voice'`; Микрофонная tab
+  (`renderTvMic()`, `tvOpenMicPanel()`, `tvSendToVoicing()`).
 - `server.js` — `POST /api/tv/gather-news` (real sourcing: Wayback Machine + Wikipedia,
-  stateless — see "News sourcing"); anchor Character Card generation reuses the existing
+  stateless — see "News sourcing"); `POST /api/tv/write-article` + `POST
+  /api/tv/generate-voice` (see "Journalist"/"Voicing" above — Gemini only, no `requireAuth`,
+  $0 cost); anchor Character Card generation reuses the existing
   `/api/upload-reference-image` + `/api/generate-image/start`/`/status` routes. Studios have
   no server route at all — pure local file upload, nothing to generate.
 - `db.js` — no `/TV`-specific tables; Postgres here is only the shared users/login/token
@@ -378,18 +430,22 @@ POST /api/tv/staff-chat   — natural-language edit commands for Сетка (fun
    — specifically whether the Wayback pass returns anything at all (unverified — see the
    caveat under "News sourcing"). Try "Собрать новости" for real and report what comes
    back before trusting it.
-3. Journalist: generate the actual voiceover text per news item (not yet built at all) —
-   now has real sourced `extract` text per item to work from once this is confirmed
-   working.
-4. Studios Stage A is done (see "Studios + virtual editor" above) — next is Stage B (studio
-   assignment wired into the anchor/text-assignment step), then C (editing-technique
-   research script), D (virtual editor logic), E (Сетка timeline+Inspector), F (render).
-   Confirm scope with Костян before starting each stage — do not batch them.
-5. Minor, discovered while testing Stage A live: `tvPersistLocalImageAsset()`
-   (`js/tv-persistence.js`) tries to `fetch()` a `data:` URL to turn it into a blob asset,
-   but the server's CSP `connect-src` header (`server.js`, ~line 283) doesn't list `data:`,
-   so the fetch is blocked and it silently falls back to storing the raw base64 `data:` URL
-   inline in the workspace JSON instead of as a separate blob file. Not data-losing and not
-   specific to studios — the same shared helper is used by anchor photo uploads too — but
-   worth fixing (add `data:` to `connect-src`) since inline base64 bloats the saved workspace
-   for any real (non-test) photo.
+3. Journalist v1 + Voicing v1 are built (Редакция → TASKS → Микрофонная → TASKS pipeline,
+   see "Journalist"/"Voicing" above) but **need a real live test with a real
+   `GEMINI_API_KEY`** — neither `/api/tv/write-article` nor `/api/tv/generate-voice` has run
+   against the actual Gemini API yet (no key was available while building this). Everything
+   up to that boundary IS verified live: assignment defaults, TASKS draft tiles with correct
+   model/cost display, the 503-not-configured error round-tripping cleanly into the TASKS
+   tile instead of crashing, and the whole Микрофонная panel (crossed-out/solid speaker
+   icon, audio playback) using a simulated result. Try a real write→voice round trip and
+   correct `GEMINI_TTS_MODEL` if it 404s (see "Voicing" above for the fallback-via-env path).
+4. Studios Stage B is done (see "Studios + virtual editor" above) — next is Stage C
+   (editing-technique research script), D (virtual editor logic), E (Сетка
+   timeline+Inspector), F (render). Confirm scope with Костян before starting each stage —
+   do not batch them.
+5. Paid model alternatives were deliberately left unwired — Claude/GPT (text) and ElevenLabs
+   (voice), both via KIE.ai — because their real createTask request shapes weren't confirmed
+   against actual docs while building this (WebFetch to docs.kie.ai 404'd/403'd during
+   research). Confirm the real field names before adding either to `TV_TEXT_MODELS`/
+   `TV_VOICE_MODELS` — guessing would repeat the exact mistake `LIPSYNC_MODELS`'s own comment
+   in `server.js` already warns about.

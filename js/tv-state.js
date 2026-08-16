@@ -136,11 +136,18 @@ const tvState = {
   // for — tvGatherNews() archives non-included items whose week no longer matches instead
   // of letting stale proposals pile up. Archived items (`archived:true`) are deleted for
   // good 30 days after `archivedAt` (tvPruneOldArchive in tv-app.js).
+  // assignedAnchorId/assignedStudioId — set on Редакция (formerly "Студия"), default to the
+  // rubric's own anchor/studio when unambiguous. articleText/articleTaskId — the written
+  // script and, while a writing task is queued/running, which tvTaskQueue entry produced it
+  // (cleared once the result lands in articleText). voiceUrl/voiceTaskId — same idea for the
+  // spoken-audio step (Микрофонная tab), voiceUrl null means "not voiced yet" (crossed-out
+  // speaker icon in the UI).
   tvNewsItems: [], // [{ id, rubric, title, summary, extract, sourceDate, sourceUrl,
                     //    source:'wayback'|'wikipedia', sourcePrecision:'week'|'year',
                     //    media:[{type,url,title}], materialStatus, isAnniversary, included,
                     //    archived, archivedAt, gatheredForWeek, assignedAnchorId,
-                    //    approvedForRelease, sortOrder }]
+                    //    assignedStudioId, articleText, articleTaskId, voiceUrl, voiceTaskId,
+                    //    _assetFiles, approvedForRelease, sortOrder }]
 
   // Сетка tab — the assembled timeline, grouped into rubric blocks (all of one rubric
   // together before the next rubric starts). Auto-populated from TV_FORMAT_TEMPLATE by
@@ -148,8 +155,14 @@ const tvState = {
   tvGridBlocks: [], // [{ id, blockType:'intro'|'host_intro'|'jingle'|'outro'|'story',
                      //    rubric, newsItemId, sortOrder, estimatedDurationSec, voTrack, cutaways:[] }]
 
-  // TASKS / Архив — direct analogs of the main app's taskQueue / archive.
-  tvTaskQueue: [], // [{ id, kind, newsItemId, model, status, createdAt }]
+  // TASKS / Архив — direct analogs of the main app's taskQueue / archive. Same two-phase
+  // tile lifecycle as js/tasks.js: status:'draft' (queued, model not chosen/sent yet) ->
+  // 'pending'/'running' (sent, waiting on the provider) -> 'done'/'failed'. kind:'article'
+  // writes newsItem.articleText; kind:'voice' writes newsItem.voiceUrl — both clear their
+  // corresponding *TaskId field on the news item once done.
+  tvTaskQueue: [], // [{ id, kind:'article'|'voice', newsItemId, model, status, errorMessage,
+                    //    createdAt }] — the result writes straight onto the news item
+                    //    (articleText/voiceUrl) when the task completes, not kept here too.
   tvArchive: [],   // [{ id, kind, sourceLabel, model, prompt, url, createdAt }]
 
   // Anniversary calendar — flags especially notable stories automatically.
