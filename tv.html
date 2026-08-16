@@ -78,7 +78,12 @@
     display:flex; align-items:center; gap:8px; padding:8px 10px;
     border-top:1px solid var(--line); font-size:11.5px; color:var(--text-2);
   }
-  .tv-news-checkbox{ flex:0 0 auto; margin-right:2px; }
+  .tv-news-checkbox{ flex:0 0 auto; margin-right:2px; width:14px; height:14px; accent-color:var(--accent); cursor:pointer; }
+  .tv-news-return-btn{
+    flex:0 0 auto; background:transparent; border:1px solid var(--line); color:var(--text-3);
+    border-radius:4px; padding:2px 7px; font-size:10.5px; font-family:var(--font-ui); cursor:pointer;
+  }
+  .tv-news-return-btn:hover{ border-color:var(--accent); color:var(--accent-text); }
   .tv-news-row-wrap{ border-bottom:1px solid var(--line-soft); }
   .tv-news-row-wrap .tv-news-row{ border-bottom:none; cursor:pointer; }
   .tv-news-expand{ padding:4px 10px 12px 10px; font-size:12px; color:var(--text-2); line-height:1.5; }

@@ -5,7 +5,20 @@ function showTvPage(page){
   document.querySelectorAll('.tv-page-tab').forEach(t=> t.classList.toggle('active', t.dataset.tvPage===page));
   document.querySelectorAll('.tv-page').forEach(el=> el.classList.toggle('hidden', el.dataset.tvPage!==page));
   renderTvApprovalButton();
-  if(page==='news'){ tvPruneOldArchive(); renderTvNewsCalendar(); renderTvNewsSubTabs(); renderTvNewsPickers(); }
+  if(page==='news'){
+    tvPruneOldArchive();
+    // Wrapped defensively: an error in the calendar must never block the rest of the
+    // Новости tab from rendering — and surfaces the real message in the UI itself, since
+    // Костян can't easily pull DevTools console output for me.
+    try{ renderTvNewsCalendar(); }
+    catch(err){
+      console.error('[tv] calendar render failed:', err);
+      const calEl = document.getElementById('tvNewsCalendar');
+      if(calEl) calEl.innerHTML = `<div class="gen-hint" style="color:var(--danger);">Ошибка календаря: ${err.message}</div>`;
+    }
+    renderTvNewsSubTabs();
+    renderTvNewsPickers();
+  }
   if(page==='grid') renderTvGrid();
 }
 
@@ -1081,16 +1094,17 @@ function renderTvNewsPickers(){
   if(!leftEl || !rightEl) return;
   const left = tvState.tvNewsItems.filter(n=> !n.included && !n.archived);
   const right = tvState.tvNewsItems.filter(n=> n.included && !n.archived);
-  const row = (n, withCheckbox)=>{
+  const row = (n, pane)=>{
     const expanded = tvExpandedNewsIds.has(n.id);
     return `<div class="tv-news-row-wrap">
       <div class="tv-news-row" data-id="${n.id}">
-        ${withCheckbox ? `<input type="checkbox" class="tv-news-checkbox" data-check="${n.id}"${tvSelectedNewsIds.has(n.id) ? ' checked' : ''}>` : ''}
+        ${pane==='left' ? `<input type="checkbox" class="tv-news-checkbox" data-check="${n.id}"${tvSelectedNewsIds.has(n.id) ? ' checked' : ''}>` : ''}
         <span class="tv-news-rubric">${tvRubricLabel(n.rubric)}</span>
         <span class="tv-news-title">${n.title}</span>
         ${tvNewsPrecisionBadge(n)}
         ${n.materialStatus==='мало материала' ? '<span class="tv-news-flag">мало материала</span>' : ''}
         ${n.isAnniversary ? '<span class="tv-news-flag tv-news-flag-anniv">юбилей</span>' : ''}
+        ${pane==='right' ? `<button class="tv-news-return-btn" data-unincude="${n.id}" title="Вернуть в Предложено">Вернуть</button>` : ''}
       </div>
       ${expanded ? `<div class="tv-news-expand">
         ${n.summary ? `<p>${n.summary}</p>` : ''}
@@ -1100,17 +1114,25 @@ function renderTvNewsPickers(){
       </div>` : ''}
     </div>`;
   };
-  leftEl.innerHTML = left.length ? left.map(n=> row(n,true)).join('') : `<div class="tv-empty-hint">Нет предложенных новостей.</div>`;
-  rightEl.innerHTML = right.length ? right.map(n=> row(n,false)).join('') : `<div class="tv-empty-hint">Перетащите новости сюда, чтобы включить в выпуск.</div>`;
+  leftEl.innerHTML = left.length ? left.map(n=> row(n,'left')).join('') : `<div class="tv-empty-hint">Нет предложенных новостей.</div>`;
+  rightEl.innerHTML = right.length ? right.map(n=> row(n,'right')).join('') : `<div class="tv-empty-hint">Отметьте новости в «Предложено» и нажмите «В выпуск».</div>`;
   [leftEl, rightEl].forEach(pane=>{
     pane.querySelectorAll('.tv-news-row').forEach(rowEl=>{
       rowEl.onclick = (e)=>{
-        if(e.target.closest('a') || e.target.closest('.tv-news-checkbox')) return;
+        if(e.target.closest('a') || e.target.closest('.tv-news-checkbox') || e.target.closest('.tv-news-return-btn')) return;
         const id = Number(rowEl.dataset.id);
         if(tvExpandedNewsIds.has(id)) tvExpandedNewsIds.delete(id); else tvExpandedNewsIds.add(id);
         renderTvNewsPickers();
       };
     });
+  });
+  rightEl.querySelectorAll('.tv-news-return-btn').forEach(btn=>{
+    btn.onclick = (e)=>{
+      e.stopPropagation();
+      const id = Number(btn.dataset.unincude);
+      const item = tvState.tvNewsItems.find(n=> n.id===id);
+      if(item){ item.included = false; tvSaveSoon(); renderTvNewsPickers(); }
+    };
   });
   leftEl.querySelectorAll('.tv-news-checkbox').forEach(cb=>{
     cb.onclick = (e)=> e.stopPropagation();
