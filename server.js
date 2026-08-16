@@ -48,10 +48,17 @@ const KIE_BASE = 'https://api.kie.ai';
 // job (text, not paid image/video generation).
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const GEMINI_MODEL = 'gemini-3.6-flash'; // Google retires these fast — if this 404s again, check ai.google.dev/gemini-api/docs/models for the current GA Flash model and update just this line
-// Best-guess model id for Gemini's native-audio TTS — genuinely unverified (no live test ran
-// against it while building this; same caution as GEMINI_MODEL above, Google's TTS-specific
-// model names churn just as fast). Override via env if this 404s rather than editing here.
+// gemini-2.5-flash-preview-tts — a real user confirmed this one actually works (a live
+// Микрофонная run produced real playable audio), so it stays the default rather than
+// getting swapped for the newer name below sight-unseen. Override via env if this 404s.
 const GEMINI_TTS_MODEL = process.env.GEMINI_TTS_MODEL || 'gemini-2.5-flash-preview-tts';
+// gemini-3.1-flash-tts-preview — Google's newer native-audio TTS model (confirmed real via
+// a docs/pricing search, not guessed), same free tier as everything else on GEMINI_API_KEY.
+// KIE.ai separately lists this exact model too (kie.ai/gemini-3.1-flash-tts), but that's a
+// paid proxy on top of it — going direct to Google, like GEMINI_TTS_MODEL above already
+// does, is the free path, so this is wired as a second free option rather than through KIE.
+// Unlike GEMINI_TTS_MODEL, this one hasn't actually been run for real yet.
+const GEMINI_TTS_MODEL_NEXT = process.env.GEMINI_TTS_MODEL_NEXT || 'gemini-3.1-flash-tts-preview';
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 // Railway sets this automatically; needed to build a callBackUrl KIE can reach.
 const PUBLIC_URL = process.env.RAILWAY_PUBLIC_DOMAIN
@@ -921,31 +928,40 @@ app.post('/api/tv/write-article', async (req, res) => {
 // async createTask+recordInfo pattern the image/video models already use here, NOT the
 // synchronous shape the KIE text models above use. If this one 500s too, that points at
 // something more systematic (wrong field name, auth, KIE-side outage) rather than a
-// model-specific issue — worth telling me the exact error either way. ----
+// model-specific issue — worth telling me the exact error either way.
+//
+// Gemini 3.1 Flash TTS via KIE.ai (kie-gemini-tts below) is deliberately ALSO listed even
+// though it's paid and the exact same model is already free direct from Google above — the
+// point isn't quality, it's a genuinely separate quota/billing path (KIE credits, not the
+// GEMINI_API_KEY free tier), so it still works as a fallback on a day the free tier's rate
+// limit is exhausted. Real docs.kie.ai fetches for this one all 403'd/404'd (tried the
+// product page and several plausible docs paths) — unlike the ElevenLabs entries above,
+// this is a genuine best-effort guess at both the model id and the input shape, patterned
+// after every other model here (KIE's own {model, input:{text, voice}} convention), not
+// independently confirmed. Lower confidence than anything else in this file — say so if it
+// errors, that's expected until a real run corrects it. ----
 const TV_VOICE_MODELS = [
-  { id: 'gemini-tts', label: 'Gemini TTS (бесплатно)', costUsd: 0, blurb: 'Тот же ключ, что и для текста — нативная генерация речи' },
+  { id: 'gemini-tts', label: 'Gemini 2.5 Flash TTS (бесплатно)', costUsd: 0, blurb: 'Тот же ключ, что и для текста — уже проверена вживую, реально работает' },
+  { id: 'gemini-tts-next', label: 'Gemini 3.1 Flash TTS (бесплатно)', costUsd: 0, blurb: 'Тот же ключ, новее — вживую ещё не проверялась', geminiModelKey: 'next' },
+  { id: 'kie-gemini-tts', label: 'Gemini 3.1 Flash TTS (KIE.ai)', costUsd: 0.03, blurb: 'Платно, через ключ KIE — отдельная квота на случай, если бесплатный Gemini лимит исчерпан; схема запроса не подтверждена доками, это догадка', provider: 'kie-gemini' },
   { id: 'kie-elevenlabs-multi', label: 'ElevenLabs Multilingual v2 (KIE.ai)', costUsd: 0.05, blurb: 'Платно, через тот же ключ KIE — живее интонация, 60+ голосов на выбор, цена оценочная', provider: 'kie-elevenlabs' },
 ];
 app.get('/api/tv/voice-models', (req, res) => {
   res.json({ models: TV_VOICE_MODELS });
 });
-async function tvCallKieElevenLabsVoice(text, voiceId, speed) {
+// Shared by every KIE TTS model here — same createTask+recordInfo async pattern the
+// image/video models use, just returning the finished audio's real URL instead of an image
+// URL. `label` is only for error messages, so a failure names which provider actually failed.
+async function tvCallKieAudioTask(kieModelId, input, label) {
   const createRes = await fetch(`${KIE_BASE}/api/v1/jobs/createTask`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${KIE_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'elevenlabs/text-to-speech-multilingual-v2',
-      // voice: our anchor.voiceId currently holds a Gemini voice NAME (e.g. "Kore"), not an
-      // ElevenLabs voice ID — the two engines don't share an id space, so this falls back to
-      // a default ElevenLabs voice ("James") whenever a Gemini name is passed in. A real
-      // fix needs a separate per-provider voice field on the anchor (see CLAUDE.md).
-      input: { text, voice: voiceId || 'EkK5I93UQWFDigLMpZcX', speed: speed || 1 },
-    }),
+    body: JSON.stringify({ model: kieModelId, input }),
   });
   const createData = await createRes.json().catch(() => null);
   const taskId = createData && createData.data && createData.data.taskId;
   if (!createRes.ok || !taskId) {
-    throw new Error((createData && createData.msg) || ('KIE.ai (ElevenLabs) rejected the request (HTTP ' + createRes.status + ').'));
+    throw new Error((createData && createData.msg) || (`KIE.ai (${label}) rejected the request (HTTP ` + createRes.status + ').'));
   }
   const deadline = Date.now() + 40000;
   while (Date.now() < deadline) {
@@ -958,13 +974,30 @@ async function tvCallKieElevenLabsVoice(text, voiceId, speed) {
     if (!d) continue;
     const state = (d.state || '').toLowerCase();
     const flag = Number(d.successFlag);
-    if (state === 'fail' || flag === 2 || d.failMsg) throw new Error(d.failMsg || 'ElevenLabs (KIE) generation failed.');
+    if (state === 'fail' || flag === 2 || d.failMsg) throw new Error(d.failMsg || `${label} (KIE) generation failed.`);
     if (state === 'success' || flag === 1) {
       const url = extractResultUrl(d);
       if (url) return url;
     }
   }
-  throw new Error('ElevenLabs (KIE) generation timed out.');
+  throw new Error(`${label} (KIE) generation timed out.`);
+}
+async function tvCallKieElevenLabsVoice(text, voiceId, speed) {
+  // voice: our anchor.voiceId currently holds a Gemini voice NAME (e.g. "Kore"), not an
+  // ElevenLabs voice ID — the two engines don't share an id space, so this falls back to a
+  // default ElevenLabs voice ("James") whenever a Gemini name is passed in. A real fix needs
+  // a separate per-provider voice field on the anchor (see CLAUDE.md).
+  return tvCallKieAudioTask(
+    'elevenlabs/text-to-speech-multilingual-v2',
+    { text, voice: voiceId || 'EkK5I93UQWFDigLMpZcX', speed: speed || 1 },
+    'ElevenLabs'
+  );
+}
+// Unverified — see the big comment above TV_VOICE_MODELS. Best guess at both the model id
+// and input shape, following the {model, input:{text, voice}} convention every other KIE
+// model here actually uses.
+async function tvCallKieGeminiVoice(text, voiceId) {
+  return tvCallKieAudioTask('gemini-3.1-flash-tts', { text, voice: voiceId || 'Kore' }, 'Gemini TTS');
 }
 function tvPcmToWav(pcmBuffer, sampleRate, numChannels, bitsPerSample) {
   const byteRate = sampleRate * numChannels * bitsPerSample / 8;
@@ -994,16 +1027,18 @@ app.post('/api/tv/generate-voice', async (req, res) => {
     return res.status(400).json({ error: 'bad_request', message: 'text is required.' });
   }
   const matched = TV_VOICE_MODELS.find(m => m.id === model) || TV_VOICE_MODELS[0];
-  if (matched.provider === 'kie-elevenlabs' && !KIE_API_KEY) {
+  if (matched.provider && !KIE_API_KEY) {
     return res.status(503).json({ error: 'not_configured', message: 'KIE_API_KEY is not set on the server yet.' });
   }
   if (!matched.provider && !GEMINI_API_KEY) {
     return res.status(503).json({ error: 'not_configured', message: 'GEMINI_API_KEY is not set on the server yet.' });
   }
   try {
-    if (matched.provider === 'kie-elevenlabs') {
+    if (matched.provider === 'kie-elevenlabs' || matched.provider === 'kie-gemini') {
       const speedNum = { slow: 0.85, normal: 1, fast: 1.15 }[voiceSpeed] || 1;
-      const audioUrl = await tvCallKieElevenLabsVoice(text, voiceName, speedNum);
+      const audioUrl = matched.provider === 'kie-gemini'
+        ? await tvCallKieGeminiVoice(text, voiceName)
+        : await tvCallKieElevenLabsVoice(text, voiceName, speedNum);
       const audioRes = await fetch(audioUrl);
       if (!audioRes.ok) throw new Error('Could not download the generated audio from KIE.ai.');
       const buf = Buffer.from(await audioRes.arrayBuffer());
@@ -1017,7 +1052,8 @@ app.post('/api/tv/generate-voice', async (req, res) => {
     // that convention in Russian; best-effort, not independently confirmed to be reliable.
     const speedPrefix = voiceSpeed === 'slow' ? 'Прочитай медленно и размеренно: '
       : voiceSpeed === 'fast' ? 'Прочитай быстро и энергично: ' : '';
-    const geminiRes = await fetch(`${GEMINI_BASE}/models/${GEMINI_TTS_MODEL}:generateContent`, {
+    const geminiModel = matched.geminiModelKey === 'next' ? GEMINI_TTS_MODEL_NEXT : GEMINI_TTS_MODEL;
+    const geminiRes = await fetch(`${GEMINI_BASE}/models/${geminiModel}:generateContent`, {
       method: 'POST',
       headers: { 'x-goog-api-key': GEMINI_API_KEY, 'Content-Type': 'application/json' },
       body: JSON.stringify({

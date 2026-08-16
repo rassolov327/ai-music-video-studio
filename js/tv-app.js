@@ -1110,7 +1110,7 @@ function tvFormatCost(costUsd){
 function tvUpdateTasksBadge(){
   const badge = document.getElementById('tvTasksBadge');
   if(!badge) return;
-  const total = tvState.tvTaskQueue.filter(t=> t.status==='draft' || t.status==='running').length;
+  const total = tvState.tvTaskQueue.filter(t=> t.status==='draft' || t.status==='running' || t.status==='failed').length;
   badge.style.display = total ? '' : 'none';
   badge.textContent = String(total);
 }
@@ -1142,7 +1142,10 @@ function renderTvTasks(){
     const item = tvState.tvNewsItems.find(n=> n.id===t.newsItemId);
     const kindLabel = t.kind==='article' ? 'Текст' : 'Озвучка';
     const title = item ? item.title : '— новость удалена —';
-    if(t.status==='draft'){
+    // 'draft' (never sent) and 'failed' (sent, came back with an error) both need the same
+    // thing: pick/change a model, then send — a failed task shouldn't be a dead end that
+    // forces deleting it and re-queuing from scratch just to try a different model.
+    if(t.status==='draft' || t.status==='failed'){
       const options = tvTaskModelOptions(t.kind);
       const modelHtml = options.length
         ? `<select class="tv-redak-select" data-task-model="${t.id}" style="width:100%;">
@@ -1156,13 +1159,14 @@ function renderTvTasks(){
           <div class="task-tile-scene">${kindLabel}</div>
           <div class="task-tile-shot">${title}</div>
           ${tvTaskAnchorRowHtml(item)}
+          ${t.status==='failed' ? `<div class="task-tile-error">${(t.errorMessage||'').replace(/</g,'&lt;')}</div>` : ''}
           <div class="tv-task-model-row">${modelHtml}</div>
-          <button class="cf-btn primary task-tile-send-btn" style="width:100%;margin-top:8px;" data-run="${t.id}" ${t.model?'':'disabled'}>Сгенерировать</button>
+          <button class="cf-btn primary task-tile-send-btn" style="width:100%;margin-top:8px;" data-run="${t.id}" ${t.model?'':'disabled'}>${t.status==='failed' ? 'Повторить' : 'Сгенерировать'}</button>
           <button class="cf-btn" style="width:100%;margin-top:6px;" data-remove="${t.id}">Убрать из очереди</button>
         </div>
       </div>`;
     }
-    const statusLabel = t.status==='running' ? 'генерация…' : t.status==='done' ? 'готово' : t.status==='failed' ? 'ошибка' : t.status;
+    const statusLabel = t.status==='running' ? 'генерация…' : 'готово';
     return `<div class="task-tile" data-task-id="${t.id}">
       ${tvTaskThumbHtml(item)}
       <div class="task-tile-body">
@@ -1171,7 +1175,6 @@ function renderTvTasks(){
         ${tvTaskAnchorRowHtml(item)}
         <div class="task-tile-status ${t.status}">${statusLabel}</div>
         ${t.status==='running' ? `<div class="task-tile-spin"></div>` : ''}
-        ${t.status==='failed' ? `<div class="task-tile-error">${(t.errorMessage||'').replace(/</g,'&lt;')}</div>` : ''}
         <button class="cf-btn" style="width:100%;margin-top:8px;" data-remove="${t.id}">Убрать из очереди</button>
       </div>
     </div>`;
