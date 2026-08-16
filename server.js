@@ -910,17 +910,21 @@ app.post('/api/tv/write-article', async (req, res) => {
 // (native audio output, same generateContent shape as everything else Gemini here, just
 // with responseModalities:['AUDIO']) returns raw PCM inline as base64 — wrapped into a
 // standard WAV header below so the browser's <audio> element can actually play it without
-// needing a separate decoder. ElevenLabs Turbo 2.5 via KIE.ai is the paid alternative
-// (better emotional range, 56 named voices) — request shape confirmed from a real
-// docs.kie.ai fetch while building this (model id `elevenlabs/text-to-speech-turbo-2-5`,
-// input: {text, voice, ...}), same async createTask+recordInfo pattern the image/video
-// models already use here, NOT the synchronous shape the KIE text models above use. Never
-// actually run against a real KIE_API_KEY while building this, so the poll timing/response
-// envelope leans on extractResultUrl()'s already-proven-in-production shape rather than
-// being independently re-verified for this specific model. ----
+// needing a separate decoder. ElevenLabs via KIE.ai is the paid alternative (better
+// emotional range, 60+ named voices) — request shape (input: {text, voice, stability,
+// similarity_boost, style, speed, ...}) confirmed from real docs.kie.ai fetches for BOTH
+// `elevenlabs/text-to-speech-turbo-2-5` and `elevenlabs/text-to-speech-multilingual-v2`
+// (identical field names, just different model id/quality tier). Started on turbo-2-5;
+// switched to multilingual-v2 after a real run came back "Internal Error, Please try again
+// later" (HTTP 500) from KIE — multilingual-v2 is the more established/mainstream ElevenLabs
+// tier, worth trying as the more likely one to actually be live on KIE's platform. Same
+// async createTask+recordInfo pattern the image/video models already use here, NOT the
+// synchronous shape the KIE text models above use. If this one 500s too, that points at
+// something more systematic (wrong field name, auth, KIE-side outage) rather than a
+// model-specific issue — worth telling me the exact error either way. ----
 const TV_VOICE_MODELS = [
   { id: 'gemini-tts', label: 'Gemini TTS (бесплатно)', costUsd: 0, blurb: 'Тот же ключ, что и для текста — нативная генерация речи' },
-  { id: 'kie-elevenlabs-turbo', label: 'ElevenLabs Turbo 2.5 (KIE.ai)', costUsd: 0.05, blurb: 'Платно, через тот же ключ KIE — живее интонация, 56 голосов на выбор, цена оценочная', provider: 'kie-elevenlabs' },
+  { id: 'kie-elevenlabs-multi', label: 'ElevenLabs Multilingual v2 (KIE.ai)', costUsd: 0.05, blurb: 'Платно, через тот же ключ KIE — живее интонация, 60+ голосов на выбор, цена оценочная', provider: 'kie-elevenlabs' },
 ];
 app.get('/api/tv/voice-models', (req, res) => {
   res.json({ models: TV_VOICE_MODELS });
@@ -930,7 +934,7 @@ async function tvCallKieElevenLabsVoice(text, voiceId, speed) {
     method: 'POST',
     headers: { Authorization: `Bearer ${KIE_API_KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: 'elevenlabs/text-to-speech-turbo-2-5',
+      model: 'elevenlabs/text-to-speech-multilingual-v2',
       // voice: our anchor.voiceId currently holds a Gemini voice NAME (e.g. "Kore"), not an
       // ElevenLabs voice ID — the two engines don't share an id space, so this falls back to
       // a default ElevenLabs voice ("James") whenever a Gemini name is passed in. A real
