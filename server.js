@@ -624,23 +624,54 @@ async function tvCallGeminiStructuring(instruction, withSourceIndex) {
   return Array.isArray(parsed.items) ? parsed.items : [];
 }
 
-// Real, well-archived tech-news sites from the era (same outlets CLAUDE.md's Journalist
-// section already names for Russian period style) — fetched once each, Gemini classifies
-// rubric per story rather than us pre-assigning by site.
-const TV_WAYBACK_SITES = ['cnet.com', 'zdnet.com', 'wired.com', 'gamespot.com', 'ign.com', 'compulenta.ru', 'ixbt.com'];
+// Real, well-archived tech-news sites from the era — mixed EN + RU on purpose (Костян's
+// ask: don't limit sourcing to the Russian-language segment). This list is research-based
+// (real outlets that existed and published tech/games/hardware news across our target
+// years) but NOT individually confirmed against live Wayback captures — web.archive.org
+// isn't reachable from the tooling used to build this, same standing caveat as the rest of
+// this file's Wayback code. Expect some entries to yield little/nothing for a given week;
+// that's expected and handled per-site (one bad site never blocks the others).
+const TV_WAYBACK_SITES = [
+  'cnet.com', 'zdnet.com', 'wired.com', 'gamespot.com', 'ign.com', 'theregister.co.uk',
+  'arstechnica.com', 'slashdot.org', 'pcworld.com',
+  'compulenta.ru', 'ixbt.com', '3dnews.ru', 'overclockers.ru', 'cnews.ru',
+];
+// Real article pages only — never spend a fetch on a stylesheet/script/feed/sitemap/icon.
+const TV_WAYBACK_SKIP_PATH_RE = /\.(css|js|xml|rss|json|png|jpe?g|gif|svg|ico|woff2?|ttf|pdf)(\?|$)|\/(feed|rss|sitemap|robots\.txt|favicon\.ico)(\/|$)/i;
 
 async function tvGatherWaybackNews(range) {
   const from = range.start.replace(/-/g, '');
   const to = range.end.replace(/-/g, '');
-  const pages = [];
-  for (const site of TV_WAYBACK_SITES) {
+  // Sites run in parallel (each independently try/caught, one bad site can't block the
+  // rest); pages within a site are fetched sequentially to avoid bursting archive.org with
+  // too many concurrent requests from one caller at once.
+  const perSite = await Promise.all(TV_WAYBACK_SITES.map(async (site) => {
     try {
-      const cdxUrl = `https://web.archive.org/cdx/search/cdx?url=${encodeURIComponent(site)}&from=${from}&to=${to}&output=json&filter=statuscode:200&collapse=timestamp:8&limit=2`;
+      // matchType=domain + collapse=urlkey: the CDX API's DEFAULT match mode is 'exact' —
+      // querying the bare domain with no matchType (the previous version of this code) only
+      // ever matches that literal homepage URL, never any article page under it. Confirmed
+      // against the CDX server's own docs (github.com/internetarchive/wayback/blob/master/
+      // wayback-cdx-server/README.md) — this was the main reason so few real stories came
+      // back: Wayback rarely holds more than 1-2 homepage snapshots a week, and a homepage's
+      // own text (after stripping nav/ads) rarely reads as real article prose anyway.
+      // matchType=domain widens the query to every real URL under the domain (and its
+      // subdomains) captured in the target week; collapse=urlkey keeps one snapshot per
+      // distinct URL instead of one per timestamp.
+      const cdxUrl = `https://web.archive.org/cdx/search/cdx?url=${encodeURIComponent(site)}&matchType=domain&from=${from}&to=${to}&output=json&filter=statuscode:200&filter=mimetype:text/html&collapse=urlkey&limit=40`;
       const cdxRes = await fetch(cdxUrl);
-      if (!cdxRes.ok) { console.warn('[tv] wayback CDX failed for', site, cdxRes.status); continue; }
+      if (!cdxRes.ok) { console.warn('[tv] wayback CDX failed for', site, cdxRes.status); return []; }
       const cdxData = await cdxRes.json().catch(() => null);
-      if (!Array.isArray(cdxData) || cdxData.length < 2) continue; // header row only = no snapshots that week
-      for (const row of cdxData.slice(1)) {
+      if (!Array.isArray(cdxData) || cdxData.length < 2) return []; // header row only = nothing archived that week
+      const candidates = cdxData.slice(1)
+        .filter((row) => {
+          const url = row[2] || '';
+          if (TV_WAYBACK_SKIP_PATH_RE.test(url)) return false;
+          const pathPart = url.replace(/^https?:\/\/[^/]+/, '');
+          return pathPart.length > 1; // exclude the bare homepage itself — we want real articles
+        })
+        .slice(0, 6); // cap per site — this still runs synchronously while Костян waits in the browser
+      const pages = [];
+      for (const row of candidates) {
         const timestamp = row[1], original = row[2];
         try {
           // the "id_" suffix asks Wayback for the raw original page, without its own
@@ -653,8 +684,10 @@ async function tvGatherWaybackNews(range) {
           pages.push({ site, timestamp, original, text });
         } catch (err) { console.warn('[tv] wayback page fetch failed for', site, timestamp, err.message); }
       }
-    } catch (err) { console.warn('[tv] wayback CDX request failed for', site, err.message); }
-  }
+      return pages;
+    } catch (err) { console.warn('[tv] wayback CDX request failed for', site, err.message); return []; }
+  }));
+  const pages = perSite.flat();
   if (!pages.length) return [];
 
   const sourceBlock = pages.map((p, i) => `[SOURCE ${i}: real archived page from ${p.site}, dated ${p.timestamp.slice(0, 4)}-${p.timestamp.slice(4, 6)}-${p.timestamp.slice(6, 8)}]\n${p.text}`).join('\n\n');
@@ -725,8 +758,11 @@ async function tvGatherWikipediaNews(range) {
   for (const rubric of Object.keys(TV_WIKI_CATEGORY_PATTERNS)) {
     try {
       const category = TV_WIKI_CATEGORY_PATTERNS[rubric](year);
-      const titles = await tvFetchWikiCategoryMembers(category, 8);
-      for (const title of titles.slice(0, 4)) {
+      // Was capped at 8 fetched / 4 used per rubric — needlessly thin given Wikipedia
+      // categories for a given year commonly hold far more real members than that, and
+      // this pass is free (no per-request cost beyond Wikipedia's own generous rate limits).
+      const titles = await tvFetchWikiCategoryMembers(category, 25);
+      for (const title of titles.slice(0, 12)) {
         try {
           const summary = await tvFetchWikiSummary(title);
           if (summary) summaries.push(Object.assign({ rubricHint: rubric }, summary));
