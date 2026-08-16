@@ -60,7 +60,7 @@
   .tv-news-pane-head{ font-size:11.5px; color:var(--text-2); padding:8px 10px; border-bottom:1px solid var(--line); }
   .tv-news-row{
     display:flex; align-items:center; gap:8px; padding:7px 10px; border-bottom:1px solid var(--line-soft);
-    font-size:12.5px; cursor:grab;
+    font-size:12.5px;
   }
   .tv-news-rubric{ font-size:10.5px; color:var(--accent-text); border:1px solid var(--accent-dim); border-radius:4px; padding:1px 6px; flex:0 0 auto; }
   .tv-news-title{ flex:1; color:var(--text-1); }
@@ -69,6 +69,16 @@
   .tv-news-flag-week{ color:var(--ok); border:1px solid var(--ok); border-radius:4px; padding:1px 6px; font-size:10px; }
   .tv-news-flag-year{ color:var(--text-2); border:1px solid var(--line); border-radius:4px; padding:1px 6px; font-size:10px; }
   .tv-news-rubric-filters{ display:flex; gap:6px; margin-bottom:10px; }
+  .tv-news-subtabs{ display:flex; gap:2px; border-bottom:1px solid var(--line); margin-bottom:14px; }
+  .tv-subtab{ padding:7px 12px; font-size:12px; color:var(--text-3); cursor:pointer; border-bottom:2px solid transparent; }
+  .tv-subtab:hover{ color:var(--text-1); }
+  .tv-subtab.active{ color:var(--accent-text); border-bottom-color:var(--accent); }
+  #tvNewsMainView.hidden, #tvNewsArchiveView.hidden{ display:none; }
+  .tv-news-bulk-actions{
+    display:flex; align-items:center; gap:8px; padding:8px 10px;
+    border-top:1px solid var(--line); font-size:11.5px; color:var(--text-2);
+  }
+  .tv-news-checkbox{ flex:0 0 auto; margin-right:2px; }
   .tv-news-row-wrap{ border-bottom:1px solid var(--line-soft); }
   .tv-news-row-wrap .tv-news-row{ border-bottom:none; cursor:pointer; }
   .tv-news-expand{ padding:4px 10px 12px 10px; font-size:12px; color:var(--text-2); line-height:1.5; }
@@ -143,7 +153,8 @@
   <div class="tv-topbar-spacer"></div>
   <span class="save-status" id="tvSaveStatus" title="Статус автосохранения"></span>
   <button class="tbtn" id="tvConnectFolderBtn" style="display:none;" title="Хранить /TV как настоящие файлы на диске">Сохранить в папку на диске</button>
-  <button id="tvApproveBtn">Утвердить в выпуск</button>
+  <!-- "Утвердить в выпуск" removed for now, per Костян — approvals stay in tvState.approvals
+       (harmless, unused) in case this comes back later. -->
 </div>
 
 <!-- 1. Work — anchors (Character Card) + studio backdrops (Object Card) -->
@@ -169,24 +180,38 @@
   <div class="tv-page-head">
     <div>
       <div class="tv-page-title">Новости</div>
-      <div class="tv-page-desc">Новости той же недели 25 лет назад. Перетащите слева направо, чтобы включить в выпуск.</div>
+      <div class="tv-page-desc">Новости той же недели 25 лет назад. Отметьте галочками в «Предложено» и выберите «В выпуск» или «В архив».</div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;">
       <span class="gen-hint" id="tvGatherNewsHint" style="margin:0;"></span>
       <button class="tv-btn primary" id="tvGatherNewsBtn">Собрать новости</button>
     </div>
   </div>
-  <div id="tvNewsCalendar" class="tv-cal"></div>
-  <div class="tv-news-rubric-filters" id="tvNewsRubricFilters"></div>
-  <div class="tv-news-panes">
-    <div class="tv-news-pane">
-      <div class="tv-news-pane-head">Предложено</div>
-      <div id="tvNewsLeftPane"></div>
+  <div class="tv-news-subtabs" id="tvNewsSubTabs">
+    <div class="tv-subtab active" data-subtab="news">Новости</div>
+    <div class="tv-subtab" data-subtab="archive">Архив</div>
+  </div>
+  <div id="tvNewsMainView">
+    <div id="tvNewsCalendar" class="tv-cal"></div>
+    <div class="tv-news-rubric-filters" id="tvNewsRubricFilters"></div>
+    <div class="tv-news-panes">
+      <div class="tv-news-pane">
+        <div class="tv-news-pane-head">Предложено</div>
+        <div id="tvNewsLeftPane"></div>
+        <div class="tv-news-bulk-actions" id="tvNewsBulkActions" style="display:none;">
+          <span id="tvNewsBulkCount"></span>
+          <button class="tv-btn primary" id="tvNewsBulkIncludeBtn">В выпуск</button>
+          <button class="tv-btn" id="tvNewsBulkArchiveBtn">В архив</button>
+        </div>
+      </div>
+      <div class="tv-news-pane">
+        <div class="tv-news-pane-head">В выпуске</div>
+        <div id="tvNewsRightPane"></div>
+      </div>
     </div>
-    <div class="tv-news-pane">
-      <div class="tv-news-pane-head">В выпуске</div>
-      <div id="tvNewsRightPane"></div>
-    </div>
+  </div>
+  <div id="tvNewsArchiveView" class="hidden">
+    <div id="tvNewsArchiveList"></div>
   </div>
 </div>
 

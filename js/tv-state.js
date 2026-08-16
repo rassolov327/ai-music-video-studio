@@ -102,10 +102,15 @@ const tvState = {
   // it is never auto-generated or silently dropped. Every item is REAL — sourced from
   // Wayback Machine (sourcePrecision:'week') or Wikipedia (sourcePrecision:'year') via
   // /api/tv/gather-news, never recalled/invented (see server.js's comment there).
+  // `gatheredForWeek` (ISO week-start date) tags which target week an item was fetched
+  // for — tvGatherNews() archives non-included items whose week no longer matches instead
+  // of letting stale proposals pile up. Archived items (`archived:true`) are deleted for
+  // good 30 days after `archivedAt` (tvPruneOldArchive in tv-app.js).
   tvNewsItems: [], // [{ id, rubric, title, summary, extract, sourceDate, sourceUrl,
                     //    source:'wayback'|'wikipedia', sourcePrecision:'week'|'year',
                     //    media:[{type,url,title}], materialStatus, isAnniversary, included,
-                    //    assignedAnchorId, approvedForRelease, sortOrder }]
+                    //    archived, archivedAt, gatheredForWeek, assignedAnchorId,
+                    //    approvedForRelease, sortOrder }]
 
   // Сетка tab — the assembled timeline, grouped into rubric blocks (all of one rubric
   // together before the next rubric starts). Auto-populated from TV_FORMAT_TEMPLATE by

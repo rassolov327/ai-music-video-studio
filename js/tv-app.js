@@ -5,7 +5,7 @@ function showTvPage(page){
   document.querySelectorAll('.tv-page-tab').forEach(t=> t.classList.toggle('active', t.dataset.tvPage===page));
   document.querySelectorAll('.tv-page').forEach(el=> el.classList.toggle('hidden', el.dataset.tvPage!==page));
   renderTvApprovalButton();
-  if(page==='news'){ renderTvNewsCalendar(); renderTvNewsPickers(); }
+  if(page==='news'){ tvPruneOldArchive(); renderTvNewsCalendar(); renderTvNewsSubTabs(); renderTvNewsPickers(); }
   if(page==='grid') renderTvGrid();
 }
 
@@ -992,6 +992,63 @@ function tvRenderNewsCalendar(){
   `;
 }
 
+// ---- Новости / Архив sub-tabs ----
+// Костян's worry was clutter — instead of a manual "clear" button, stale proposals
+// (not-included items whose gatheredForWeek no longer matches the current target week)
+// move themselves to a dated archive on the next "Собрать новости", and anything sitting
+// in the archive for 30 days is deleted for good (tvPruneOldArchive). Items already в
+// выпуске are never auto-archived regardless of week, since work on an episode can span
+// more than one calendar week.
+let tvNewsSubTab = 'news'; // 'news' | 'archive'
+const tvSelectedNewsIds = new Set(); // checked items in "Предложено", for bulk actions
+
+function tvPruneOldArchive(){
+  const cutoff = Date.now() - 30*24*60*60*1000;
+  const before = tvState.tvNewsItems.length;
+  tvState.tvNewsItems = tvState.tvNewsItems.filter(n=> !(n.archived && n.archivedAt && n.archivedAt < cutoff));
+  if(tvState.tvNewsItems.length !== before) tvSaveSoon();
+}
+function tvSwitchNewsSubTab(tab){
+  tvNewsSubTab = tab;
+  tvSelectedNewsIds.clear();
+  renderTvNewsSubTabs();
+}
+function renderTvNewsSubTabs(){
+  const tabsEl = document.getElementById('tvNewsSubTabs');
+  const mainView = document.getElementById('tvNewsMainView');
+  const archiveView = document.getElementById('tvNewsArchiveView');
+  if(!tabsEl || !mainView || !archiveView) return;
+  const archivedCount = tvState.tvNewsItems.filter(n=> n.archived).length;
+  tabsEl.querySelectorAll('.tv-subtab').forEach(t=> t.classList.toggle('active', t.dataset.subtab===tvNewsSubTab));
+  const archiveTabEl = tabsEl.querySelector('[data-subtab="archive"]');
+  if(archiveTabEl) archiveTabEl.textContent = 'Архив' + (archivedCount ? ' (' + archivedCount + ')' : '');
+  mainView.classList.toggle('hidden', tvNewsSubTab!=='news');
+  archiveView.classList.toggle('hidden', tvNewsSubTab!=='archive');
+  if(tvNewsSubTab==='archive') renderTvNewsArchive();
+}
+function renderTvNewsArchive(){
+  const el = document.getElementById('tvNewsArchiveList');
+  if(!el) return;
+  const items = tvState.tvNewsItems.filter(n=> n.archived).sort((a,b)=> (b.archivedAt||0)-(a.archivedAt||0));
+  if(!items.length){ el.innerHTML = `<div class="tv-empty-hint">Архив пуст.</div>`; return; }
+  el.innerHTML = items.map(n=>{
+    const daysLeft = n.archivedAt ? Math.max(0, 30 - Math.floor((Date.now()-n.archivedAt)/86400000)) : 30;
+    return `<div class="tv-news-row" data-id="${n.id}">
+      <span class="tv-news-rubric">${tvRubricLabel(n.rubric)}</span>
+      <span class="tv-news-title">${n.title}</span>
+      <span class="tv-news-flag" title="Удалится безвозвратно">удалится через ${daysLeft} дн.</span>
+      <button class="cf-btn" data-restore="${n.id}" style="flex:0 0 auto;padding:3px 8px;font-size:11px;">Вернуть</button>
+    </div>`;
+  }).join('');
+  el.querySelectorAll('[data-restore]').forEach(btn=>{
+    btn.onclick = ()=>{
+      const id = Number(btn.dataset.restore);
+      const item = tvState.tvNewsItems.find(n=> n.id===id);
+      if(item){ item.archived = false; item.archivedAt = null; tvSaveSoon(); renderTvNewsArchive(); renderTvNewsSubTabs(); renderTvNewsPickers(); }
+    };
+  });
+}
+
 // ---- two-pane picker, with click-to-expand (read full text + collected materials) ----
 const tvExpandedNewsIds = new Set(); // UI-only, not persisted — resets on reload
 function tvNewsPrecisionBadge(n){
@@ -999,16 +1056,36 @@ function tvNewsPrecisionBadge(n){
   if(n.sourcePrecision==='year') return '<span class="tv-news-flag tv-news-flag-year" title="Источник — Wikipedia, точность в пределах года, не недели">год</span>';
   return '';
 }
+function tvUpdateNewsBulkButtons(){
+  const bar = document.getElementById('tvNewsBulkActions');
+  if(!bar) return;
+  const count = tvSelectedNewsIds.size;
+  bar.style.display = count ? 'flex' : 'none';
+  const countEl = document.getElementById('tvNewsBulkCount');
+  if(countEl) countEl.textContent = 'Выбрано: ' + count;
+}
+function tvBulkMoveSelectedNews(target){ // 'included' | 'archived'
+  tvState.tvNewsItems.forEach(n=>{
+    if(!tvSelectedNewsIds.has(n.id)) return;
+    if(target==='included') n.included = true;
+    else if(target==='archived'){ n.archived = true; n.archivedAt = Date.now(); }
+  });
+  tvSelectedNewsIds.clear();
+  renderTvNewsPickers();
+  renderTvNewsSubTabs();
+  tvSaveSoon();
+}
 function renderTvNewsPickers(){
   const leftEl = document.getElementById('tvNewsLeftPane');
   const rightEl = document.getElementById('tvNewsRightPane');
   if(!leftEl || !rightEl) return;
-  const left = tvState.tvNewsItems.filter(n=> !n.included);
-  const right = tvState.tvNewsItems.filter(n=> n.included);
-  const row = (n)=>{
+  const left = tvState.tvNewsItems.filter(n=> !n.included && !n.archived);
+  const right = tvState.tvNewsItems.filter(n=> n.included && !n.archived);
+  const row = (n, withCheckbox)=>{
     const expanded = tvExpandedNewsIds.has(n.id);
     return `<div class="tv-news-row-wrap">
       <div class="tv-news-row" data-id="${n.id}">
+        ${withCheckbox ? `<input type="checkbox" class="tv-news-checkbox" data-check="${n.id}"${tvSelectedNewsIds.has(n.id) ? ' checked' : ''}>` : ''}
         <span class="tv-news-rubric">${tvRubricLabel(n.rubric)}</span>
         <span class="tv-news-title">${n.title}</span>
         ${tvNewsPrecisionBadge(n)}
@@ -1023,18 +1100,27 @@ function renderTvNewsPickers(){
       </div>` : ''}
     </div>`;
   };
-  leftEl.innerHTML = left.length ? left.map(row).join('') : `<div class="tv-empty-hint">Нет предложенных новостей.</div>`;
-  rightEl.innerHTML = right.length ? right.map(row).join('') : `<div class="tv-empty-hint">Перетащите новости сюда, чтобы включить в выпуск.</div>`;
+  leftEl.innerHTML = left.length ? left.map(n=> row(n,true)).join('') : `<div class="tv-empty-hint">Нет предложенных новостей.</div>`;
+  rightEl.innerHTML = right.length ? right.map(n=> row(n,false)).join('') : `<div class="tv-empty-hint">Перетащите новости сюда, чтобы включить в выпуск.</div>`;
   [leftEl, rightEl].forEach(pane=>{
     pane.querySelectorAll('.tv-news-row').forEach(rowEl=>{
       rowEl.onclick = (e)=>{
-        if(e.target.closest('a')) return;
+        if(e.target.closest('a') || e.target.closest('.tv-news-checkbox')) return;
         const id = Number(rowEl.dataset.id);
         if(tvExpandedNewsIds.has(id)) tvExpandedNewsIds.delete(id); else tvExpandedNewsIds.add(id);
         renderTvNewsPickers();
       };
     });
   });
+  leftEl.querySelectorAll('.tv-news-checkbox').forEach(cb=>{
+    cb.onclick = (e)=> e.stopPropagation();
+    cb.onchange = ()=>{
+      const id = Number(cb.dataset.check);
+      if(cb.checked) tvSelectedNewsIds.add(id); else tvSelectedNewsIds.delete(id);
+      tvUpdateNewsBulkButtons();
+    };
+  });
+  tvUpdateNewsBulkButtons();
 }
 
 // ---- Сетка tab: auto-populated from TV_FORMAT_TEMPLATE (see tv-state.js — draft, derived
@@ -1108,13 +1194,31 @@ async function tvGatherNews(){
   if(hint) hint.textContent = 'Ищу реальные источники — это может занять минуту-другую…';
   try{
     const week = tvComputeTargetWeek();
+    // Anything still just proposed (not included) from an earlier target week is stale —
+    // move it to the archive instead of letting it pile up next to this week's picks.
+    tvState.tvNewsItems.forEach(n=>{
+      if(!n.included && !n.archived && n.gatheredForWeek && n.gatheredForWeek!==week.start){
+        n.archived = true;
+        n.archivedAt = Date.now();
+      }
+    });
     const res = await fetch('/api/tv/gather-news', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ weekStart: week.start, weekEnd: week.end }),
     });
     const data = await res.json().catch(()=> null);
     if(!res.ok || !data || !Array.isArray(data.items)) throw new Error((data && data.message) || 'Не удалось собрать новости.');
+
+    // Dedup against whatever's still active (not archived) — re-running the gather for
+    // the same week shouldn't duplicate what's already there.
+    const dedupKey = (n)=> n.sourceUrl || (n.title||'').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim();
+    const existingKeys = new Set(tvState.tvNewsItems.filter(n=> !n.archived).map(dedupKey));
+    let addedCount = 0, skippedCount = 0;
     data.items.forEach(item=>{
+      const key = dedupKey(item);
+      if(existingKeys.has(key)){ skippedCount++; return; }
+      existingKeys.add(key);
+      addedCount++;
       tvState.tvNewsItems.push({
         id: tvNewsItemSeq++,
         rubric: item.rubric,
@@ -1129,15 +1233,19 @@ async function tvGatherNews(){
         materialStatus: 'мало материала',
         isAnniversary: false,
         included: false,
+        archived: false,
+        archivedAt: null,
+        gatheredForWeek: week.start,
         assignedAnchorId: null,
         approvedForRelease: false,
         sortOrder: 0,
       });
     });
     renderTvNewsPickers();
+    renderTvNewsSubTabs();
     tvSaveSoon();
     hint.textContent = data.items.length
-      ? 'Добавлено: ' + data.items.length + ' (реальные источники — проверьте ссылки)'
+      ? 'Добавлено: ' + addedCount + (skippedCount ? ', уже было: ' + skippedCount : '') + ' (реальные источники — проверьте ссылки)'
       : 'За эту неделю ничего не нашлось в реальных источниках. Попробуйте ещё раз позже, или добавьте новость вручную.';
   } catch(err){
     if(hint){ hint.textContent = err.message; hint.style.color = 'var(--danger)'; }
@@ -1246,6 +1354,13 @@ function wireTvPageTabs(){
   if(gatherNewsBtn) gatherNewsBtn.onclick = tvGatherNews;
   const autoPopulateGridBtn = document.getElementById('tvAutoPopulateGridBtn');
   if(autoPopulateGridBtn) autoPopulateGridBtn.onclick = tvAutoPopulateGrid;
+  document.querySelectorAll('#tvNewsSubTabs .tv-subtab').forEach(tab=>{
+    tab.onclick = ()=> tvSwitchNewsSubTab(tab.dataset.subtab);
+  });
+  const bulkIncludeBtn = document.getElementById('tvNewsBulkIncludeBtn');
+  if(bulkIncludeBtn) bulkIncludeBtn.onclick = ()=> tvBulkMoveSelectedNews('included');
+  const bulkArchiveBtn = document.getElementById('tvNewsBulkArchiveBtn');
+  if(bulkArchiveBtn) bulkArchiveBtn.onclick = ()=> tvBulkMoveSelectedNews('archived');
 }
 
 (async function(){
@@ -1254,6 +1369,7 @@ function wireTvPageTabs(){
   tvWireCreditsIndicator();
   await Promise.all([tvLoadModelList(), tvLoadWorkspace()]);
   tvStartAutosave();
+  tvPruneOldArchive();
   renderTvAnchors();
   renderTvBackdrops();
   renderTvNewsPickers();

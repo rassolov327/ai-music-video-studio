@@ -573,8 +573,14 @@ function tvStripHtml(html) {
 // passes below. `withSourceIndex` adds a required sourceIndex field so the caller (not
 // Gemini) maps each item back to its real URL/date — Gemini never gets to invent a source.
 async function tvCallGeminiStructuring(instruction, withSourceIndex) {
-  const itemProps = { rubric: { type: 'string' }, title: { type: 'string' }, summary: { type: 'string' } };
-  const required = ['rubric', 'title', 'summary'];
+  const itemProps = {
+    rubric: { type: 'string' }, title: { type: 'string' }, summary: { type: 'string' },
+    // A short ENGLISH search phrase for finding a real illustrative photo afterward — kept
+    // separate from `title`/`summary` (which are Russian) since Wikimedia Commons search
+    // works far better on English terms.
+    imageQuery: { type: 'string' },
+  };
+  const required = ['rubric', 'title', 'summary', 'imageQuery'];
   if (withSourceIndex) { itemProps.sourceIndex = { type: 'integer' }; required.push('sourceIndex'); }
   const responseSchema = { type: 'object', properties: { items: { type: 'array', items: { type: 'object', properties: itemProps, required } } }, required: ['items'] };
   const geminiRes = await fetch(`${GEMINI_BASE}/models/${GEMINI_MODEL}:generateContent`, {
@@ -633,6 +639,7 @@ async function tvGatherWaybackNews(range) {
     'For EACH numbered source below, extract any IT/technology, video games, software, or internet NEWS STORIES that are LITERALLY PRESENT in that source\'s text — a short Russian title, a factual 1-3 sentence Russian summary based ONLY on the text given, and which sourceIndex it came from.',
     'This is real scraped page content and may include navigation/ad/boilerplate text — ignore that. Do not add any fact, name, or number that is not literally present in the text.',
     'rubric must be exactly one of: news, games, soft, internet.',
+    'imageQuery: a short English search phrase (2-5 words) for finding a real illustrative photo of this story — normally the product/company/game name mentioned in the text.',
     'If a source has no real news story content, skip it entirely rather than inventing one.',
     'Respond with ONLY the JSON object, nothing else.',
     '', sourceBlock,
@@ -643,7 +650,7 @@ async function tvGatherWaybackNews(range) {
     const src = pages[it.sourceIndex];
     if (!src) return null;
     return {
-      rubric: it.rubric, title: it.title, summary: it.summary,
+      rubric: it.rubric, title: it.title, summary: it.summary, imageQuery: it.imageQuery,
       source: 'wayback', sourcePrecision: 'week',
       sourceUrl: `https://web.archive.org/web/${src.timestamp}/${src.original}`,
       sourceDate: `${src.timestamp.slice(0, 4)}-${src.timestamp.slice(4, 6)}-${src.timestamp.slice(6, 8)}`,
@@ -705,6 +712,7 @@ async function tvGatherWikipediaNews(range) {
     'The following are real, literally-retrieved Wikipedia article summaries about IT/technology, video games, software, or internet topics from one specific historical year.',
     'For EACH numbered source below that describes a genuinely news-worthy event or release, produce one structured item: a short Russian title, a factual 1-3 sentence Russian summary based ONLY on the text given, and which sourceIndex it came from.',
     'rubric must be exactly one of: news, games, soft, internet — use the rubric hint as a starting point but correct it if the actual content clearly belongs elsewhere.',
+    'imageQuery: a short English search phrase (2-5 words) for finding a real illustrative photo of this story — normally the subject\'s own name.',
     'Do not add any fact not present in the given text. Skip sources that are too vague to be real news-worthy items.',
     'Respond with ONLY the JSON object, nothing else.',
     '', sourceBlock,
@@ -715,12 +723,42 @@ async function tvGatherWikipediaNews(range) {
     const src = summaries[it.sourceIndex];
     if (!src) return null;
     return {
-      rubric: it.rubric, title: it.title, summary: it.summary,
+      rubric: it.rubric, title: it.title, summary: it.summary, imageQuery: it.imageQuery,
       source: 'wikipedia', sourcePrecision: 'year',
       sourceUrl: src.pageUrl, sourceDate: null, extract: src.extract,
       media: src.thumbnail ? [{ type: 'image', url: src.thumbnail, title: src.title }] : [],
     };
   }).filter(Boolean);
+}
+
+// Real (free, keyless) illustrative photo per item — Wikipedia items may already have a
+// thumbnail from their own page summary; everything else (all Wayback items, and any
+// Wikipedia item whose article had no thumbnail) gets one real Commons search. Video
+// sourcing (YouTube Data API) is a deliberate NOT-YET — needs its own API key/quota setup,
+// deferred until Костян sets that up.
+async function tvSearchCommonsImage(query) {
+  if (!query) return null;
+  try {
+    const searchUrl = `https://commons.wikimedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&srnamespace=6&format=json&srlimit=3`;
+    const searchRes = await fetch(searchUrl, { headers: TV_WIKI_UA });
+    if (!searchRes.ok) return null;
+    const searchData = await searchRes.json().catch(() => null);
+    const results = searchData && searchData.query && searchData.query.search;
+    if (!Array.isArray(results) || !results.length) return null;
+    const title = results[0].title;
+    const infoUrl = `https://commons.wikimedia.org/w/api.php?action=query&titles=${encodeURIComponent(title)}&prop=imageinfo&iiprop=url&iiurlwidth=800&format=json`;
+    const infoRes = await fetch(infoUrl, { headers: TV_WIKI_UA });
+    if (!infoRes.ok) return null;
+    const infoData = await infoRes.json().catch(() => null);
+    const pages = infoData && infoData.query && infoData.query.pages;
+    const page = pages && Object.values(pages)[0];
+    const info = page && page.imageinfo && page.imageinfo[0];
+    const url = info && (info.thumburl || info.url);
+    return url ? { type: 'image', url, title } : null;
+  } catch (err) {
+    console.warn('[tv] commons image search failed for', query, err.message);
+    return null;
+  }
 }
 
 app.post('/api/tv/gather-news', async (req, res) => {
@@ -734,8 +772,16 @@ app.post('/api/tv/gather-news', async (req, res) => {
     tvGatherWaybackNews(range).catch((err) => { console.warn('[tv] wayback pass failed entirely:', err.message); return []; }),
     tvGatherWikipediaNews(range).catch((err) => { console.warn('[tv] wikipedia pass failed entirely:', err.message); return []; }),
   ]);
+  const items = [...waybackItems, ...wikipediaItems];
 
-  res.json({ items: [...waybackItems, ...wikipediaItems], weekStart: range.start, weekEnd: range.end });
+  await Promise.all(items.map(async (item) => {
+    if (item.media && item.media.length) return; // already has a real thumbnail (Wikipedia)
+    const img = await tvSearchCommonsImage(item.imageQuery || item.title);
+    if (img) item.media = [img];
+    delete item.imageQuery; // internal-only, not needed by the client
+  }));
+
+  res.json({ items, weekStart: range.start, weekEnd: range.end });
 });
 
 app.get('/api/models', (req, res) => {
