@@ -46,6 +46,16 @@ function tvCloseModal(){
   tvAnchorCardBuilderOpenId = null;
 }
 
+// ---- fullscreen image lightbox (Character Card / Object Card sheet preview) ----
+function tvOpenLightbox(url){
+  document.getElementById('tvLightboxImg').src = url;
+  document.getElementById('tvLightbox').classList.remove('hidden');
+}
+function tvCloseLightbox(){
+  document.getElementById('tvLightbox').classList.add('hidden');
+  document.getElementById('tvLightboxImg').src = '';
+}
+
 // ---- reference-capable model list (for Character Card generation) ----
 let tvModelOptions = [];
 async function tvLoadModelList(){
@@ -190,7 +200,7 @@ function tvOpenAnchorDetail(anchor){
         ${anchor.voiceId ? `<div class="gen-hint" style="margin-top:-8px;margin-bottom:14px;">Голос: ${anchor.voiceId}</div>` : ''}
         <div class="char-card-section-title">Character Card</div>
         ${hasSheet
-          ? `<div class="char-card-angles"><div class="char-card-angle" style="width:100%;height:90px;"><img src="${anchor.card.images.sheet.url}"></div></div>`
+          ? `<div class="char-card-angles"><div class="char-card-angle tv-clickable-img" id="tvAnchorSheetThumb" style="width:100%;height:90px;"><img src="${anchor.card.images.sheet.url}"></div></div>`
           : `<div class="gen-hint" style="margin-top:0;">Лист ещё не создан — на нём держится каждая генерация этого ведущего.</div>`}
         <div class="char-card-actions">
           <button class="cf-btn" id="tvAnchorBack">Закрыть</button>
@@ -207,6 +217,7 @@ function tvOpenAnchorDetail(anchor){
   document.getElementById('tvAnchorEdit').onclick = ()=> tvOpenAnchorForm(anchor);
   document.getElementById('tvAnchorBuildBtn').onclick = ()=> tvOpenAnchorCardBuilder(anchor);
   document.getElementById('tvAnchorPersonaBtn').onclick = ()=> tvOpenAnchorPersona(anchor);
+  if(hasSheet) document.getElementById('tvAnchorSheetThumb').onclick = ()=> tvOpenLightbox(anchor.card.images.sheet.url);
   document.getElementById('tvAnchorDelete').onclick = ()=>{
     if(!confirm('Удалить ведущего «' + anchor.name + '»?')) return;
     tvDeleteAnchorLocal(anchor.id);
@@ -569,7 +580,7 @@ function tvOpenBackdropDetail(backdrop){
         ${backdrop.description ? `<p class="char-card-desc">${backdrop.description}</p>` : ''}
         <div class="char-card-section-title">Object Card</div>
         ${hasSheet
-          ? `<div class="char-card-angles"><div class="char-card-angle" style="width:100%;height:90px;"><img src="${backdrop.card.images.sheet.url}"></div></div>`
+          ? `<div class="char-card-angles"><div class="char-card-angle tv-clickable-img" id="tvBackdropSheetThumb" style="width:100%;height:90px;"><img src="${backdrop.card.images.sheet.url}"></div></div>`
           : `<div class="gen-hint" style="margin-top:0;">Лист ещё не создан — на нём держится консистентность декорации между генерациями.</div>`}
         <div class="char-card-section-title" style="margin-top:14px;">Ракурсы (${filledAngles.length}/${TV_ANGLE_KEYS.length})</div>
         ${filledAngles.length
@@ -590,6 +601,7 @@ function tvOpenBackdropDetail(backdrop){
   document.getElementById('tvBackdropEdit').onclick = ()=> tvOpenBackdropForm(backdrop);
   document.getElementById('tvBackdropCardBtn').onclick = ()=> tvOpenBackdropCardBuilder(backdrop);
   document.getElementById('tvBackdropAnglesBtn').onclick = ()=> tvOpenBackdropAngleShots(backdrop);
+  if(hasSheet) document.getElementById('tvBackdropSheetThumb').onclick = ()=> tvOpenLightbox(backdrop.card.images.sheet.url);
   document.getElementById('tvBackdropDelete').onclick = ()=>{
     if(!confirm('Удалить декорацию «' + backdrop.name + '»?')) return;
     tvDeleteBackdropLocal(backdrop.id);
@@ -1427,6 +1439,8 @@ function wireTvPageTabs(){
   if(addBackdropBtn) addBackdropBtn.onclick = ()=> tvOpenBackdropForm(null);
   const modalBackdrop = document.getElementById('tvAnchorModalBackdrop');
   if(modalBackdrop) modalBackdrop.onclick = tvCloseModal;
+  const lightboxBackdrop = document.getElementById('tvLightboxBackdrop');
+  if(lightboxBackdrop) lightboxBackdrop.onclick = tvCloseLightbox;
   const folderBtn = document.getElementById('tvConnectFolderBtn');
   if(folderBtn) folderBtn.onclick = tvHandleFolderButtonClick;
   const gatherNewsBtn = document.getElementById('tvGatherNewsBtn');
