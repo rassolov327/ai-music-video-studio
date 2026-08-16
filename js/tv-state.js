@@ -114,8 +114,11 @@ function tvEmptyPersona(){
 // human sanity check; the segment ORDER and relative proportions held up better.
 const TV_FORMAT_TEMPLATE = {
   introDurationSec: 44,      // fixed station-ID/sponsor/title jingle, reused every week
-  hostIntroDurationSec: 60,  // anchor on-camera open
+  hostIntroDurationSec: 60,  // anchor on-camera open — also teases the FIRST rubric, so no
+                              // separate rubric_intro block precedes it
   jingleDurationSec: 4,      // graphic-bumper transition between blocks
+  rubricIntroDurationSec: 15,// host's short tease before each rubric AFTER the first one
+                              // ("а теперь — рубрика Игры") — skipped entirely if left empty
   outroDurationSec: 32,      // anchor sign-off + close
   // News airs first (grouped, not interleaved — see comment above), then the deep-dive
   // rubrics, with games always last to match all 3 analyzed episodes. hardware/mobile
@@ -168,9 +171,18 @@ const tvState = {
 
   // Сетка tab — the assembled timeline, grouped into rubric blocks (all of one rubric
   // together before the next rubric starts). Auto-populated from TV_FORMAT_TEMPLATE by
-  // tvAutoPopulateGrid() in tv-app.js.
-  tvGridBlocks: [], // [{ id, blockType:'intro'|'host_intro'|'jingle'|'outro'|'story',
-                     //    rubric, newsItemId, sortOrder, estimatedDurationSec, voTrack, cutaways:[] }]
+  // tvAutoPopulateGrid() in tv-app.js. host_intro/rubric_intro/outro blocks are clickable —
+  // they carry anchorId/text/voiceUrl/voiceTaskId/_assetFiles, similar to a news item's
+  // article (see tvNewsItems above) but not tied to any specific story. Text itself is
+  // written directly ("Сделать ведущему", js/tv-app.js) rather than TASKS-queued — only
+  // voicing goes through TASKS, hence no separate textTaskId field. anchorId defaults
+  // to the null-rubric general host ("живёт" across the whole show, like Богданов) — these
+  // are always his lines, never a rubric specialist's, per Костян. Left empty, a
+  // rubric_intro block is silently skipped in the final assembly (straight to that rubric's
+  // jingle); host_intro/outro can be left empty too.
+  tvGridBlocks: [], // [{ id, blockType:'intro'|'host_intro'|'jingle'|'rubric_intro'|'outro'|'story',
+                     //    rubric, newsItemId, sortOrder, estimatedDurationSec, voTrack, cutaways:[],
+                     //    anchorId, text, voiceUrl, voiceTaskId, _assetFiles }]
 
   // TASKS / Архив — direct analogs of the main app's taskQueue / archive. Same two-phase
   // tile lifecycle as js/tasks.js: status:'draft' (queued, model not chosen/sent yet) ->

@@ -1116,14 +1116,38 @@ function tvUpdateTasksBadge(){
 }
 // Thumb = the news item's own illustration when it has one (same media Новости already
 // collected), so a TASKS tile is recognizable at a glance instead of being plain text.
-function tvTaskThumbHtml(item){
-  const img = item && item.media && item.media[0] && item.media[0].url;
-  return `<div class="task-tile-thumb">${img ? `<img src="${img}">` : '<i class="ti ti-news" style="font-size:22px;color:var(--text-3);"></i>'}</div>`;
+// A task is either for a news item (article writing, or its voicing) or a grid block
+// (voicing only — grid-block TEXT is written directly via "Сделать ведущему", never
+// TASKS-queued). This resolves either shape into one normalized view so the rest of TASKS
+// doesn't need to care which kind of thing it's looking at.
+function tvResolveTaskTarget(task){
+  if(task.blockId){
+    const block = tvState.tvGridBlocks.find(b=> b.id===task.blockId);
+    if(!block) return null;
+    return {
+      kindTarget: 'block',
+      ref: block,
+      title: (TV_GRID_FIXED_LABELS[block.blockType] || block.blockType) + (block.blockType==='rubric_intro' ? ' — ' + tvRubricLabel(block.rubric) : ''),
+      anchor: tvState.tvAnchors.find(a=> a.id===block.anchorId),
+      mediaUrl: null,
+    };
+  }
+  const item = tvState.tvNewsItems.find(n=> n.id===task.newsItemId);
+  if(!item) return null;
+  return {
+    kindTarget: 'newsItem',
+    ref: item,
+    title: item.title,
+    anchor: tvState.tvAnchors.find(a=> a.id===item.assignedAnchorId),
+    mediaUrl: item.media && item.media[0] && item.media[0].url,
+  };
+}
+function tvTaskThumbHtml(mediaUrl){
+  return `<div class="task-tile-thumb">${mediaUrl ? `<img src="${mediaUrl}">` : '<i class="ti ti-news" style="font-size:22px;color:var(--text-3);"></i>'}</div>`;
 }
 // Who's actually responsible for this piece — small avatar + name, same idea as the
 // anchor tiles elsewhere, so a TASKS tile answers "whose job is this" without opening it.
-function tvTaskAnchorRowHtml(item){
-  const anchor = item && tvState.tvAnchors.find(a=> a.id===item.assignedAnchorId);
+function tvTaskAnchorRowHtml(anchor){
   if(!anchor) return '';
   return `<div class="tv-task-anchor-row">
     <span class="tv-task-anchor-photo">${anchor.photo ? `<img src="${anchor.photo}">` : '<i class="ti ti-user"></i>'}</span>
@@ -1139,9 +1163,9 @@ function renderTvTasks(){
     return;
   }
   el.innerHTML = tvState.tvTaskQueue.map(t=>{
-    const item = tvState.tvNewsItems.find(n=> n.id===t.newsItemId);
+    const target = tvResolveTaskTarget(t);
     const kindLabel = t.kind==='article' ? 'Текст' : 'Озвучка';
-    const title = item ? item.title : '— новость удалена —';
+    const title = target ? target.title : (t.blockId ? '— блок удалён —' : '— новость удалена —');
     // 'draft' (never sent) and 'failed' (sent, came back with an error) both need the same
     // thing: pick/change a model, then send — a failed task shouldn't be a dead end that
     // forces deleting it and re-queuing from scratch just to try a different model.
@@ -1154,11 +1178,11 @@ function renderTvTasks(){
            </select>`
         : `<div class="gen-hint" style="margin:0;">Модели недоступны.</div>`;
       return `<div class="task-tile draft" data-task-id="${t.id}">
-        ${tvTaskThumbHtml(item)}
+        ${tvTaskThumbHtml(target && target.mediaUrl)}
         <div class="task-tile-body">
           <div class="task-tile-scene">${kindLabel}</div>
           <div class="task-tile-shot">${title}</div>
-          ${tvTaskAnchorRowHtml(item)}
+          ${tvTaskAnchorRowHtml(target && target.anchor)}
           ${t.status==='failed' ? `<div class="task-tile-error">${(t.errorMessage||'').replace(/</g,'&lt;')}</div>` : ''}
           <div class="tv-task-model-row">${modelHtml}</div>
           <button class="cf-btn primary task-tile-send-btn" style="width:100%;margin-top:8px;" data-run="${t.id}" ${t.model?'':'disabled'}>${t.status==='failed' ? 'Повторить' : 'Сгенерировать'}</button>
@@ -1168,11 +1192,11 @@ function renderTvTasks(){
     }
     const statusLabel = t.status==='running' ? 'генерация…' : 'готово';
     return `<div class="task-tile" data-task-id="${t.id}">
-      ${tvTaskThumbHtml(item)}
+      ${tvTaskThumbHtml(target && target.mediaUrl)}
       <div class="task-tile-body">
         <div class="task-tile-scene">${kindLabel}</div>
         <div class="task-tile-shot">${title}</div>
-        ${tvTaskAnchorRowHtml(item)}
+        ${tvTaskAnchorRowHtml(target && target.anchor)}
         <div class="task-tile-status ${t.status}">${statusLabel}</div>
         ${t.status==='running' ? `<div class="task-tile-spin"></div>` : ''}
         <button class="cf-btn" style="width:100%;margin-top:8px;" data-remove="${t.id}">Убрать из очереди</button>
@@ -1194,32 +1218,36 @@ function renderTvTasks(){
       const id = Number(btn.dataset.remove);
       const task = tvState.tvTaskQueue.find(t=> t.id===id);
       if(task){
-        const item = tvState.tvNewsItems.find(n=> n.id===task.newsItemId);
-        if(item){
-          if(item.articleTaskId===id) item.articleTaskId = null;
-          if(item.voiceTaskId===id) item.voiceTaskId = null;
+        const target = tvResolveTaskTarget(task);
+        if(target){
+          if(target.ref.articleTaskId===id) target.ref.articleTaskId = null;
+          if(target.ref.voiceTaskId===id) target.ref.voiceTaskId = null;
         }
       }
       tvState.tvTaskQueue = tvState.tvTaskQueue.filter(t=> t.id!==id);
       tvSaveSoon();
       renderTvTasks();
       renderTvRedaktsiya();
+      renderTvGrid();
     };
   });
 }
 // Actually runs a task against the server — the ONLY place either Gemini route gets called
-// from. Writes the result straight onto the news item (articleText/voiceUrl); the task tile
-// itself just flips to 'done'/'failed' and stays until dismissed.
+// from. Writes the result straight onto the news item or grid block (articleText/voiceUrl,
+// or text/voiceUrl); the task tile itself just flips to 'done'/'failed' and stays until
+// dismissed. kind:'article' is only ever queued for news items (grid blocks use the direct
+// "Сделать ведущему" flow for text, never TASKS) — see tvResolveTaskTarget above.
 async function tvRunTvTask(taskId){
   const task = tvState.tvTaskQueue.find(t=> t.id===taskId);
   if(!task || !task.model) return;
-  const item = tvState.tvNewsItems.find(n=> n.id===task.newsItemId);
-  if(!item){ task.status = 'failed'; task.errorMessage = 'Новость удалена.'; renderTvTasks(); return; }
+  const target = tvResolveTaskTarget(task);
+  if(!target){ task.status = 'failed'; task.errorMessage = task.blockId ? 'Блок удалён.' : 'Новость удалена.'; renderTvTasks(); return; }
   task.status = 'running';
   renderTvTasks();
   try{
     if(task.kind==='article'){
-      const anchor = tvState.tvAnchors.find(a=> a.id===item.assignedAnchorId);
+      const item = target.ref;
+      const anchor = target.anchor;
       if(!anchor) throw new Error('Ведущий не назначен.');
       const personaContext = tvBuildAnchorVoiceContext(anchor);
       const res = await fetch('/api/tv/write-article', {
@@ -1232,11 +1260,12 @@ async function tvRunTvTask(taskId){
       item.articleText = data.text;
       item.articleTaskId = null;
     } else if(task.kind==='voice'){
-      if(!item.articleText) throw new Error('Текст ещё не написан.');
-      const anchor = tvState.tvAnchors.find(a=> a.id===item.assignedAnchorId);
+      const text = target.kindTarget==='block' ? target.ref.text : target.ref.articleText;
+      if(!text) throw new Error('Текст ещё не написан.');
+      const anchor = target.anchor;
       const res = await fetch('/api/tv/generate-voice', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: item.articleText, voiceName: anchor && anchor.voiceId, voiceSpeed: anchor && anchor.voiceSpeed, model: task.model }),
+        body: JSON.stringify({ text, voiceName: anchor && anchor.voiceId, voiceSpeed: anchor && anchor.voiceSpeed, model: task.model }),
       });
       if(res.status===401) throw new Error('Нужно войти в аккаунт — откройте / и авторизуйтесь, затем вернитесь на /tv.');
       if(!res.ok){
@@ -1246,12 +1275,13 @@ async function tvRunTvTask(taskId){
       const blob = await res.blob();
       // No hardcoded extension — Gemini always returns WAV, but ElevenLabs (KIE) returns
       // MP3, so this has to follow the actual Content-Type the server sent back.
-      const persisted = await tvPersistBlobAssetDirect('newsitem:' + item.id + ':voice', blob);
-      item.voiceUrl = persisted ? persisted.url : URL.createObjectURL(blob);
-      item._assetFiles = item._assetFiles || {};
-      item._assetFiles.voice = !!persisted;
-      item._assetFiles.voiceFile = persisted ? persisted.fileName : undefined;
-      item.voiceTaskId = null;
+      const assetKeyPrefix = target.kindTarget==='block' ? 'gridblock:' + target.ref.id : 'newsitem:' + target.ref.id;
+      const persisted = await tvPersistBlobAssetDirect(assetKeyPrefix + ':voice', blob);
+      target.ref.voiceUrl = persisted ? persisted.url : URL.createObjectURL(blob);
+      target.ref._assetFiles = target.ref._assetFiles || {};
+      target.ref._assetFiles.voice = !!persisted;
+      target.ref._assetFiles.voiceFile = persisted ? persisted.fileName : undefined;
+      target.ref.voiceTaskId = null;
     }
     task.status = 'done';
     tvSaveSoon();
@@ -1262,7 +1292,10 @@ async function tvRunTvTask(taskId){
   renderTvTasks();
   renderTvRedaktsiya();
   renderTvMic();
-  if(tvMicPanelOpenAnchorId===item.assignedAnchorId) tvRenderMicItemsList(item.assignedAnchorId);
+  renderTvGrid();
+  if(target.kindTarget==='newsItem' && tvMicPanelOpenAnchorId===target.ref.assignedAnchorId){
+    tvRenderMicItemsList(target.ref.assignedAnchorId);
+  }
 }
 
 // ---- Микрофонная tab — anchor tiles; each opens a panel listing the items written for
@@ -1386,7 +1419,15 @@ function tvSendToVoicing(itemId){
 
 // ---- Сетка tab: auto-populated from TV_FORMAT_TEMPLATE (see tv-state.js — draft, derived
 // from scripts/analyze-show-format.js's analysis of 3 real reference episodes) ----
-const TV_GRID_FIXED_LABELS = { intro:'Заставка', host_intro:'Выход ведущего', jingle:'Джингл', outro:'Аутро' };
+const TV_GRID_FIXED_LABELS = { intro:'Заставка', host_intro:'Выход ведущего', jingle:'Джингл', rubric_intro:'Подводка к рубрике', outro:'Аутро' };
+// Grid blocks with host text/voice (host_intro/rubric_intro/outro) always belong to the
+// null-rubric general host, never a rubric specialist — same "живёт в своей передаче" idea
+// as Богданов in the reference show. Auto-assigns only when the match is unambiguous, same
+// rule as Редакция's anchor default.
+function tvGeneralHostAnchorId(){
+  const matches = tvState.tvAnchors.filter(a=> !a.rubric);
+  return matches.length===1 ? matches[0].id : null;
+}
 function tvAutoPopulateGrid(){
   const included = tvState.tvNewsItems.filter(n=> n.included);
   if(!included.length){
@@ -1394,16 +1435,23 @@ function tvAutoPopulateGrid(){
     return;
   }
   const t = TV_FORMAT_TEMPLATE;
+  const hostAnchorId = tvGeneralHostAnchorId();
   const blocks = [];
   let order = 0;
   const push = (fields)=> blocks.push(Object.assign({ id: tvGridBlockSeq++, rubric:null, newsItemId:null, sortOrder: order++, voTrack:{}, cutaways:[] }, fields));
 
   push({ blockType:'intro', estimatedDurationSec: t.introDurationSec });
-  push({ blockType:'host_intro', estimatedDurationSec: t.hostIntroDurationSec });
+  // host_intro also teases the FIRST rubric — no separate rubric_intro precedes it.
+  push({ blockType:'host_intro', estimatedDurationSec: t.hostIntroDurationSec, anchorId: hostAnchorId, text: null, voiceUrl: null, _assetFiles: {} });
 
+  let isFirstRubric = true;
   t.rubricOrder.forEach(rubricKey=>{
     const items = included.filter(n=> n.rubric===rubricKey).sort((a,b)=> (a.sortOrder||0)-(b.sortOrder||0));
     if(!items.length) return;
+    if(!isFirstRubric){
+      push({ blockType:'rubric_intro', rubric: rubricKey, estimatedDurationSec: t.rubricIntroDurationSec, anchorId: hostAnchorId, text: null, voiceUrl: null, _assetFiles: {} });
+    }
+    isFirstRubric = false;
     push({ blockType:'jingle', estimatedDurationSec: t.jingleDurationSec });
     items.forEach(item=>{
       push({ blockType:'story', rubric: rubricKey, newsItemId: item.id, estimatedDurationSec: t.storyDurationSec[rubricKey] || 60 });
@@ -1411,15 +1459,22 @@ function tvAutoPopulateGrid(){
   });
 
   push({ blockType:'jingle', estimatedDurationSec: t.jingleDurationSec });
-  push({ blockType:'outro', estimatedDurationSec: t.outroDurationSec });
+  push({ blockType:'outro', estimatedDurationSec: t.outroDurationSec, anchorId: hostAnchorId, text: null, voiceUrl: null, _assetFiles: {} });
 
   tvState.tvGridBlocks = blocks;
   tvSaveSoon();
   renderTvGrid();
 }
+const TV_GRID_HOST_BLOCK_TYPES = ['host_intro', 'rubric_intro', 'outro'];
+function tvGridBlockStatus(b){
+  if(b.text && b.voiceUrl) return 'green';
+  if(b.text) return 'yellow';
+  return 'red';
+}
 function renderTvGrid(){
   const el = document.getElementById('tvGridTrack');
   if(!el) return;
+  tvAutoAssignGridHostAnchors();
   if(!tvState.tvGridBlocks.length){
     el.innerHTML = `<div class="tv-empty-hint">Сетка пуста — нажмите «Собрать сетку», чтобы собрать её автоматически из новостей, включённых в выпуск.</div>`;
     return;
@@ -1435,12 +1490,153 @@ function renderTvGrid(){
         <span class="tv-grid-item-dur">~${b.estimatedDurationSec}с</span>
       </div>`;
     }
+    if(TV_GRID_HOST_BLOCK_TYPES.includes(b.blockType)){
+      return `<div class="tv-grid-item clickable" data-block-id="${b.id}">
+        <span class="tv-redak-status-dot status-${tvGridBlockStatus(b)}"></span>
+        <span class="tv-grid-item-title">${TV_GRID_FIXED_LABELS[b.blockType] || b.blockType}${b.blockType==='rubric_intro' ? ' — ' + tvRubricLabel(b.rubric) : ''}</span>
+        <span class="tv-grid-item-dur">~${b.estimatedDurationSec}с</span>
+      </div>`;
+    }
     return `<div class="tv-grid-item fixed">
       <span class="tv-grid-item-title">${TV_GRID_FIXED_LABELS[b.blockType] || b.blockType}</span>
       <span class="tv-grid-item-dur">~${b.estimatedDurationSec}с</span>
     </div>`;
   }).join('');
   el.innerHTML = `<div class="gen-hint" style="margin-bottom:10px;">Черновая оценка хронометража: ~${Math.round(totalSec/60)} мин (${totalSec} сек) — уточнится, когда появится реальная озвучка.</div><div class="tv-grid-flow">${rows}</div>`;
+  el.querySelectorAll('[data-block-id]').forEach(row=>{
+    row.onclick = ()=>{
+      const block = tvState.tvGridBlocks.find(b=> b.id===Number(row.dataset.blockId));
+      if(block) tvOpenGridBlockEditor(block);
+    };
+  });
+}
+// Recomputes tvGridBlocks[].anchorId whenever it's still unset and exactly one null-rubric
+// anchor now exists — same "recheck every render" rule as Редакция's story assignment, so
+// adding the general host after "Собрать сетку" already ran still fills the gap.
+function tvAutoAssignGridHostAnchors(){
+  const hostId = tvGeneralHostAnchorId();
+  if(!hostId) return;
+  let changed = false;
+  tvState.tvGridBlocks.forEach(b=>{
+    if(TV_GRID_HOST_BLOCK_TYPES.includes(b.blockType) && !b.anchorId){
+      b.anchorId = hostId;
+      changed = true;
+    }
+  });
+  if(changed) tvSaveSoon();
+}
+// Plain-text summary of everything actually in this episode — fed to write-block-text so
+// the host's intro/outro/rubric-tease lines can reference the real lineup, not guess.
+function tvBuildEpisodeSummaryText(){
+  const blocks = [...tvState.tvGridBlocks].sort((a,b)=> a.sortOrder-b.sortOrder);
+  const lines = [];
+  let currentRubric = null;
+  blocks.forEach(b=>{
+    if(b.blockType==='story'){
+      if(b.rubric!==currentRubric){
+        currentRubric = b.rubric;
+        lines.push(tvRubricLabel(currentRubric) + ':');
+      }
+      const item = tvState.tvNewsItems.find(n=> n.id===b.newsItemId);
+      if(item) lines.push('- ' + item.title);
+    }
+  });
+  return lines.join('\n');
+}
+// Host/rubric-intro/outro editor — reuses the shared modal. "Сделать ведущему" is a direct,
+// un-queued call (unlike article writing, which goes through TASKS with a model picker) —
+// this is meant to feel like a quick retake, not a heavyweight job. Whatever's currently in
+// the textarea when it's clicked goes as a steering directive, not dictated text; the result
+// replaces the textarea but still needs an explicit Save, same as everywhere else in /TV.
+function tvOpenGridBlockEditor(block){
+  const anchor = tvState.tvAnchors.find(a=> a.id===block.anchorId);
+  const body = document.getElementById('tvAnchorModalBody');
+  const titleLabel = (TV_GRID_FIXED_LABELS[block.blockType] || block.blockType) + (block.blockType==='rubric_intro' ? ' — ' + tvRubricLabel(block.rubric) : '');
+  body.innerHTML = `
+    <div class="char-form">
+      <h3>${titleLabel}</h3>
+      <p class="sub">${anchor ? 'Ведущий: ' + anchor.name : 'Ведущий передачи целиком не назначен — заведите его на вкладке Work.'}</p>
+      <div class="cf-field">
+        <label>Текст</label>
+        <textarea id="tvGridBlockText" style="min-height:120px;" placeholder="Напишите текст сами, или короткую заметку о настроении/контексте — и нажмите «Сделать ведущему»">${block.text || ''}</textarea>
+      </div>
+      <button class="cf-btn" type="button" id="tvGridBlockMakeBtn" style="width:100%;" ${anchor?'':'disabled'}>Сделать ведущему</button>
+      <div class="gen-hint" id="tvGridBlockMakeHint" style="margin-top:6px;"></div>
+      <div class="cf-actions" style="margin-top:12px;">
+        <button class="cf-btn" id="tvGridBlockBack">Закрыть</button>
+        <button class="cf-btn primary" id="tvGridBlockSave">Сохранить текст</button>
+      </div>
+      <div class="char-card-section-title" style="margin-top:16px;">Озвучка</div>
+      <div id="tvGridBlockVoiceArea"></div>
+    </div>`;
+
+  function renderVoiceArea(){
+    const areaEl = document.getElementById('tvGridBlockVoiceArea');
+    if(!areaEl) return;
+    if(block.voiceUrl){
+      areaEl.innerHTML = `<audio class="tv-mic-audio" controls src="${block.voiceUrl}" style="width:100%;"></audio>`;
+    } else if(block.voiceTaskId){
+      areaEl.innerHTML = `<div class="gen-hint" style="margin:0;">Отправлено в TASKS</div>`;
+    } else {
+      areaEl.innerHTML = `<button class="cf-btn" id="tvGridBlockVoiceBtn" style="width:100%;" ${block.text?'':'disabled'}>Отправить на озвучку</button>`;
+      const voiceBtn = document.getElementById('tvGridBlockVoiceBtn');
+      if(voiceBtn) voiceBtn.onclick = ()=>{
+        tvSendGridBlockToVoicing(block.id);
+        renderVoiceArea();
+      };
+    }
+  }
+  renderVoiceArea();
+
+  document.getElementById('tvGridBlockBack').onclick = tvCloseModal;
+  document.getElementById('tvGridBlockSave').onclick = ()=>{
+    block.text = document.getElementById('tvGridBlockText').value.trim() || null;
+    tvSaveSoon();
+    renderTvGrid();
+    renderVoiceArea();
+  };
+  const makeBtn = document.getElementById('tvGridBlockMakeBtn');
+  if(makeBtn) makeBtn.onclick = async ()=>{
+    if(!anchor) return;
+    const hint = document.getElementById('tvGridBlockMakeHint');
+    const textarea = document.getElementById('tvGridBlockText');
+    const directive = textarea.value.trim();
+    makeBtn.disabled = true; makeBtn.textContent = 'Генерация…';
+    hint.textContent = ''; hint.style.color = '';
+    try{
+      const personaContext = tvBuildAnchorVoiceContext(anchor);
+      const res = await fetch('/api/tv/write-block-text', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          blockType: block.blockType,
+          rubricLabel: block.blockType==='rubric_intro' ? tvRubricLabel(block.rubric) : undefined,
+          episodeSummary: tvBuildEpisodeSummaryText(),
+          directive,
+          personaContext,
+        }),
+      });
+      const data = await res.json().catch(()=> null);
+      if(res.status===401) throw new Error('Нужно войти в аккаунт — откройте / и авторизуйтесь, затем вернитесь на /tv.');
+      if(!res.ok || !data || !data.text) throw new Error((data && data.message) || 'Не удалось написать текст.');
+      textarea.value = data.text;
+    } catch(err){
+      hint.textContent = err.message;
+      hint.style.color = 'var(--danger)';
+    } finally {
+      makeBtn.disabled = false; makeBtn.textContent = 'Сделать ведущему';
+    }
+  };
+  tvOpenModal();
+}
+function tvSendGridBlockToVoicing(blockId){
+  const block = tvState.tvGridBlocks.find(b=> b.id===blockId);
+  if(!block || !block.text || block.voiceUrl || block.voiceTaskId) return;
+  const task = { id: tvTaskSeq++, kind:'voice', blockId: block.id, model:null, status:'draft', createdAt: Date.now() };
+  tvState.tvTaskQueue.push(task);
+  block.voiceTaskId = task.id;
+  tvSaveSoon();
+  renderTvTasks();
+  renderTvGrid();
 }
 
 // ---- Собрать новости — real, sourced items only (Wayback Machine + Wikipedia, see

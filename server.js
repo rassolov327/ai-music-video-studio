@@ -913,6 +913,51 @@ app.post('/api/tv/write-article', async (req, res) => {
   }
 });
 
+// ---- structural host text (Сетка's host_intro/rubric_intro/outro blocks) — the connective
+// tissue between stories, always the whole-show host's lines (never a rubric specialist's).
+// Deliberately a direct, un-queued call (not TASKS) — this is meant to feel like nudging an
+// actor for another take, tried a few times in a row while writing, not a heavyweight job.
+// Gemini only, no model picker — matches that "quick iteration" framing. `directive` is
+// whatever the user currently has typed in the text box when they click "Сделать
+// ведущему" — treated as a steering note (mood/context), NOT dictated word-for-word.
+app.post('/api/tv/write-block-text', async (req, res) => {
+  if (!GEMINI_API_KEY) {
+    return res.status(503).json({ error: 'not_configured', message: 'GEMINI_API_KEY is not set on the server yet.' });
+  }
+  const { blockType, rubricLabel, episodeSummary, directive, personaContext } = req.body || {};
+  if (!blockType || !personaContext) {
+    return res.status(400).json({ error: 'bad_request', message: 'blockType and personaContext are both required.' });
+  }
+  const roleText = {
+    host_intro: 'Ты — ведущий передачи. Это твой выход в начале эфира: поприветствуй зрителя и коротко анонсируй, что будет в сегодняшнем выпуске.',
+    rubric_intro: `Ты — ведущий передачи. Анонсируй зрителю следующую рубрику: «${rubricLabel || ''}». Только подводка к рубрике — не пересказывай, что в ней будет, просто заинтересуй.`,
+    outro: 'Ты — ведущий передачи. Попрощайся со зрителем в конце выпуска.',
+  }[blockType];
+  if (!roleText) {
+    return res.status(400).json({ error: 'bad_request', message: 'blockType must be host_intro, rubric_intro, or outro.' });
+  }
+
+  const prompt = [
+    roleText,
+    episodeSummary ? `Вот что реально попало в этот выпуск:\n${episodeSummary}` : '',
+    `Вот кто ведёт передачу — пиши строго от его лица, с его манерой и характером:`,
+    personaContext,
+    directive ? `Дополнительное указание от режиссёра о том, в каком настроении/контексте это сказать (используй как направление, не читай вслух буквально): ${directive}` : '',
+    `Требования:`,
+    `- Живая устная речь для эфира, короткая (10-20 секунд, примерно 20-40 слов).`,
+    `- Никаких списков, подзаголовков, канцелярских оборотов, штампов вроде "подводя итог".`,
+    `Ответь только самим текстом для эфира, без пояснений и без кавычек вокруг него.`,
+  ].filter(Boolean).join('\n\n');
+
+  try {
+    const text = await tvCallGeminiText(prompt);
+    res.json({ text: text.trim() });
+  } catch (err) {
+    console.error('[server] /api/tv/write-block-text failed:', err);
+    res.status(500).json({ error: 'server_error', message: String(err && err.message || err) });
+  }
+});
+
 // ---- voicing — turns approved article text into audio (Микрофонная tab). Gemini TTS
 // (native audio output, same generateContent shape as everything else Gemini here, just
 // with responseModalities:['AUDIO']) returns raw PCM inline as base64 — wrapped into a

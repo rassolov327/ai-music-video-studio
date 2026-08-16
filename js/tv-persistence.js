@@ -132,6 +132,11 @@ async function tvMigrateAssetsToDisk(){
       await tvCopyAssetToDisk('newsitem:' + newsItem.id + ':voice', newsItem._assetFiles.voiceFile);
     }
   }
+  for(const block of tvState.tvGridBlocks){
+    if(block._assetFiles && block._assetFiles.voice){
+      await tvCopyAssetToDisk('gridblock:' + block.id + ':voice', block._assetFiles.voiceFile);
+    }
+  }
 }
 
 // Always just WRITES current state into the freshly chosen folder — never loads from it —
@@ -304,13 +309,19 @@ function tvSerialize(){
     copy.voiceUrl = null;
     return copy;
   });
+  const gridBlocks = tvState.tvGridBlocks.map(b=>{
+    if(!b._assetFiles || !b._assetFiles.voice) return b;
+    const copy = JSON.parse(JSON.stringify(b));
+    copy.voiceUrl = null;
+    return copy;
+  });
   return {
     version: 1,
     savedAt: Date.now(),
     tvAnchors: anchors,
     tvStudios: studios,
     tvNewsItems: newsItems,
-    tvGridBlocks: tvState.tvGridBlocks,
+    tvGridBlocks: gridBlocks,
     tvTaskQueue: tvState.tvTaskQueue,
     tvArchive: tvState.tvArchive,
     tvAnniversaryEvents: tvState.tvAnniversaryEvents,
@@ -394,6 +405,12 @@ async function tvRestoreNewsItemVoiceAsset(newsItem){
     if(url) newsItem.voiceUrl = url;
   }
 }
+async function tvRestoreGridBlockVoiceAsset(block){
+  if(block._assetFiles && block._assetFiles.voice){
+    const url = await tvLoadBlobAsset('gridblock:' + block.id + ':voice', block._assetFiles.voiceFile);
+    if(url) block.voiceUrl = url;
+  }
+}
 async function tvApplyWorkspaceData(data){
   if(Array.isArray(data.tvAnchors)) tvState.tvAnchors = data.tvAnchors;
   if(Array.isArray(data.tvStudios)) tvState.tvStudios = data.tvStudios;
@@ -416,6 +433,7 @@ async function tvApplyWorkspaceData(data){
   for(const anchor of tvState.tvAnchors) await tvRestoreAnchorAssets(anchor);
   for(const studio of tvState.tvStudios) await tvRestoreStudioAssets(studio);
   for(const newsItem of tvState.tvNewsItems) await tvRestoreNewsItemVoiceAsset(newsItem);
+  for(const block of tvState.tvGridBlocks) await tvRestoreGridBlockVoiceAsset(block);
   if(typeof renderTvAnchors==='function') renderTvAnchors();
   if(typeof renderTvStudios==='function') renderTvStudios();
   if(typeof renderTvNewsPickers==='function') renderTvNewsPickers();

@@ -305,6 +305,23 @@ rubric transitions by hand. He wants to only lightly review/adjust. Concretely:
   fresh each week. That template comes from analyzing the real reference show once (see
   "Show format analysis" below) and is then applied mechanically every week — segment order,
   typical block durations, transition style are baked in as rules, not re-improvised.
+- **Host structural text (BUILT)** — `host_intro`, `rubric_intro` (new block type — the
+  host's tease before every rubric AFTER the first one; the first rubric is already teased
+  by `host_intro` itself, so no redundant lead-in there), and `outro` blocks are clickable
+  in Сетка (`tvOpenGridBlockEditor()`, `js/tv-app.js`). These are always the null-rubric
+  general host's lines ("живёт" across the whole show, like Богданов), never a rubric
+  specialist's. Left empty, a `rubric_intro` block is silently skipped in the final assembly
+  (straight to that rubric's jingle); `host_intro`/`outro` can be left empty too. Text is
+  written directly via a "Сделать ведущему" button (`POST /api/tv/write-block-text`,
+  `server.js`, Gemini only, un-queued — unlike article writing this is meant to feel like a
+  quick retake, not a TASKS job) — whatever's currently typed in the box is sent as a
+  steering directive ("ведущий радостный, потому что всю ночь играл в Doom"), not dictated
+  text, and the model's result replaces the box for further hand-editing. The prompt is
+  grounded in the real episode lineup (`tvBuildEpisodeSummaryText()` walks the already-built
+  `tvGridBlocks`+`tvNewsItems`, per Костян: "мы сначала формируем новости и уже из этого
+  понимаем, каким будет выпуск"). Voicing reuses the exact same TASKS pipeline as news
+  articles (`tvResolveTaskTarget()` normalizes a task's target to either a news item or a
+  grid block so the rest of TASKS doesn't care which).
 - **Staff chat** — instead of (or alongside) dragging blocks by hand, the user should be
   able to type natural-language notes like "вырежи второй план у новости про PS2" or
   "удлини кадр с ведущим" into a chat, and have it actually apply the edit. Build this by
