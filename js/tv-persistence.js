@@ -228,27 +228,20 @@ function tvSerialize(){
     if(copy.card) delete copy.card._pending;
     return copy;
   });
-  const backdrops = tvState.tvBackdrops.map(b=>{
-    const copy = JSON.parse(JSON.stringify(b));
-    if(copy._assetFiles && copy._assetFiles.photo) copy.photo = null;
-    if(copy._assetFiles && copy._assetFiles.sheet && copy.card && copy.card.images && copy.card.images.sheet){
-      copy.card.images.sheet.url = null;
-    }
-    if(copy.angleShots){
-      Object.keys(copy.angleShots).forEach(k=>{
-        if(copy._assetFiles && copy._assetFiles['angle_' + k] && copy.angleShots[k]) copy.angleShots[k].photo = null;
+  const studios = tvState.tvStudios.map(s=>{
+    const copy = JSON.parse(JSON.stringify(s));
+    if(copy.angles){
+      Object.keys(copy.angles).forEach(k=>{
+        if(copy._assetFiles && copy._assetFiles['angle_' + k]) copy.angles[k] = null;
       });
     }
-    delete copy._pending;
-    delete copy._pendingAngles;
-    if(copy.card) delete copy.card._pending;
     return copy;
   });
   return {
     version: 1,
     savedAt: Date.now(),
     tvAnchors: anchors,
-    tvBackdrops: backdrops,
+    tvStudios: studios,
     tvNewsItems: tvState.tvNewsItems,
     tvGridBlocks: tvState.tvGridBlocks,
     tvTaskQueue: tvState.tvTaskQueue,
@@ -257,7 +250,7 @@ function tvSerialize(){
     tvEpisode: tvState.tvEpisode,
     approvals: tvState.approvals,
     tvOwedToUsers: tvState.tvOwedToUsers,
-    seq: { tvAnchorSeq, tvBackdropSeq, tvNewsItemSeq, tvGridBlockSeq, tvTaskSeq, tvArchiveSeq },
+    seq: { tvAnchorSeq, tvStudioSeq, tvNewsItemSeq, tvGridBlockSeq, tvTaskSeq, tvArchiveSeq },
   };
 }
 async function tvSaveNow(){
@@ -319,27 +312,18 @@ async function tvRestoreAnchorAssets(anchor){
     if(url) anchor.card.images.sheet.url = url;
   }
 }
-async function tvRestoreBackdropAssets(backdrop){
-  if(backdrop._assetFiles && backdrop._assetFiles.photo){
-    const url = await tvLoadBlobAsset('backdrop:' + backdrop.id + ':photo', backdrop._assetFiles.photoFile);
-    if(url) backdrop.photo = url;
-  }
-  if(backdrop._assetFiles && backdrop._assetFiles.sheet && backdrop.card && backdrop.card.images && backdrop.card.images.sheet){
-    const url = await tvLoadBlobAsset('backdrop:' + backdrop.id + ':sheet', backdrop._assetFiles.sheetFile);
-    if(url) backdrop.card.images.sheet.url = url;
-  }
-  if(backdrop.angleShots){
-    for(const key of Object.keys(backdrop.angleShots)){
-      if(backdrop._assetFiles && backdrop._assetFiles['angle_' + key]){
-        const url = await tvLoadBlobAsset('backdrop:' + backdrop.id + ':angle:' + key, backdrop._assetFiles['angle_' + key + 'File']);
-        if(url && backdrop.angleShots[key]) backdrop.angleShots[key].photo = url;
-      }
+async function tvRestoreStudioAssets(studio){
+  if(!studio.angles) return;
+  for(const key of TV_STUDIO_ANGLE_KEYS){
+    if(studio._assetFiles && studio._assetFiles['angle_' + key]){
+      const url = await tvLoadBlobAsset('studio:' + studio.id + ':angle:' + key, studio._assetFiles['angle_' + key + 'File']);
+      if(url) studio.angles[key] = url;
     }
   }
 }
 async function tvApplyWorkspaceData(data){
   if(Array.isArray(data.tvAnchors)) tvState.tvAnchors = data.tvAnchors;
-  if(Array.isArray(data.tvBackdrops)) tvState.tvBackdrops = data.tvBackdrops;
+  if(Array.isArray(data.tvStudios)) tvState.tvStudios = data.tvStudios;
   if(Array.isArray(data.tvNewsItems)) tvState.tvNewsItems = data.tvNewsItems;
   if(Array.isArray(data.tvGridBlocks)) tvState.tvGridBlocks = data.tvGridBlocks;
   if(Array.isArray(data.tvTaskQueue)) tvState.tvTaskQueue = data.tvTaskQueue;
@@ -350,16 +334,16 @@ async function tvApplyWorkspaceData(data){
   if(typeof data.tvOwedToUsers === 'number') tvState.tvOwedToUsers = data.tvOwedToUsers;
   if(data.seq){
     tvAnchorSeq = Math.max(tvAnchorSeq, data.seq.tvAnchorSeq || 1);
-    tvBackdropSeq = Math.max(tvBackdropSeq, data.seq.tvBackdropSeq || 1);
+    tvStudioSeq = Math.max(tvStudioSeq, data.seq.tvStudioSeq || 1);
     tvNewsItemSeq = Math.max(tvNewsItemSeq, data.seq.tvNewsItemSeq || 1);
     tvGridBlockSeq = Math.max(tvGridBlockSeq, data.seq.tvGridBlockSeq || 1);
     tvTaskSeq = Math.max(tvTaskSeq, data.seq.tvTaskSeq || 1);
     tvArchiveSeq = Math.max(tvArchiveSeq, data.seq.tvArchiveSeq || 1);
   }
   for(const anchor of tvState.tvAnchors) await tvRestoreAnchorAssets(anchor);
-  for(const backdrop of tvState.tvBackdrops) await tvRestoreBackdropAssets(backdrop);
+  for(const studio of tvState.tvStudios) await tvRestoreStudioAssets(studio);
   if(typeof renderTvAnchors==='function') renderTvAnchors();
-  if(typeof renderTvBackdrops==='function') renderTvBackdrops();
+  if(typeof renderTvStudios==='function') renderTvStudios();
   if(typeof renderTvNewsPickers==='function') renderTvNewsPickers();
   if(typeof renderTvGrid==='function') renderTvGrid();
   if(typeof tvSyncOwedInput==='function') tvSyncOwedInput();

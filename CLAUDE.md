@@ -65,17 +65,25 @@ hand (no auto-upload yet).
   for the shared login/token/credits system, not for `/TV`'s own content data.
 - Reuses TAKE:ONE's proven engine pieces directly: KIE.ai generation wrappers in `server.js`
   (model catalogs, field-name quirks per model — see comments in `server.js`, hard-won via
-  real trial and error, do not re-derive from scratch), Character Card / Object Card builder
-  pattern (`characters.js`, `object-card.js`, `locations.js`) for anchors and backdrops,
-  multi-track voice/magnet timeline (`audio-track.js`) for the VO-under-cutaways pattern,
-  TASKS queue (`tasks.js`), Archive (`archive.js`), ffmpeg.wasm render pipeline (`render.js`),
-  and the Gemini quick-assistant chat pattern (`gemini-chat.js`) — extended for /TV, see
-  "Staff chat" below.
+  real trial and error, do not re-derive from scratch), Character Card builder pattern
+  (`characters.js`) for anchors, multi-track voice/magnet timeline (`audio-track.js`) for the
+  VO-under-cutaways pattern, TASKS queue (`tasks.js`), Archive (`archive.js`), ffmpeg.wasm
+  render pipeline (`render.js`), and the Gemini quick-assistant chat pattern
+  (`gemini-chat.js`) — extended for /TV, see "Staff chat" below. Studios (see Work tab below)
+  deliberately do NOT reuse the Object Card/angle-shots generation pattern — see "Studios +
+  virtual editor (planned, staged)" below for why.
 
 ## Tab structure (final, in this order)
 
-1. **Work** — create anchors (Character Card pattern, built) and virtual studio backdrops/
-   camera angles (Object Card + angle-shots pattern from `locations.js`, built). Each anchor
+1. **Work** — create anchors (Character Card pattern, built) and **studios** (built, see
+   "Studios + virtual editor" below): one dedicated "corner" per rubric, or one for the
+   general host (`тvOpenStudioForm`/`tvOpenStudioDetail`, `js/tv-app.js`) — name, rubric
+   (`<select>` over `TV_RUBRICS`, same nullable pattern as anchors), and exactly 4 general/
+   establishing shots uploaded manually from disk. NOT AI-generated — this replaced an
+   earlier Object Card + 5-angle-shots generation flow for backdrops, which Костян had built
+   and then explicitly discarded once the real requirement became clear: one studio per
+   rubric (not one backdrop with multiple angles), 4 wide shots only, and framing/crop
+   decisions belong to the planned virtual editor, not to per-shot AI generation. Each anchor
    picks a rubric at creation time (`anchor.rubric`, `<select>` over `TV_RUBRICS`) OR leaves
    it unset — `rubric: null` means "hosts the whole show" (like Владимир Богданов in the
    reference show, or Сергей Пушной in Галилео), a real, named case, not a missing value.
@@ -99,7 +107,12 @@ hand (no auto-upload yet).
    calls Gemini for a draft candidate list (`POST /api/tv/gather-news`) — see "News
    sourcing" below for the fuller, not-yet-built free-API pipeline this should grow into.
 3. **Студия** — assign each chosen news item to a specific anchor (defaults to that item's
-   rubric's anchor); sends it off for voice (TTS) generation.
+   rubric's anchor); sends it off for voice (TTS) generation. Per the studio-design
+   discussion (see "Studios + virtual editor" below), this same assignment step must also
+   assign a **studio** — usually the one matching the anchor's rubric, but a picker if more
+   than one studio shares that rubric ("ведущий живёт в своей студии" — Костян's framing).
+   NOT YET BUILT — this tab is currently a placeholder; building it is Stage B of the staged
+   plan below, after Stage A (studios themselves) is done.
 4. **Сетка** — the real editing timeline (NLE-style), auto-populated per the show's
    broadcast algorithm (a fixed template extracted from the reference show — see "Show
    format analysis" below, not re-derived by AI each week). Holds the VO track (from
@@ -193,6 +206,54 @@ prompting/context problem, not a model-choice problem:
   and encourage: continuous running prose, a real subjective opinion, varied sentence
   rhythm, the kind of clichés real 2000s TV journalism actually used.
 
+## Studios + virtual editor (planned, staged)
+
+Design agreed with Костян (chat discussion, not yet fully built) for how on-camera rubric
+segments in Сетка should look — the goal is real broadcast-style cutting between shots
+during a rubric's on-camera moments, not one static continuous shot of the anchor talking.
+Staged into 6 steps because each depends on data the previous one produces; work through
+them in order, confirming scope with Костян before starting each one (his explicit
+instruction — do not batch-implement the remaining stages without checking in first).
+
+- **A. Studios entity — BUILT.** One studio per rubric (or the null-rubric general host —
+  "ведущий живёт в своей студии"), gallery of tiles like anchors (`tvOpenStudioForm`/
+  `tvOpenStudioDetail`, `js/tv-app.js`; `tvState.tvStudios`, `js/tv-state.js`). Exactly 4
+  general/establishing shots (`TV_STUDIO_ANGLE_KEYS`), uploaded manually from disk only —
+  **no generation step anywhere in this flow**. This replaced an earlier Object Card +
+  5-angle-shots AI-generation flow for "Декорации студии" (backdrops), which Костян
+  explicitly discarded once the real shape of the requirement became clear: a rubric isn't
+  a different angle of one shared set, it's its own dedicated studio; crop/framing decisions
+  belong to the virtual editor (step D), not to separate AI-generated shots per crop size.
+  Multiple studio cards CAN share a rubric — the assignment step (B) is where a specific one
+  gets picked, defaulting to the match if there's only one.
+- **B. Studio assignment — NOT YET BUILT.** Wherever a news item's script gets assigned to
+  an anchor (planned for the Студия tab, see above, or wherever the tabled "Выход ведущего"
+  work resumes), also assign which studio that anchor performs from.
+- **C. Editing-technique research — NOT YET BUILT.** A separate one-off Gemini
+  video-understanding script, same idea as `scripts/analyze-show-format.js` (see "Show
+  format analysis" below) but analyzing cut rhythm, shot-size choices, and camera movement
+  in the same reference episodes, instead of segment timing. Output: a draft ruleset the
+  virtual editor (step D) follows mechanically, not something re-decided by AI every week.
+- **D. Virtual editor logic — NOT YET BUILT.** Given a block's VO duration, its assigned
+  studio's 4 wide shots, and the ruleset from step C, generate a sequence of "shots" — which
+  of the 4 angles, what crop/shot-size, what camera movement. Camera movement is Ken Burns
+  only (pan/push/pull on a still image) — explicitly nothing more elaborate. Output is data
+  only at this stage (no image processing yet) — one shot list per Сетка block.
+- **E. Сетка timeline + Inspector — NOT YET BUILT.** Two parts: (1) drag-to-reorder for
+  rubric blocks specifically (their relative order in the episode) — NOT story order within
+  a rubric, which stays picker-controlled, and NOT the fixed bumpers (intro/jingle/outro).
+  (2) Clicking a block opens a timeline reusing TAKE:ONE's own scene/shot editor
+  (`js/timeline.js`, `js/scenes-preview.js`) almost directly: a VO track, a music track, and
+  a shots track populated from step D's output, with an Inspector panel (same shape as
+  `renderInspectorPanel()` in `scenes-preview.js` — `SHOT_SIZES`, `CAMERA_MOVES`, and a
+  location-angle-style picker over the block's 4 studio shots) so Костян can review/override
+  what the virtual editor chose, the same way he already edits AI-video shot parameters in
+  the main app.
+- **F. Render integration — NOT YET BUILT.** Applying the chosen crop + Ken Burns movement
+  to the studio's static photos happens only at final render (`render.js`, ffmpeg) — until
+  then every studio photo is untouched, and framing/movement is only ever stored as data on
+  the block's shots.
+
 ## Editing / Сетка — fully automated
 
 The user does not want to manually edit, insert photos/materials, place jingles, or place
@@ -277,19 +338,18 @@ Two parallel passes, then reconcile:
   button. Bottom-right: KIE credits indicator (personal balance = live KIE balance minus a
   manually-entered "roздано пользователям" number, since dev's Postgres has no record of
   main's real users — see `js/tv-app.js`'s `tvSyncOwedInput`/`tvRenderCreditsIndicator`).
-- `js/tv-state.js` — client state shape: `tvAnchors`, `tvBackdrops`, `tvNewsItems`,
+- `js/tv-state.js` — client state shape: `tvAnchors`, `tvStudios`, `tvNewsItems`,
   `tvGridBlocks`, etc. `tvState` IS the source of truth (no server mirror).
 - `js/tv-persistence.js` — local disk/IndexedDB workspace persistence (see Architecture).
 - `js/tv-app.js` — tab-switching; full anchor Character Card flow (gallery → detail → quick
   form → 6-slot reference builder → generated turnaround sheet) plus a Персона screen
   (character-bible fields — age/archetype/catchphrase/speech quirks/sample lines, see Work
-  tab above); full backdrop flow (same Character Card idea, plus a 5-slot independently-
-  generated angle-shots screen, `object-card.js`/`locations.js` pattern); "Собрать новости"
-  on Новости.
+  tab above); studios flow (gallery → detail → form with 4 manually-uploaded angle slots, no
+  generation — see "Studios + virtual editor" above, Stage A); "Собрать новости" on Новости.
 - `server.js` — `POST /api/tv/gather-news` (real sourcing: Wayback Machine + Wikipedia,
-  stateless — see "News sourcing"); anchor/backdrop Character/Object Card generation
-  reuses the existing `/api/upload-reference-image` + `/api/generate-image/start`/`/status`
-  routes.
+  stateless — see "News sourcing"); anchor Character Card generation reuses the existing
+  `/api/upload-reference-image` + `/api/generate-image/start`/`/status` routes. Studios have
+  no server route at all — pure local file upload, nothing to generate.
 - `db.js` — no `/TV`-specific tables; Postgres here is only the shared users/login/token
   schema TAKE:ONE already had.
 - `scripts/analyze-show-format.js` — one-off Gemini video-understanding script for the
@@ -321,3 +381,15 @@ POST /api/tv/staff-chat   — natural-language edit commands for Сетка (fun
 3. Journalist: generate the actual voiceover text per news item (not yet built at all) —
    now has real sourced `extract` text per item to work from once this is confirmed
    working.
+4. Studios Stage A is done (see "Studios + virtual editor" above) — next is Stage B (studio
+   assignment wired into the anchor/text-assignment step), then C (editing-technique
+   research script), D (virtual editor logic), E (Сетка timeline+Inspector), F (render).
+   Confirm scope with Костян before starting each stage — do not batch them.
+5. Minor, discovered while testing Stage A live: `tvPersistLocalImageAsset()`
+   (`js/tv-persistence.js`) tries to `fetch()` a `data:` URL to turn it into a blob asset,
+   but the server's CSP `connect-src` header (`server.js`, ~line 283) doesn't list `data:`,
+   so the fetch is blocked and it silently falls back to storing the raw base64 `data:` URL
+   inline in the workspace JSON instead of as a separate blob file. Not data-losing and not
+   specific to studios — the same shared helper is used by anchor photo uploads too — but
+   worth fixing (add `data:` to `connect-src`) since inline base64 bloats the saved workspace
+   for any real (non-test) photo.

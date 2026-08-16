@@ -521,512 +521,190 @@ async function tvRunCreateCard(anchor){
   renderTvAnchors();
 }
 
-// ---- Work tab: studio backdrops — Object Card (consistency reference) + angle shots
-// (finished, independently usable establishing images), both patterns reused from
-// object-card.js / locations.js the same way anchors reuse characters.js above. ----
-function tvSaveBackdropLocal(payload, existing){
+// ---- Work tab: studios — one dedicated "corner" per rubric (or the general host).
+// Manually uploaded only, never AI-generated: exactly 4 wide/establishing shots. The
+// planned virtual editor derives medium/close-up framing from these itself (crop/pan/zoom
+// at render time) — there is no generation step anywhere in this flow. ----
+function tvSaveStudioLocal(payload, existing){
   if(existing){
     Object.assign(existing, payload);
     tvSaveSoon();
     return existing;
   }
-  const backdrop = Object.assign({ id: tvBackdropSeq++, card: null, angleShots: {}, approved: false, _assetFiles: {} }, payload);
-  tvState.tvBackdrops.push(backdrop);
+  const studio = Object.assign({ id: tvStudioSeq++, angles: tvEmptyStudioAngles(), _assetFiles: {} }, payload);
+  tvState.tvStudios.push(studio);
   tvSaveSoon();
-  return backdrop;
+  return studio;
 }
-function tvDeleteBackdropLocal(id){
-  tvState.tvBackdrops = tvState.tvBackdrops.filter(b=> b.id!==id);
+function tvDeleteStudioLocal(id){
+  tvState.tvStudios = tvState.tvStudios.filter(s=> s.id!==id);
   tvSaveSoon();
 }
-function tvBackdropStatus(b){
-  if(!b.name || !b.photo || !b.description) return 'red';
-  const hasSheet = !!(b.card && b.card.images && b.card.images.sheet && b.card.images.sheet.url);
-  return hasSheet ? 'green' : 'yellow';
+function tvStudioStatus(s){
+  if(!s.name) return 'red';
+  const filled = TV_STUDIO_ANGLE_KEYS.filter(k=> s.angles && s.angles[k]).length;
+  if(filled===0) return 'red';
+  return filled===TV_STUDIO_ANGLE_KEYS.length ? 'green' : 'yellow';
 }
 
-function renderTvBackdrops(){
-  const el = document.getElementById('tvBackdropsGrid');
+function renderTvStudios(){
+  const el = document.getElementById('tvStudiosGrid');
   if(!el) return;
-  if(!tvState.tvBackdrops.length){
-    el.innerHTML = `<div class="tv-empty-hint">Декораций студии пока нет — нажмите «+ Декорация».</div>`;
+  if(!tvState.tvStudios.length){
+    el.innerHTML = `<div class="tv-empty-hint">Студий пока нет — нажмите «+ Студия».</div>`;
     return;
   }
-  el.innerHTML = tvState.tvBackdrops.map(b=> `
-    <div class="char-tile" data-id="${b.id}">
-      <div class="char-tile-photo">${b.photo ? `<img src="${b.photo}">` : '<i class="ti ti-photo"></i>'}</div>
-      <div class="char-tile-status status-${tvBackdropStatus(b)}"></div>
-      <div class="char-tile-name">${b.name}</div>
-    </div>`).join('');
+  el.innerHTML = tvState.tvStudios.map(s=>{
+    const cover = TV_STUDIO_ANGLE_KEYS.map(k=> s.angles && s.angles[k]).find(Boolean);
+    return `
+    <div class="char-tile" data-id="${s.id}">
+      <div class="char-tile-photo">${cover ? `<img src="${cover}">` : '<i class="ti ti-camera"></i>'}</div>
+      <div class="char-tile-status status-${tvStudioStatus(s)}"></div>
+      <div class="char-tile-name">${s.name}</div>
+    </div>`;
+  }).join('');
   el.querySelectorAll('.char-tile').forEach(tile=>{
     tile.onclick = ()=>{
-      const backdrop = tvState.tvBackdrops.find(b=> String(b.id)===tile.dataset.id);
-      if(backdrop) tvOpenBackdropDetail(backdrop);
+      const studio = tvState.tvStudios.find(s=> String(s.id)===tile.dataset.id);
+      if(studio) tvOpenStudioDetail(studio);
     };
   });
 }
 
-function tvOpenBackdropDetail(backdrop){
-  const hasSheet = !!(backdrop.card && backdrop.card.images && backdrop.card.images.sheet && backdrop.card.images.sheet.url);
-  const filledAngles = TV_ANGLE_KEYS.filter(k=> backdrop.angleShots && backdrop.angleShots[k] && backdrop.angleShots[k].photo);
+function tvOpenStudioDetail(studio){
+  const filled = TV_STUDIO_ANGLE_KEYS.filter(k=> studio.angles && studio.angles[k]);
+  const cover = filled.length ? studio.angles[filled[0]] : null;
   const body = document.getElementById('tvAnchorModalBody');
   body.innerHTML = `
     <div class="char-card">
       <div class="char-card-photo">
-        ${backdrop.photo ? `<img src="${backdrop.photo}">` : '<i class="ti ti-photo" style="font-size:40px;"></i>'}
+        ${cover ? `<img src="${cover}">` : '<i class="ti ti-camera" style="font-size:40px;"></i>'}
       </div>
       <div class="char-card-body">
-        <p class="char-card-name">${backdrop.name}</p>
-        ${backdrop.description ? `<p class="char-card-desc">${backdrop.description}</p>` : ''}
-        <div class="char-card-section-title">Object Card</div>
-        ${hasSheet
-          ? `<div class="char-card-angles"><div class="char-card-angle tv-clickable-img" id="tvBackdropSheetThumb" style="width:100%;height:90px;"><img src="${backdrop.card.images.sheet.url}"></div></div>`
-          : `<div class="gen-hint" style="margin-top:0;">Лист ещё не создан — на нём держится консистентность декорации между генерациями.</div>`}
-        <div class="char-card-section-title" style="margin-top:14px;">Ракурсы (${filledAngles.length}/${TV_ANGLE_KEYS.length})</div>
-        ${filledAngles.length
-          ? `<div class="char-card-angles">${filledAngles.map(k=> `<div class="char-card-angle" style="width:60px;height:60px;"><img src="${backdrop.angleShots[k].photo}"></div>`).join('')}</div>`
-          : `<div class="gen-hint" style="margin-top:0;">Готовых ракурсов пока нет.</div>`}
+        <p class="char-card-name">${studio.name}</p>
+        <span class="char-card-role">${tvRubricLabel(studio.rubric)}</span>
+        <div class="char-card-section-title">Общие планы (${filled.length}/${TV_STUDIO_ANGLE_KEYS.length})</div>
+        ${filled.length
+          ? `<div class="char-card-angles">${filled.map(k=> `<div class="char-card-angle tv-clickable-img" data-angle-key="${k}" style="width:60px;height:60px;"><img src="${studio.angles[k]}"></div>`).join('')}</div>`
+          : `<div class="gen-hint" style="margin-top:0;">Планов пока нет — загрузите их в форме редактирования.</div>`}
         <div class="char-card-actions">
-          <button class="cf-btn" id="tvBackdropBack">Закрыть</button>
+          <button class="cf-btn" id="tvStudioBack">Закрыть</button>
           <div style="display:flex;gap:8px;">
-            <button class="cf-btn" id="tvBackdropEdit">Изменить</button>
-            <button class="cf-btn" id="tvBackdropDelete" style="color:var(--danger);">Удалить</button>
+            <button class="cf-btn" id="tvStudioEdit">Изменить</button>
+            <button class="cf-btn" id="tvStudioDelete" style="color:var(--danger);">Удалить</button>
           </div>
         </div>
-        <button class="cf-btn primary" id="tvBackdropCardBtn" style="width:100%;margin-top:12px;">${hasSheet ? 'Изменить Object Card' : 'Создать Object Card'}</button>
-        <button class="cf-btn" id="tvBackdropAnglesBtn" style="width:100%;margin-top:8px;">Ракурсы</button>
       </div>
     </div>`;
-  document.getElementById('tvBackdropBack').onclick = tvCloseModal;
-  document.getElementById('tvBackdropEdit').onclick = ()=> tvOpenBackdropForm(backdrop);
-  document.getElementById('tvBackdropCardBtn').onclick = ()=> tvOpenBackdropCardBuilder(backdrop);
-  document.getElementById('tvBackdropAnglesBtn').onclick = ()=> tvOpenBackdropAngleShots(backdrop);
-  if(hasSheet) document.getElementById('tvBackdropSheetThumb').onclick = ()=> tvOpenLightbox(backdrop.card.images.sheet.url);
-  document.getElementById('tvBackdropDelete').onclick = ()=>{
-    if(!confirm('Удалить декорацию «' + backdrop.name + '»?')) return;
-    tvDeleteBackdropLocal(backdrop.id);
-    renderTvBackdrops();
+  document.getElementById('tvStudioBack').onclick = tvCloseModal;
+  document.getElementById('tvStudioEdit').onclick = ()=> tvOpenStudioForm(studio);
+  body.querySelectorAll('.char-card-angle[data-angle-key]').forEach(el=>{
+    el.onclick = ()=> tvOpenLightbox(studio.angles[el.dataset.angleKey]);
+  });
+  document.getElementById('tvStudioDelete').onclick = ()=>{
+    if(!confirm('Удалить студию «' + studio.name + '»?')) return;
+    tvDeleteStudioLocal(studio.id);
+    renderTvStudios();
     tvCloseModal();
   };
   tvOpenModal();
 }
 
-function tvOpenBackdropForm(existing){
-  const body = document.getElementById('tvAnchorModalBody');
-  body.innerHTML = `
-    <div class="char-form">
-      <h3>${existing ? 'Изменить декорацию' : 'Новая декорация'}</h3>
-      <p class="sub">${existing ? 'Обновите данные декорации.' : 'Название, описание, одно фото. После сохранения можно собрать Object Card и ракурсы.'}</p>
-      <div class="cf-field"><label>Название</label><input type="text" id="tvBackdropName" placeholder="например, Студия новостей" value="${existing ? existing.name : ''}"></div>
-      <div class="cf-field"><label>Описание</label><textarea id="tvBackdropDesc" placeholder="Что за декорация, стиль, детали интерьера">${existing && existing.description ? existing.description : ''}</textarea></div>
-      <div class="cf-field">
-        <label>Фото</label>
-        <label class="photo-drop${existing && existing.photo ? ' has-photo' : ''}" id="tvBackdropPhotoDrop">
-          ${existing && existing.photo ? `<img src="${existing.photo}">` : ''}
-          <span class="photo-drop-plus"><i class="ti ti-plus"></i></span><span class="photo-drop-text">Добавить фото</span>
-          <input type="file" id="tvBackdropPhotoInput" accept="image/*" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;">
-        </label>
-      </div>
-      <div class="cf-actions">
-        <button class="cf-btn" id="tvBackdropCancel">Отмена</button>
-        <button class="cf-btn primary" id="tvBackdropSave" ${existing && existing.name ? '' : 'disabled'}>${existing ? 'Сохранить' : 'Добавить'}</button>
-      </div>
-    </div>`;
-
-  const photoDrop = document.getElementById('tvBackdropPhotoDrop');
-  let photoInput = document.getElementById('tvBackdropPhotoInput');
-  let photoDataUrl = existing ? existing.photo || null : null;
-  photoDrop.onclick = (e)=>{ if(!e.target.closest('input')) photoInput.click(); };
-  function wirePhotoInput(){
-    photoInput = document.getElementById('tvBackdropPhotoInput');
-    photoInput.onchange = async ()=>{
-      const file = photoInput.files[0];
-      if(!file) return;
-      try{
-        photoDataUrl = await loadImageAsDataURL(file);
-        photoDrop.classList.add('has-photo');
-        photoDrop.innerHTML = `<img src="${photoDataUrl}"><span class="photo-drop-plus"><i class="ti ti-plus"></i></span><span class="photo-drop-text">Добавить фото</span><input type="file" id="tvBackdropPhotoInput" accept="image/*" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;">`;
-        wirePhotoInput();
-      } catch(err){}
-    };
-  }
-  wirePhotoInput();
-
-  const nameInput = document.getElementById('tvBackdropName');
-  const saveBtn = document.getElementById('tvBackdropSave');
-  nameInput.addEventListener('input', ()=>{ saveBtn.disabled = nameInput.value.trim().length===0; });
-
-  document.getElementById('tvBackdropCancel').onclick = ()=> existing ? tvOpenBackdropDetail(existing) : tvCloseModal();
-  saveBtn.onclick = async ()=>{
-    const name = nameInput.value.trim();
-    if(!name) return;
-    saveBtn.disabled = true; saveBtn.textContent = 'Сохранение…';
-    const isNewPhoto = photoDataUrl && photoDataUrl.indexOf('data:')===0;
-    const payload = { name, description: document.getElementById('tvBackdropDesc').value.trim() };
-    if(!isNewPhoto) payload.photo = photoDataUrl;
-    const backdrop = tvSaveBackdropLocal(payload, existing || null);
-    if(isNewPhoto){
-      const result = await tvPersistLocalImageAsset('backdrop:' + backdrop.id + ':photo', photoDataUrl);
-      backdrop.photo = result ? result.url : photoDataUrl;
-      backdrop._assetFiles = backdrop._assetFiles || {};
-      backdrop._assetFiles.photo = !!result;
-      backdrop._assetFiles.photoFile = result ? result.fileName : undefined;
-      tvSaveSoon();
-    }
-    renderTvBackdrops();
-    tvOpenBackdropDetail(backdrop);
-  };
-  tvOpenModal();
-}
-
-// ---- Object Card builder (4-slot reference sheet — object-card.js's pattern) ----
-let tvBackdropCardBuilderOpenId = null;
-function tvBuildBackdropCardSheetPrompt(backdrop, basePrompt, extra){
-  return [
-    basePrompt || backdrop.description || '',
-    'reference turnaround sheet for this exact studio backdrop/set, four panels in a 2x2 grid, the exact same set with identical architecture, materials, colors, and lighting in every panel',
-    'top-left panel: viewed straight-on from the front',
-    'top-right panel: viewed from directly behind',
-    'bottom-left panel: viewed from the left side',
-    'bottom-right panel: viewed from the right side — the mirror opposite of the bottom-left panel, facing the opposite direction',
-    extra,
-    'plain neutral surroundings beyond the set itself, even studio lighting, photoreal, highly detailed, no text, no labels, no panel borders, no people',
-  ].filter(Boolean).join(', ');
-}
-function tvGatherBackdropReferencePhotos(backdrop){
-  const photos = TV_OBJECT_CARD_INPUT_SLOTS.map(s=> backdrop.card.inputSlots[s.key]).filter(Boolean);
-  if(photos.length===0 && backdrop.photo) photos.push(backdrop.photo);
-  return photos;
-}
-function tvOpenBackdropCardBuilder(backdrop){
-  tvBackdropCardBuilderOpenId = backdrop.id;
-  if(!backdrop.card) backdrop.card = { inputSlots: tvEmptyObjectCardInputSlots(), prompt: backdrop.description || '', images: {} };
-  if(!backdrop.card.inputSlots) backdrop.card.inputSlots = tvEmptyObjectCardInputSlots();
-  if(!backdrop.card.images) backdrop.card.images = {};
-  if(!backdrop.card.inputSlots.front && backdrop.photo) backdrop.card.inputSlots.front = backdrop.photo;
-
-  const hasSheet = !!(backdrop.card.images.sheet && backdrop.card.images.sheet.url);
+// Angle uploads stay purely local (in `localAngles`, a plain-object copy) until Save —
+// same convention as the anchor/backdrop single-photo forms — so a cancelled "new studio"
+// form never persists an asset under an id that gets thrown away.
+function tvOpenStudioForm(existing){
+  const localAngles = Object.assign({}, tvEmptyStudioAngles(), existing ? existing.angles : null);
   const body = document.getElementById('tvAnchorModalBody');
   body.innerHTML = `
     <div class="char-form card-builder">
-      <h3>Object Card — ${backdrop.name}</h3>
-      <p class="sub">На этой карте держится консистентность декорации между генерациями. Добавьте, что есть — хватит и одного фото.</p>
+      <h3>${existing ? 'Изменить студию' : 'Новая студия'}</h3>
+      <p class="sub">${existing ? 'Обновите данные студии.' : 'Название, рубрика и 4 общих плана — загружаются с диска, ничего не генерируется.'}</p>
+      <div class="cf-field"><label>Название</label><input type="text" id="tvStudioName" placeholder="например, Студия «Игры»" value="${existing ? existing.name : ''}"></div>
+      <div class="cf-field"><label>Рубрика</label><select id="tvStudioRubric">
+        <option value=""${!existing || !existing.rubric ? ' selected' : ''}>Ведущий передачи целиком (без рубрики)</option>
+        ${TV_RUBRICS.map(r=> `<option value="${r.key}"${existing && existing.rubric===r.key ? ' selected' : ''}>${r.label}</option>`).join('')}
+      </select></div>
       <div class="cf-field">
-        <label>Референс-фото <span style="color:var(--text-3);font-weight:400;">— опционально, больше — лучше</span></label>
-        <div class="angle-slots-grid" id="tvBackdropCardInputGrid"></div>
-        <input type="file" id="tvBackdropCardSlotFileInput" accept="image/*" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;">
+        <label>Общие планы <span style="color:var(--text-3);font-weight:400;">— ровно 4, загрузка с диска</span></label>
+        <div class="angle-slots-grid" id="tvStudioAngleGrid"></div>
+        <input type="file" id="tvStudioAngleFileInput" accept="image/*" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;">
       </div>
-      <div class="cf-field">
-        <label>Описание <span style="color:var(--text-3);font-weight:400;">— промпт для карты</span></label>
-        <textarea id="tvBackdropCardPromptInput" style="min-height:80px;">${backdrop.card.prompt || backdrop.description || ''}</textarea>
-      </div>
-      <button class="cf-btn primary" id="tvBackdropCardCreateBtn" style="width:100%;">${hasSheet ? 'Пересоздать карту' : 'Создать карту'}</button>
-      <div class="gen-hint" id="tvBackdropCardModelHint" style="margin-top:6px;"></div>
-      <div class="char-card-section-title" style="margin-top:16px;">Изображения карты</div>
-      <div class="card-output-grid" id="tvBackdropCardOutputGrid" style="grid-template-columns:1fr;"></div>
-      <div class="cf-actions" style="margin-top:16px;">
-        <button class="cf-btn" id="tvBackdropCardBuilderBack">Назад к декорации</button>
+      <div class="cf-actions">
+        <button class="cf-btn" id="tvStudioCancel">Отмена</button>
+        <button class="cf-btn primary" id="tvStudioSave" ${existing && existing.name ? '' : 'disabled'}>${existing ? 'Сохранить' : 'Добавить'}</button>
       </div>
     </div>`;
 
-  tvRenderBackdropCardInputGrid(backdrop);
-  tvRenderBackdropCardOutputGrid(backdrop);
-
-  const model = tvPickReferenceCapableModel();
-  const modelHint = document.getElementById('tvBackdropCardModelHint');
-  if(!model){
-    modelHint.textContent = 'Нет подключённой модели с поддержкой референс-фото.';
-    modelHint.style.color = 'var(--danger)';
-    document.getElementById('tvBackdropCardCreateBtn').disabled = true;
-  } else {
-    modelHint.textContent = 'Генерация через ' + model.label + '.';
+  function renderAngleGrid(){
+    const grid = document.getElementById('tvStudioAngleGrid');
+    if(!grid) return;
+    grid.innerHTML = TV_STUDIO_ANGLE_KEYS.map(key=>{
+      const src = localAngles[key];
+      return `<div class="angle-slot${src?' filled':' optional'}" data-slot="${key}">
+        ${src ? `<img src="${src}"><div class="slot-remove" data-remove="${key}"><i class="ti ti-x" style="font-size:10px;"></i></div>` : `<span class="slot-plus"><i class="ti ti-plus"></i></span>`}
+        <span class="slot-label">${TV_STUDIO_ANGLE_LABELS[key]}</span>
+      </div>`;
+    }).join('');
+    grid.querySelectorAll('.angle-slot').forEach(el=>{
+      el.onclick = (e)=>{
+        if(e.target.closest('.slot-remove')) return;
+        activeSlotKey = el.dataset.slot;
+        slotFileInput.click();
+      };
+    });
+    grid.querySelectorAll('.slot-remove').forEach(btn=>{
+      btn.onclick = (e)=>{
+        e.stopPropagation();
+        localAngles[btn.dataset.remove] = null;
+        renderAngleGrid();
+      };
+    });
   }
-
-  document.getElementById('tvBackdropCardPromptInput').addEventListener('input', (e)=>{ backdrop.card.prompt = e.target.value; });
-  document.getElementById('tvBackdropCardCreateBtn').onclick = ()=> tvRunCreateBackdropCard(backdrop);
-  document.getElementById('tvBackdropCardBuilderBack').onclick = ()=>{
-    tvBackdropCardBuilderOpenId = null;
-    tvOpenBackdropDetail(backdrop);
-  };
-  tvOpenModal();
-}
-function tvRenderBackdropCardInputGrid(backdrop){
-  const grid = document.getElementById('tvBackdropCardInputGrid');
-  if(!grid) return;
-  const slotFileInput = document.getElementById('tvBackdropCardSlotFileInput');
+  const slotFileInput = document.getElementById('tvStudioAngleFileInput');
   let activeSlotKey = null;
-  grid.innerHTML = TV_OBJECT_CARD_INPUT_SLOTS.map(s=>{
-    const src = backdrop.card.inputSlots[s.key];
-    return `<div class="angle-slot${src?' filled':' optional'}" data-slot="${s.key}" title="${s.hint}">
-      ${src ? `<img src="${src}"><div class="slot-remove" data-remove="${s.key}"><i class="ti ti-x" style="font-size:10px;"></i></div>` : `<span class="slot-plus"><i class="ti ti-plus"></i></span>`}
-      <span class="slot-label">${s.label}</span>
-    </div>`;
-  }).join('');
-  grid.querySelectorAll('.angle-slot').forEach(el=>{
-    el.onclick = (e)=>{
-      if(e.target.closest('.slot-remove')) return;
-      activeSlotKey = el.dataset.slot;
-      slotFileInput.click();
-    };
-  });
-  grid.querySelectorAll('.slot-remove').forEach(btn=>{
-    btn.onclick = (e)=>{
-      e.stopPropagation();
-      backdrop.card.inputSlots[btn.dataset.remove] = null;
-      tvRenderBackdropCardInputGrid(backdrop);
-    };
-  });
   slotFileInput.onchange = async ()=>{
     const file = slotFileInput.files[0];
     if(!file || !activeSlotKey) return;
     try{
-      const dataUrl = await loadImageAsDataURL(file);
-      backdrop.card.inputSlots[activeSlotKey] = dataUrl;
-      tvRenderBackdropCardInputGrid(backdrop);
+      localAngles[activeSlotKey] = await loadImageAsDataURL(file);
+      renderAngleGrid();
     } catch(err){}
     slotFileInput.value = '';
   };
-}
-function tvRenderBackdropCardOutputGrid(backdrop){
-  const grid = document.getElementById('tvBackdropCardOutputGrid');
-  if(!grid) return;
-  const entry = backdrop.card.images.sheet;
-  const pending = backdrop.card._pending && backdrop.card._pending.sheet;
-  let inner;
-  if(entry && entry.url) inner = `<img src="${entry.url}">`;
-  else if(pending) inner = `<div class="task-tile-spin"></div>`;
-  else inner = `<span class="card-output-empty">Ещё не сгенерировано</span>`;
-  grid.innerHTML = `<div class="card-sheet-tile">${inner}</div>`;
-}
-function tvRenderBackdropCardOutputGridIfOpen(backdrop){
-  if(tvBackdropCardBuilderOpenId===backdrop.id) tvRenderBackdropCardOutputGrid(backdrop);
-}
-async function tvRunCreateBackdropCard(backdrop){
-  const model = tvPickReferenceCapableModel();
-  if(!model) return;
-  const btn = document.getElementById('tvBackdropCardCreateBtn');
-  if(btn){ btn.disabled = true; btn.textContent = 'Генерация…'; }
-  const promptText = document.getElementById('tvBackdropCardPromptInput').value.trim();
-  backdrop.card.prompt = promptText;
-  backdrop.card._pending = backdrop.card._pending || {};
-  backdrop.card._pending.sheet = true;
-  tvRenderBackdropCardOutputGridIfOpen(backdrop);
+  renderAngleGrid();
 
-  try{
-    const photos = tvGatherBackdropReferencePhotos(backdrop);
-    const referenceImageUrls = [];
-    for(const p of photos){
-      const url = await tvUploadReferencePhoto(p);
-      if(url) referenceImageUrls.push(url);
+  const nameInput = document.getElementById('tvStudioName');
+  const saveBtn = document.getElementById('tvStudioSave');
+  nameInput.addEventListener('input', ()=>{ saveBtn.disabled = nameInput.value.trim().length===0; });
+
+  document.getElementById('tvStudioCancel').onclick = ()=> existing ? tvOpenStudioDetail(existing) : tvCloseModal();
+  saveBtn.onclick = async ()=>{
+    const name = nameInput.value.trim();
+    if(!name) return;
+    saveBtn.disabled = true; saveBtn.textContent = 'Сохранение…';
+    const payload = { name, rubric: document.getElementById('tvStudioRubric').value || null };
+    const studio = tvSaveStudioLocal(payload, existing || null);
+    studio.angles = studio.angles || tvEmptyStudioAngles();
+    studio._assetFiles = studio._assetFiles || {};
+    for(const key of TV_STUDIO_ANGLE_KEYS){
+      const val = localAngles[key];
+      if(val && val.indexOf('data:')===0){
+        const result = await tvPersistLocalImageAsset('studio:' + studio.id + ':angle:' + key, val);
+        studio.angles[key] = result ? result.url : val;
+        studio._assetFiles['angle_' + key] = !!result;
+        studio._assetFiles['angle_' + key + 'File'] = result ? result.fileName : undefined;
+      } else if(!val){
+        studio.angles[key] = null;
+        delete studio._assetFiles['angle_' + key];
+        delete studio._assetFiles['angle_' + key + 'File'];
+      }
     }
-    const prompt = tvBuildBackdropCardSheetPrompt(backdrop, promptText);
-    const res = await fetch('/api/generate-image/start', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        prompt, width: TV_CARD_SHEET_WIDTH, height: TV_CARD_SHEET_HEIGHT, model: model.id,
-        referenceImageUrl: referenceImageUrls,
-        meta: { kind: 'tv-backdrop-card', backdropId: backdrop.id, backdropName: backdrop.name },
-      }),
-    });
-    const data = await res.json().catch(()=> null);
-    if(res.status===401) throw new Error('Нужно войти в аккаунт — откройте / и авторизуйтесь, затем вернитесь на /tv.');
-    if(!res.ok || !data || !data.taskId) throw new Error((data && data.message) || 'Не удалось запустить генерацию.');
-    const imageUrl = await tvPollGenerationSlot(data.taskId);
-    const persisted = await tvPersistRemoteImageAsset('backdrop:' + backdrop.id + ':sheet', imageUrl);
-    backdrop.card.images.sheet = backdrop.card.images.sheet || {};
-    backdrop.card.images.sheet.url = persisted ? persisted.url : imageUrl;
-    backdrop._assetFiles = backdrop._assetFiles || {};
-    backdrop._assetFiles.sheet = !!persisted;
-    backdrop._assetFiles.sheetFile = persisted ? persisted.fileName : undefined;
-    delete backdrop.card._pending.sheet;
     tvSaveSoon();
-  } catch(err){
-    console.warn('[tv] failed to generate the backdrop card:', err);
-    alert('Не удалось создать Object Card: ' + err.message);
-  } finally {
-    if(backdrop.card._pending) delete backdrop.card._pending.sheet;
-    tvRenderBackdropCardOutputGridIfOpen(backdrop);
-  }
-
-  if(btn){ btn.disabled = false; btn.textContent = (backdrop.card.images.sheet && backdrop.card.images.sheet.url) ? 'Пересоздать карту' : 'Создать карту'; }
-  renderTvBackdrops();
-}
-
-// ---- Angle shots (locations.js's LOCATION_ANGLE_KEYS pattern) — five independently
-// generated, finished establishing shots, each using every other filled angle (or,
-// failing that, the Object Card sheet / micro-photo) as a reference. ----
-const TV_ANGLE_SHOT_WIDTH = 1920, TV_ANGLE_SHOT_HEIGHT = 1080;
-let tvBackdropAnglesOpenId = null;
-function tvGatherAngleReferences(backdrop, excludeKey){
-  const refs = [];
-  TV_ANGLE_KEYS.forEach(k=>{
-    if(k===excludeKey) return;
-    const a = backdrop.angleShots && backdrop.angleShots[k];
-    if(a && a.photo) refs.push(a.photo);
-  });
-  if(refs.length===0){
-    const sheet = backdrop.card && backdrop.card.images && backdrop.card.images.sheet;
-    if(sheet && sheet.url) refs.push(sheet.url);
-    else if(backdrop.photo) refs.push(backdrop.photo);
-  }
-  return refs.slice(0, 8);
-}
-function tvBuildAngleShotPrompt(backdrop, key){
-  const directionText = TV_ANGLE_PROMPT_LABELS[key] || key;
-  return (backdrop.description ? backdrop.description + '. ' : '')
-    + 'The exact same studio backdrop/set as in the reference image(s) — same architecture, materials, colors, and lighting — but shown as ' + directionText + '. Do not invent a different place, no people in frame.';
-}
-function tvOpenBackdropAngleShots(backdrop){
-  tvBackdropAnglesOpenId = backdrop.id;
-  backdrop.angleShots = backdrop.angleShots || {};
-  const body = document.getElementById('tvAnchorModalBody');
-  body.innerHTML = `
-    <div class="char-form card-builder">
-      <h3>Ракурсы — ${backdrop.name}</h3>
-      <p class="sub">Готовые, самостоятельно используемые планы декорации с разных сторон. Каждый генерируется с учётом уже готовых ракурсов — так модель видит декорацию с нескольких сторон сразу.</p>
-      <div class="location-angle-grid" id="tvAngleGrid"></div>
-      <input type="file" id="tvAngleFileInput" accept="image/*" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;">
-      <div class="gen-hint" id="tvAngleModelHint" style="margin-top:10px;"></div>
-      <div class="cf-actions" style="margin-top:16px;">
-        <button class="cf-btn" id="tvAnglesBack">Назад к декорации</button>
-      </div>
-    </div>`;
-  tvRenderAngleTiles(backdrop);
-  const model = tvPickReferenceCapableModel();
-  const modelHint = document.getElementById('tvAngleModelHint');
-  if(!model){
-    modelHint.textContent = 'Нет подключённой модели с поддержкой референс-фото — генерация ракурсов недоступна, но загрузка своих фото работает.';
-    modelHint.style.color = 'var(--danger)';
-  } else {
-    modelHint.textContent = 'Генерация через ' + model.label + '.';
-  }
-  document.getElementById('tvAnglesBack').onclick = ()=>{
-    tvBackdropAnglesOpenId = null;
-    tvOpenBackdropDetail(backdrop);
+    renderTvStudios();
+    tvOpenStudioDetail(studio);
   };
   tvOpenModal();
-}
-function tvRenderAngleTiles(backdrop){
-  const grid = document.getElementById('tvAngleGrid');
-  if(!grid) return;
-  grid.innerHTML = TV_ANGLE_KEYS.map(key=>{
-    const angle = backdrop.angleShots && backdrop.angleShots[key];
-    const pending = backdrop._pendingAngles && backdrop._pendingAngles[key];
-    const label = `<div class="location-angle-tile-label">${TV_ANGLE_UI_LABELS[key]}</div>`;
-    let inner;
-    if(angle && angle.photo) inner = `<img src="${angle.photo}">${label}<div class="location-angle-tile-del" data-angle-key="${key}" title="Удалить"><i class="ti ti-x" style="font-size:11px;"></i></div>`;
-    else if(pending) inner = `<div class="task-tile-spin"></div>${label}`;
-    else inner = `<div class="location-angle-tile-add"><i class="ti ti-plus" style="font-size:20px;"></i></div>${label}`;
-    return `<div class="location-angle-tile" data-angle-key="${key}">${inner}</div>`;
-  }).join('');
-  grid.querySelectorAll('.location-angle-tile').forEach(tile=>{
-    tile.onclick = (e)=>{
-      if(e.target.closest('.location-angle-tile-del')) return;
-      tvOpenAngleTileMenu(backdrop, tile.dataset.angleKey, tile);
-    };
-  });
-  grid.querySelectorAll('.location-angle-tile-del').forEach(btn=>{
-    btn.onclick = (e)=>{
-      e.stopPropagation();
-      delete backdrop.angleShots[btn.dataset.angleKey];
-      tvRenderAngleTiles(backdrop);
-      tvSaveSoon();
-    };
-  });
-}
-function tvCloseAngleTileMenu(){
-  const menu = document.getElementById('tvAngleTileMenu');
-  if(menu) menu.remove();
-  document.removeEventListener('click', tvCloseAngleTileMenu, true);
-}
-function tvOpenAngleTileMenu(backdrop, key, tileEl){
-  tvCloseAngleTileMenu();
-  const rect = tileEl.getBoundingClientRect();
-  const model = tvPickReferenceCapableModel();
-  const menu = document.createElement('div');
-  menu.className = 'angle-tile-menu';
-  menu.id = 'tvAngleTileMenu';
-  menu.style.left = rect.left + 'px';
-  menu.style.top = (rect.bottom + 4) + 'px';
-  menu.innerHTML = `
-    <div class="angle-tile-menu-item" data-action="upload">Загрузить с диска</div>
-    <div class="angle-tile-menu-item${model?'':' disabled'}" data-action="generate">Сгенерировать с ИИ</div>`;
-  document.body.appendChild(menu);
-  menu.querySelector('[data-action="upload"]').onclick = (e)=>{
-    e.stopPropagation();
-    tvCloseAngleTileMenu();
-    const input = document.getElementById('tvAngleFileInput');
-    input.onchange = async ()=>{
-      const file = input.files[0];
-      if(!file) return;
-      try{
-        const dataUrl = await loadImageAsDataURL(file);
-        const result = await tvPersistLocalImageAsset('backdrop:' + backdrop.id + ':angle:' + key, dataUrl);
-        backdrop.angleShots[key] = { photo: result ? result.url : dataUrl };
-        backdrop._assetFiles = backdrop._assetFiles || {};
-        backdrop._assetFiles['angle_' + key] = !!result;
-        backdrop._assetFiles['angle_' + key + 'File'] = result ? result.fileName : undefined;
-        tvRenderAngleTiles(backdrop);
-        renderTvBackdrops();
-        tvSaveSoon();
-      } catch(err){}
-      input.value = '';
-    };
-    input.click();
-  };
-  const genItem = menu.querySelector('[data-action="generate"]');
-  if(model){
-    genItem.onclick = (e)=>{
-      e.stopPropagation();
-      tvCloseAngleTileMenu();
-      tvRunGenerateAngleShot(backdrop, key);
-    };
-  }
-  setTimeout(()=> document.addEventListener('click', tvCloseAngleTileMenu, true), 0);
-}
-async function tvRunGenerateAngleShot(backdrop, key){
-  const model = tvPickReferenceCapableModel();
-  if(!model) return;
-  backdrop._pendingAngles = backdrop._pendingAngles || {};
-  backdrop._pendingAngles[key] = true;
-  tvRenderAngleTilesIfOpen(backdrop);
-  try{
-    const refs = tvGatherAngleReferences(backdrop, key);
-    const referenceImageUrls = [];
-    for(const p of refs){
-      const url = await tvUploadReferencePhoto(p);
-      if(url) referenceImageUrls.push(url);
-    }
-    const prompt = tvBuildAngleShotPrompt(backdrop, key);
-    const res = await fetch('/api/generate-image/start', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        prompt, width: TV_ANGLE_SHOT_WIDTH, height: TV_ANGLE_SHOT_HEIGHT, model: model.id,
-        referenceImageUrl: referenceImageUrls,
-        meta: { kind: 'tv-backdrop-angle', backdropId: backdrop.id, angleKey: key },
-      }),
-    });
-    const data = await res.json().catch(()=> null);
-    if(res.status===401) throw new Error('Нужно войти в аккаунт — откройте / и авторизуйтесь, затем вернитесь на /tv.');
-    if(!res.ok || !data || !data.taskId) throw new Error((data && data.message) || 'Не удалось запустить генерацию.');
-    const imageUrl = await tvPollGenerationSlot(data.taskId);
-    const persisted = await tvPersistRemoteImageAsset('backdrop:' + backdrop.id + ':angle:' + key, imageUrl);
-    backdrop.angleShots[key] = { photo: persisted ? persisted.url : imageUrl };
-    backdrop._assetFiles = backdrop._assetFiles || {};
-    backdrop._assetFiles['angle_' + key] = !!persisted;
-    backdrop._assetFiles['angle_' + key + 'File'] = persisted ? persisted.fileName : undefined;
-    tvSaveSoon();
-  } catch(err){
-    console.warn('[tv] failed to generate angle shot', key, err);
-    alert('Не удалось сгенерировать ракурс: ' + err.message);
-  } finally {
-    if(backdrop._pendingAngles) delete backdrop._pendingAngles[key];
-    tvRenderAngleTilesIfOpen(backdrop);
-    renderTvBackdrops();
-  }
-}
-function tvRenderAngleTilesIfOpen(backdrop){
-  if(tvBackdropAnglesOpenId===backdrop.id) tvRenderAngleTiles(backdrop);
 }
 
 // ---- Новости tab: two-pane picker (left = proposed, right = included in episode) ----
@@ -1435,8 +1113,8 @@ function wireTvPageTabs(){
   if(approveBtn) approveBtn.onclick = toggleTvApproval;
   const addAnchorBtn = document.getElementById('tvAddAnchorBtn');
   if(addAnchorBtn) addAnchorBtn.onclick = ()=> tvOpenAnchorForm(null);
-  const addBackdropBtn = document.getElementById('tvAddBackdropBtn');
-  if(addBackdropBtn) addBackdropBtn.onclick = ()=> tvOpenBackdropForm(null);
+  const addStudioBtn = document.getElementById('tvAddStudioBtn');
+  if(addStudioBtn) addStudioBtn.onclick = ()=> tvOpenStudioForm(null);
   const modalBackdrop = document.getElementById('tvAnchorModalBackdrop');
   if(modalBackdrop) modalBackdrop.onclick = tvCloseModal;
   const lightboxBackdrop = document.getElementById('tvLightboxBackdrop');
@@ -1464,7 +1142,7 @@ function wireTvPageTabs(){
   tvStartAutosave();
   tvPruneOldArchive();
   renderTvAnchors();
-  renderTvBackdrops();
+  renderTvStudios();
   renderTvNewsPickers();
   renderTvGrid();
 })();

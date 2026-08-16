@@ -36,28 +36,18 @@ function tvEmptyCardInputSlots(){
 const TV_CARD_SHEET_WIDTH = 1600;
 const TV_CARD_SHEET_HEIGHT = 900;
 
-// Studio backdrops (Object Card pattern, same idea as Locations/Props in object-card.js —
-// 4 reference-photo input slots, one generated turnaround sheet used as the consistency
-// reference for everything else).
-const TV_OBJECT_CARD_INPUT_SLOTS = [
-  { key:'front', label:'Спереди', hint:'Вид прямо на декорацию' },
-  { key:'left',  label:'Слева',   hint:'Вид с левой стороны' },
-  { key:'right', label:'Справа',  hint:'Вид с правой стороны' },
-  { key:'back',  label:'Сзади',   hint:'Вид сзади' },
-];
-function tvEmptyObjectCardInputSlots(){
+// Studios — one dedicated "corner" per rubric (or the null-rubric general host, who "живёт
+// в своей студии" same as any rubric anchor). Manually uploaded only, never AI-generated —
+// exactly 4 wide/establishing shots. The virtual editor (planned, not yet built) derives
+// medium/close-up framing from these 4 stills itself via crop/pan/zoom at render time; it
+// never asks for separate per-crop-size images, so there is no generation step here at all.
+const TV_STUDIO_ANGLE_KEYS = ['angle1', 'angle2', 'angle3', 'angle4'];
+const TV_STUDIO_ANGLE_LABELS = { angle1:'Общий план 1', angle2:'Общий план 2', angle3:'Общий план 3', angle4:'Общий план 4' };
+function tvEmptyStudioAngles(){
   const obj = {};
-  TV_OBJECT_CARD_INPUT_SLOTS.forEach(s=> obj[s.key]=null);
+  TV_STUDIO_ANGLE_KEYS.forEach(k=> obj[k]=null);
   return obj;
 }
-
-// Angle shots (locations.js's LOCATION_ANGLE_KEYS pattern) — five independently generated,
-// actually-usable establishing-shot images of the backdrop, each one using every OTHER
-// already-filled angle as a reference so the model sees the set from multiple sides at
-// once instead of guessing a new one from text alone every time.
-const TV_ANGLE_KEYS = ['wide', 'front', 'reverse', 'left', 'right'];
-const TV_ANGLE_UI_LABELS = { wide:'Общий план', front:'Спереди', reverse:'Разворот назад', left:'Слева', right:'Справа' };
-const TV_ANGLE_PROMPT_LABELS = { wide:'a wide establishing shot', front:'a front-facing shot', reverse:'the reverse angle, looking back the other way', left:'the camera turned to the left', right:'the camera turned to the right' };
 
 // ---- Anchor persona (voice/character bible) ----
 // Captures the kind of rich character-sheet Костян hands us for a real show host (age,
@@ -124,13 +114,15 @@ const TV_FORMAT_TEMPLATE = {
 const tvState = {
   activeTab: 'work',
 
-  // Work tab — anchors (Character Card pattern) and studio backdrops (Object Card pattern).
+  // Work tab — anchors (Character Card pattern) and studios (see tvStudios below).
   // Persisted locally (disk folder/IndexedDB, js/tv-persistence.js) — this array IS the
   // source of truth, restored from the workspace on load and saved after every change.
   // `rubric: null` means "hosts the whole show" (like Богданов in the reference show, or
   // Пушной in Галилео) rather than one dedicated rubric — a real, named case, not a gap.
   tvAnchors: [],    // [{ id, name, rubric, description, photo, voiceId, persona:{...TV_PERSONA_TEXT_FIELDS/LIST_FIELDS}, card:{inputSlots,prompt,images:{sheet:{url}}}, approved, _assetFiles }]
-  tvBackdrops: [],  // [{ id, name, description, photo, card:{inputSlots,prompt,images:{sheet:{url}}}, angleShots:{wide,front,reverse,left,right:{photo}}, approved, _assetFiles }]
+  // Studios — one per rubric (or null-rubric for the general host). Manually uploaded only,
+  // no card/generation step; each of the 4 slots IS the final asset, not a reference input.
+  tvStudios: [],    // [{ id, name, rubric, angles:{angle1,angle2,angle3,angle4:url|null}, _assetFiles }]
 
   // Новости tab — two-pane picker: proposed items (left) vs items dragged into the episode
   // (right, `included:true`). `materialStatus` is 'ok' or 'мало материала' — when scarce,
@@ -176,7 +168,7 @@ const tvState = {
   tvOwedToUsers: 0,
 };
 
-let tvAnchorSeq = 1, tvBackdropSeq = 1, tvNewsItemSeq = 1, tvGridBlockSeq = 1, tvTaskSeq = 1, tvArchiveSeq = 1;
+let tvAnchorSeq = 1, tvStudioSeq = 1, tvNewsItemSeq = 1, tvGridBlockSeq = 1, tvTaskSeq = 1, tvArchiveSeq = 1;
 
 function tvRubricLabel(key){
   if(!key) return 'Ведущий передачи';
