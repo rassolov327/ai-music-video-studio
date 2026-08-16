@@ -455,7 +455,11 @@ function tvOpenAnchorCardBuilder(anchor){
         <label>Описание <span style="color:var(--text-3);font-weight:400;">— промпт для карты</span></label>
         <textarea id="tvCardPromptInput" style="min-height:80px;" placeholder="Внешность, одежда, отличительные черты...">${anchor.card.prompt || anchor.description || ''}</textarea>
       </div>
-      <button class="cf-btn primary" id="tvCardCreateBtn" style="width:100%;">${hasSheet ? 'Пересоздать карту' : 'Создать карту'}</button>
+      <div style="display:flex;gap:8px;">
+        <button class="cf-btn primary" id="tvCardCreateBtn" style="flex:1;">${hasSheet ? 'Пересоздать карту' : 'Создать карту'}</button>
+        <button class="cf-btn" id="tvCardUploadBtn" type="button" style="flex:1;">Загрузить с диска</button>
+        <input type="file" id="tvCardSheetFileInput" accept="image/*" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;">
+      </div>
       <div class="gen-hint" id="tvCardModelHint" style="margin-top:6px;"></div>
       <div class="char-card-section-title" style="margin-top:16px;">Изображения карты</div>
       <div class="card-output-grid" id="tvCardOutputGrid" style="grid-template-columns:1fr;"></div>
@@ -470,7 +474,7 @@ function tvOpenAnchorCardBuilder(anchor){
   const model = tvPickReferenceCapableModel();
   const modelHint = document.getElementById('tvCardModelHint');
   if(!model){
-    modelHint.textContent = 'Нет подключённой модели с поддержкой референс-фото (например, Nano Banana Pro).';
+    modelHint.textContent = 'Нет подключённой модели с поддержкой референс-фото (например, Nano Banana Pro) — генерация недоступна, но загрузка своего листа с диска работает.';
     modelHint.style.color = 'var(--danger)';
     document.getElementById('tvCardCreateBtn').disabled = true;
   } else {
@@ -479,6 +483,27 @@ function tvOpenAnchorCardBuilder(anchor){
 
   document.getElementById('tvCardPromptInput').addEventListener('input', (e)=>{ anchor.card.prompt = e.target.value; });
   document.getElementById('tvCardCreateBtn').onclick = ()=> tvRunCreateCard(anchor);
+  // Manual upload — the finished turnaround sheet doesn't have to come from generation;
+  // Костян can draw/edit/source one himself and just drop it in.
+  document.getElementById('tvCardUploadBtn').onclick = ()=> document.getElementById('tvCardSheetFileInput').click();
+  document.getElementById('tvCardSheetFileInput').onchange = async (e)=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    try{
+      const dataUrl = await loadImageAsDataURL(file);
+      const result = await tvPersistLocalImageAsset('anchor:' + anchor.id + ':sheet', dataUrl);
+      anchor.card.images.sheet = anchor.card.images.sheet || {};
+      anchor.card.images.sheet.url = result ? result.url : dataUrl;
+      anchor._assetFiles = anchor._assetFiles || {};
+      anchor._assetFiles.sheet = !!result;
+      anchor._assetFiles.sheetFile = result ? result.fileName : undefined;
+      tvSaveSoon();
+      tvRenderCardOutputGrid(anchor);
+      renderTvAnchors();
+      document.getElementById('tvCardCreateBtn').textContent = 'Пересоздать карту';
+    } catch(err){}
+    e.target.value = '';
+  };
   document.getElementById('tvCardBuilderBack').onclick = ()=>{
     tvAnchorCardBuilderOpenId = null;
     tvOpenAnchorDetail(anchor);
@@ -905,6 +930,7 @@ function renderTvNewsArchive(){
 const tvExpandedNewsIds = new Set(); // UI-only, not persisted — resets on reload
 function tvNewsPrecisionBadge(n){
   if(n.sourcePrecision==='week') return '<span class="tv-news-flag tv-news-flag-week" title="Реальный архивный источник, датирован именно этой неделей">неделя</span>';
+  if(n.sourcePrecision==='month') return '<span class="tv-news-flag tv-news-flag-month" title="Для этой рубрики за точную неделю ничего не нашлось — источник реальный, но датирован в пределах месяца">месяц</span>';
   if(n.sourcePrecision==='year') return '<span class="tv-news-flag tv-news-flag-year" title="Источник — Wikipedia, точность в пределах года, не недели">год</span>';
   return '';
 }
@@ -1648,7 +1674,7 @@ async function tvGatherNews(){
   const btn = document.getElementById('tvGatherNewsBtn');
   const hint = document.getElementById('tvGatherNewsHint');
   if(btn){ btn.disabled = true; btn.textContent = 'Собираю…'; }
-  if(hint) hint.textContent = 'Ищу реальные источники — это может занять минуту-другую…';
+  if(hint){ hint.textContent = 'Ищу реальные источники — это может занять минуту-другую…'; hint.style.color = ''; }
   try{
     const week = tvComputeTargetWeek();
     // Anything still just proposed (not included) from an earlier target week is stale —
@@ -1701,9 +1727,21 @@ async function tvGatherNews(){
     renderTvNewsPickers();
     renderTvNewsSubTabs();
     tvSaveSoon();
-    hint.textContent = data.items.length
+    // Honesty about rubric coverage, per Костян's requirement: say plainly which rubrics
+    // needed the month-wide fallback (real items, just not week-precise) and which came
+    // back with nothing at all even after widening — never silently leave a gap unexplained.
+    const coverageNotes = [];
+    if(Array.isArray(data.filledFromFallback) && data.filledFromFallback.length){
+      coverageNotes.push('за месяц вместо недели: ' + data.filledFromFallback.map(tvRubricLabel).join(', '));
+    }
+    if(Array.isArray(data.emptyRubrics) && data.emptyRubrics.length){
+      coverageNotes.push('совсем ничего не нашлось (даже за месяц): ' + data.emptyRubrics.map(tvRubricLabel).join(', '));
+    }
+    const baseText = data.items.length
       ? 'Добавлено: ' + addedCount + (skippedCount ? ', уже было: ' + skippedCount : '') + ' (реальные источники — проверьте ссылки)'
       : 'За эту неделю ничего не нашлось в реальных источниках. Попробуйте ещё раз позже, или добавьте новость вручную.';
+    hint.textContent = coverageNotes.length ? baseText + '. ' + coverageNotes.join('; ') + '.' : baseText;
+    if(coverageNotes.length) hint.style.color = 'var(--warn)';
   } catch(err){
     if(hint){ hint.textContent = err.message; hint.style.color = 'var(--danger)'; }
   } finally {

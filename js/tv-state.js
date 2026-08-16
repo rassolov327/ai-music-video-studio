@@ -163,7 +163,7 @@ const tvState = {
   // spoken-audio step (Микрофонная tab), voiceUrl null means "not voiced yet" (crossed-out
   // speaker icon in the UI).
   tvNewsItems: [], // [{ id, rubric, title, summary, extract, sourceDate, sourceUrl,
-                    //    source:'wayback'|'wikipedia', sourcePrecision:'week'|'year',
+                    //    source:'wayback'|'wikipedia', sourcePrecision:'week'|'month'|'year',
                     //    media:[{type,url,title}], materialStatus, isAnniversary, included,
                     //    archived, archivedAt, gatheredForWeek, assignedAnchorId,
                     //    assignedStudioId, articleText, articleTaskId, voiceUrl, voiceTaskId,

@@ -563,6 +563,19 @@ function tvHistoricalWeekRange(refDate) {
   return { start: fmt(histMonday), end: fmt(histSunday) };
 }
 
+// Widens a week-range into a ~30-day window centered on the same midpoint — used only as a
+// fallback when a rubric came back with zero real items for the exact target week (see
+// /api/tv/gather-news below). Every item pulled from this wider window is honestly tagged
+// sourcePrecision:'month' rather than passed off as week-accurate.
+function tvMonthRange(range) {
+  const start = new Date(range.start + 'T00:00:00Z');
+  const end = new Date(range.end + 'T00:00:00Z');
+  const midMs = (start.getTime() + end.getTime()) / 2;
+  const dayMs = 24 * 60 * 60 * 1000;
+  const fmt = (d) => d.toISOString().slice(0, 10);
+  return { start: fmt(new Date(midMs - 15 * dayMs)), end: fmt(new Date(midMs + 15 * dayMs)) };
+}
+
 function tvStripHtml(html) {
   if (!html) return '';
   return html
@@ -777,6 +790,10 @@ async function tvSearchCommonsImage(query) {
   }
 }
 
+// All 6 rubrics — kept here (not imported from tv-state.js, which the server doesn't load)
+// purely to check real coverage per gather; must stay in sync with TV_RUBRICS client-side.
+const TV_ALL_RUBRIC_KEYS = ['news', 'games', 'soft', 'hardware', 'internet', 'mobile'];
+
 app.post('/api/tv/gather-news', async (req, res) => {
   if (!GEMINI_API_KEY) {
     return res.status(503).json({ error: 'not_configured', message: 'GEMINI_API_KEY is not set on the server yet.' });
@@ -788,7 +805,30 @@ app.post('/api/tv/gather-news', async (req, res) => {
     tvGatherWaybackNews(range).catch((err) => { console.warn('[tv] wayback pass failed entirely:', err.message); return []; }),
     tvGatherWikipediaNews(range).catch((err) => { console.warn('[tv] wikipedia pass failed entirely:', err.message); return []; }),
   ]);
-  const items = [...waybackItems, ...wikipediaItems];
+  let items = [...waybackItems, ...wikipediaItems];
+
+  // Костян's requirement: every rubric should end up with at least one real item, and if
+  // one genuinely can't be found for the exact week, say so honestly rather than silently
+  // leaving it empty — then widen to a ~30-day window (still real, sourced items, never
+  // invented) as a fallback, clearly tagged sourcePrecision:'month' so the UI can show the
+  // difference. Rubrics that STILL come back empty after that stay in emptyRubrics — no
+  // further fallback, no recall/invention.
+  let emptyRubrics = TV_ALL_RUBRIC_KEYS.filter((r) => !items.some((i) => i.rubric === r));
+  let filledFromFallback = [];
+  if (emptyRubrics.length) {
+    try {
+      const monthRange = tvMonthRange(range);
+      const fallbackItems = await tvGatherWaybackNews(monthRange);
+      const stillMissing = new Set(emptyRubrics);
+      const picked = fallbackItems.filter((i) => stillMissing.has(i.rubric));
+      picked.forEach((i) => { i.sourcePrecision = 'month'; });
+      items = items.concat(picked);
+      filledFromFallback = [...new Set(picked.map((i) => i.rubric))];
+      emptyRubrics = emptyRubrics.filter((r) => !filledFromFallback.includes(r));
+    } catch (err) {
+      console.warn('[tv] month-wide fallback pass failed:', err.message);
+    }
+  }
 
   await Promise.all(items.map(async (item) => {
     if (item.media && item.media.length) return; // already has a real thumbnail (Wikipedia)
@@ -797,7 +837,7 @@ app.post('/api/tv/gather-news', async (req, res) => {
     delete item.imageQuery; // internal-only, not needed by the client
   }));
 
-  res.json({ items, weekStart: range.start, weekEnd: range.end });
+  res.json({ items, weekStart: range.start, weekEnd: range.end, emptyRubrics, filledFromFallback });
 });
 
 // ---- text-writing (Journalist) — turns a sourced news item into the anchor's on-air read,
