@@ -612,7 +612,13 @@ async function tvCallGeminiStructuring(instruction, withSourceIndex) {
     headers: { 'x-goog-api-key': GEMINI_API_KEY, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       contents: [{ role: 'user', parts: [{ text: instruction }] }],
-      generationConfig: { responseMimeType: 'application/json', responseSchema },
+      // temperature:0 — this is an EXTRACTION task (pull out what's literally in the given
+      // text), not creative writing. Without this, Gemini's default sampling temperature
+      // made repeated runs against the identical real source text return different subsets
+      // of items with different wording each time — Костян noticed results "didn't seem
+      // tied to anything consistent" between gathers. Deterministic extraction of the same
+      // real input should give the same real output.
+      generationConfig: { responseMimeType: 'application/json', responseSchema, temperature: 0 },
     }),
   });
   const data = await geminiRes.json().catch(() => null);
@@ -897,25 +903,33 @@ app.post('/api/tv/gather-news', async (req, res) => {
   // Express's default HTML error page. The client's res.json() then failed to parse it,
   // producing the content-free "Не удалось собрать новости." fallback with no code at all.
   try {
-    const { weekStart, weekEnd } = req.body || {};
+    const { weekStart, weekEnd, sources } = req.body || {};
     const range = (weekStart && weekEnd) ? { start: weekStart, end: weekEnd } : tvHistoricalWeekRange();
+    // Which real sources to actually query, per the checkboxes next to "Собрать новости"
+    // (js/tv-app.js). Missing/malformed selection defaults to everything ON — safe fallback
+    // for any caller that doesn't send the field, never a reason to silently return nothing.
+    const sel = sources && typeof sources === 'object'
+      ? sources
+      : { wayback: true, computerra: true, wikipedia: true, monthFallback: true };
 
     const [waybackItems, wikipediaItems, computerraItems] = await Promise.all([
-      tvGatherWaybackNews(range).catch((err) => { console.warn('[tv] wayback pass failed entirely:', err.message); return []; }),
-      tvGatherWikipediaNews(range).catch((err) => { console.warn('[tv] wikipedia pass failed entirely:', err.message); return []; }),
-      tvGatherComputerraNews(range).catch((err) => { console.warn('[tv] computerra pass failed entirely:', err.message); return []; }),
+      sel.wayback ? tvGatherWaybackNews(range).catch((err) => { console.warn('[tv] wayback pass failed entirely:', err.message); return []; }) : [],
+      sel.wikipedia ? tvGatherWikipediaNews(range).catch((err) => { console.warn('[tv] wikipedia pass failed entirely:', err.message); return []; }) : [],
+      sel.computerra ? tvGatherComputerraNews(range).catch((err) => { console.warn('[tv] computerra pass failed entirely:', err.message); return []; }) : [],
     ]);
     let items = [...waybackItems, ...wikipediaItems, ...computerraItems];
 
     // Костян's requirement: every rubric should end up with at least one real item, and if
     // one genuinely can't be found for the exact week, say so honestly rather than silently
-    // leaving it empty — then widen to a ~30-day window (still real, sourced items, never
-    // invented) as a fallback, clearly tagged sourcePrecision:'month' so the UI can show the
-    // difference. Rubrics that STILL come back empty after that stay in emptyRubrics — no
+    // leaving it empty — then, ONLY if the "Расширять до месяца" checkbox is on, widen to a
+    // ~30-day window (still real, sourced items, never invented) as a fallback, clearly
+    // tagged sourcePrecision:'month'. Off by default: a month-wide item isn't really "the
+    // selected week" any more than Wikipedia's year-precision is, so this stays opt-in the
+    // same way. Rubrics that STILL come back empty after that stay in emptyRubrics — no
     // further fallback, no recall/invention.
     let emptyRubrics = TV_ALL_RUBRIC_KEYS.filter((r) => !items.some((i) => i.rubric === r));
     let filledFromFallback = [];
-    if (emptyRubrics.length) {
+    if (emptyRubrics.length && sel.monthFallback) {
       try {
         const monthRange = tvMonthRange(range);
         const fallbackItems = await tvGatherWaybackNews(monthRange);

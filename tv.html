@@ -62,6 +62,11 @@
   .tv-card-tile-name{ font-size:12px; color:var(--text-1); }
   .tv-empty-hint{ font-size:12px; color:var(--text-3); padding:14px; border:1px dashed var(--line); border-radius:8px; }
 
+  .tv-news-sources{ display:flex; flex-wrap:wrap; align-items:center; gap:12px; margin:-4px 0 12px; font-size:11.5px; color:var(--text-2); }
+  .tv-news-sources-label{ color:var(--text-3); }
+  .tv-news-source-check{ display:flex; align-items:center; gap:5px; cursor:pointer; }
+  .tv-news-source-check input{ accent-color:var(--accent); cursor:pointer; }
+  .tv-news-source-check.secondary{ color:var(--text-3); padding-left:12px; border-left:1px solid var(--line); }
   .tv-news-panes{ display:flex; gap:14px; }
   .tv-news-pane{ flex:1; min-width:0; border:1px solid var(--line); border-radius:8px; background:var(--bg-panel-2); min-height:340px; }
   .tv-news-pane-head{ font-size:11.5px; color:var(--text-2); padding:8px 10px; border-bottom:1px solid var(--line); }
@@ -287,6 +292,7 @@
       <button class="tv-btn primary" id="tvGatherNewsBtn">Собрать новости</button>
     </div>
   </div>
+  <div class="tv-news-sources" id="tvNewsSources"></div>
   <div class="tv-news-subtabs" id="tvNewsSubTabs">
     <div class="tv-subtab active" data-subtab="news">Новости</div>
     <div class="tv-subtab" data-subtab="archive">Архив</div>

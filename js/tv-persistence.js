@@ -338,6 +338,7 @@ function tvSerialize(){
     tvAnniversaryEvents: tvState.tvAnniversaryEvents,
     tvEpisode: tvState.tvEpisode,
     approvals: tvState.approvals,
+    tvNewsSourceSelection: tvState.tvNewsSourceSelection,
     tvOwedToUsers: tvState.tvOwedToUsers,
     seq: { tvAnchorSeq, tvStudioSeq, tvNewsItemSeq, tvGridBlockSeq, tvTaskSeq, tvArchiveSeq },
   };
@@ -444,6 +445,7 @@ async function tvApplyWorkspaceData(data){
   if(Array.isArray(data.tvAnniversaryEvents)) tvState.tvAnniversaryEvents = data.tvAnniversaryEvents;
   if(data.tvEpisode) tvState.tvEpisode = data.tvEpisode;
   if(data.approvals) Object.assign(tvState.approvals, data.approvals);
+  if(data.tvNewsSourceSelection) Object.assign(tvState.tvNewsSourceSelection, data.tvNewsSourceSelection);
   if(typeof data.tvOwedToUsers === 'number') tvState.tvOwedToUsers = data.tvOwedToUsers;
   if(data.seq){
     tvAnchorSeq = Math.max(tvAnchorSeq, data.seq.tvAnchorSeq || 1);

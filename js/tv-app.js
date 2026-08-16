@@ -16,6 +16,7 @@ function showTvPage(page){
       const calEl = document.getElementById('tvNewsCalendar');
       if(calEl) calEl.innerHTML = `<div class="gen-hint" style="color:var(--danger);">Ошибка календаря: ${err.message}</div>`;
     }
+    renderTvNewsSources();
     renderTvNewsSubTabs();
     renderTvNewsPickers();
   }
@@ -827,9 +828,21 @@ function tvOpenStudioForm(existing){
 // ---- Новости tab: two-pane picker (left = proposed, right = included in episode) ----
 // ---- target week (client-side mirror of server.js's tvHistoricalWeekRange) — drives both
 // the calendar and the week sent to /api/tv/gather-news ----
+// Date components stay LOCAL throughout (renderTvNewsCalendar() below reads startDate/
+// endDate back out with local getters to highlight days on a human-facing calendar grid —
+// that's correct, a calendar should follow the viewer's own local day boundaries). The
+// `start`/`end` STRINGS actually sent to the server used to go through `toISOString()`,
+// which re-interprets a local-midnight Date in UTC — for any positive-offset timezone
+// (Россия included), that silently rolled the reported date back by one, shifting the
+// whole range the server searched. Formatting directly off the local Y/M/D components
+// instead avoids that UTC round-trip entirely.
+function tvFmtLocalDate(d){
+  const pad = (n)=> String(n).padStart(2,'0');
+  return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
+}
 function tvComputeTargetWeek(refDate){
   const now = refDate || new Date();
-  const day = now.getDay(); // 0=Sun..6=Sat, local time — this is a display calendar, not a server boundary
+  const day = now.getDay(); // 0=Sun..6=Sat, local time
   const monday = new Date(now);
   monday.setHours(0,0,0,0);
   monday.setDate(now.getDate() + ((day===0 ? -6 : 1) - day));
@@ -837,8 +850,7 @@ function tvComputeTargetWeek(refDate){
   sunday.setDate(monday.getDate() + 6);
   const histMonday = new Date(monday); histMonday.setFullYear(monday.getFullYear() - 25);
   const histSunday = new Date(sunday); histSunday.setFullYear(sunday.getFullYear() - 25);
-  const fmt = (d)=> d.toISOString().slice(0,10);
-  return { start: fmt(histMonday), end: fmt(histSunday), startDate: histMonday, endDate: histSunday, year: histMonday.getFullYear() };
+  return { start: tvFmtLocalDate(histMonday), end: tvFmtLocalDate(histSunday), startDate: histMonday, endDate: histSunday, year: histMonday.getFullYear() };
 }
 const TV_MONTH_NAMES = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
 // Static display only (no navigation, per Костян) — a month grid for the target week's
@@ -1792,11 +1804,40 @@ function tvSendGridBlockToVoicing(blockId){
   renderTvGrid();
 }
 
-// ---- Собрать новости — real, sourced items only (Wayback Machine + Wikipedia, see
-// server.js's /api/tv/gather-news) for the exact target week (tvComputeTargetWeek,
-// matches the calendar shown above it). Still always lands unincluded and 'мало
-// материала' — a real, verifiable STORY isn't the same as having real photo/video
-// material for it yet; that's still a separate step, per CLAUDE.md's rule. ----
+// ---- source-selection checkboxes next to "Собрать новости" — which real sources to pull
+// from this run (tvState.tvNewsSourceSelection, see tv-state.js for the default reasoning).
+// wayback/computerra are the two week-precise sources (main row); wikipedia and the
+// month-wide fallback are opt-in extras that trade precision for volume (secondary row,
+// visually set apart). ----
+const TV_NEWS_SOURCE_LABELS = [
+  { key:'wayback', label:'Wayback Machine' },
+  { key:'computerra', label:'Компьютерра' },
+  { key:'wikipedia', label:'Wikipedia (год, менее точно)', secondary:true },
+  { key:'monthFallback', label:'Расширять до месяца, если рубрика пустая', secondary:true },
+];
+function renderTvNewsSources(){
+  const el = document.getElementById('tvNewsSources');
+  if(!el) return;
+  const sel = tvState.tvNewsSourceSelection;
+  el.innerHTML = '<span class="tv-news-sources-label">Источники:</span>'
+    + TV_NEWS_SOURCE_LABELS.map(s=> `
+      <label class="tv-news-source-check${s.secondary ? ' secondary' : ''}">
+        <input type="checkbox" data-news-source="${s.key}"${sel[s.key] ? ' checked' : ''}>${s.label}
+      </label>`).join('');
+  el.querySelectorAll('[data-news-source]').forEach(cb=>{
+    cb.onchange = ()=>{
+      tvState.tvNewsSourceSelection[cb.dataset.newsSource] = cb.checked;
+      tvSaveSoon();
+    };
+  });
+}
+
+// ---- Собрать новости — real, sourced items only (Wayback Machine + Компьютерра +
+// Wikipedia, see server.js's /api/tv/gather-news, gated by tvNewsSourceSelection above) for
+// the exact target week (tvComputeTargetWeek, matches the calendar shown above it). Still
+// always lands unincluded and 'мало материала' — a real, verifiable STORY isn't the same as
+// having real photo/video material for it yet; that's still a separate step, per
+// CLAUDE.md's rule. ----
 async function tvGatherNews(){
   const btn = document.getElementById('tvGatherNewsBtn');
   const hint = document.getElementById('tvGatherNewsHint');
@@ -1814,7 +1855,7 @@ async function tvGatherNews(){
     });
     const res = await fetch('/api/tv/gather-news', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ weekStart: week.start, weekEnd: week.end }),
+      body: JSON.stringify({ weekStart: week.start, weekEnd: week.end, sources: tvState.tvNewsSourceSelection }),
     });
     const data = await res.json().catch(()=> null);
     // Always carry the real HTTP status in the message shown on screen — a bare "не
@@ -1827,8 +1868,13 @@ async function tvGatherNews(){
     }
 
     // Dedup against whatever's still active (not archived) — re-running the gather for
-    // the same week shouldn't duplicate what's already there.
-    const dedupKey = (n)=> n.sourceUrl || (n.title||'').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim();
+    // the same week shouldn't duplicate what's already there. Must combine sourceUrl AND
+    // title, not sourceUrl alone: Компьютерра's sourceUrl is a per-DAY archive index page,
+    // shared by every distinct story pulled from that day — keying on sourceUrl alone made
+    // the 2nd+ real story from the same day collide with the 1st and get silently dropped
+    // as a "duplicate" even though it was a genuinely different item (this is why "гораздо
+    // больше новостей на Компьютерре, чем добавилось в Предложено").
+    const dedupKey = (n)=> (n.sourceUrl||'') + '||' + (n.title||'').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim();
     const existingKeys = new Set(tvState.tvNewsItems.filter(n=> !n.archived).map(dedupKey));
     let addedCount = 0, skippedCount = 0;
     data.items.forEach(item=>{

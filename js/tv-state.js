@@ -204,6 +204,15 @@ const tvState = {
   // Anniversary calendar — flags especially notable stories automatically.
   tvAnniversaryEvents: [], // [{ id, eventDate, title, description, rubric }]
 
+  // Which real sources "Собрать новости" pulls from (checkboxes next to the button on
+  // Новости, js/tv-app.js). wayback/computerra default ON (both week-precise). wikipedia
+  // defaults OFF — it's only ever year-precision, and mixing year-level material in by
+  // default made results feel "not tied to the selected week" (Костян's own words); it's
+  // still one click away when more volume matters more than precision. monthFallback
+  // (the ~30-day-window retry for a rubric that came back completely empty) defaults OFF
+  // for the same reason — "нас интересуют новости только на выбранной неделе".
+  tvNewsSourceSelection: { wayback: true, computerra: true, wikipedia: false, monthFallback: false },
+
   // Current episode being worked on (the one shown across all tabs).
   tvEpisode: null, // { id, weekStartDate, sourceWeekStartDate, status, renderUrl }
 
