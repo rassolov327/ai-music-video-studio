@@ -993,11 +993,17 @@ async function tvCallKieElevenLabsVoice(text, voiceId, speed) {
     'ElevenLabs'
   );
 }
-// Unverified — see the big comment above TV_VOICE_MODELS. Best guess at both the model id
-// and input shape, following the {model, input:{text, voice}} convention every other KIE
-// model here actually uses.
+// Unverified — see the big comment above TV_VOICE_MODELS. First attempt used
+// 'gemini-3.1-flash-tts' (a dot, matching Google's own direct-API naming) and got back "The
+// model name you specified is not supported" from KIE — a real, specific error confirming
+// the id itself was wrong (not an auth/shape problem). KIE's Gemini category consistently
+// strips dots to dashes elsewhere (gemini-3-5-flash is the confirmed-real page/id for the
+// text model above), so this retries with the same convention applied to the TTS model.
+// Still not confirmed via real docs — a search even suggested KIE's actual current Gemini
+// TTS lineup might only go up to 2.5 (gemini-2-5-flash-tts/gemini-2-5-pro-tts), i.e. 3.1
+// TTS specifically may not exist on KIE at all yet despite the marketing page existing.
 async function tvCallKieGeminiVoice(text, voiceId) {
-  return tvCallKieAudioTask('gemini-3.1-flash-tts', { text, voice: voiceId || 'Kore' }, 'Gemini TTS');
+  return tvCallKieAudioTask('gemini-3-1-flash-tts', { text, voice: voiceId || 'Kore' }, 'Gemini TTS');
 }
 function tvPcmToWav(pcmBuffer, sampleRate, numChannels, bitsPerSample) {
   const byteRate = sampleRate * numChannels * bitsPerSample / 8;
