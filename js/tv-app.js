@@ -132,7 +132,7 @@ function tvSaveAnchorLocal(payload, existing){
     tvSaveSoon();
     return existing;
   }
-  const anchor = Object.assign({ id: tvAnchorSeq++, card: null, approved: false, _assetFiles: {} }, payload);
+  const anchor = Object.assign({ id: tvAnchorSeq++, card: null, persona: tvEmptyPersona(), approved: false, _assetFiles: {} }, payload);
   tvState.tvAnchors.push(anchor);
   tvSaveSoon();
   return anchor;
@@ -143,8 +143,10 @@ function tvDeleteAnchorLocal(id){
 }
 
 // ---- status (red = incomplete basics, yellow = basics done but no card yet, green = card built) ----
+// rubric is intentionally NOT required — null means "hosts the whole show" (a real value,
+// not a missing one; see TV_RUBRICS/tvRubricLabel in tv-state.js).
 function tvAnchorStatus(a){
-  if(!a.name || !a.photo || !a.rubric || !a.description) return 'red';
+  if(!a.name || !a.photo || !a.description) return 'red';
   const hasSheet = !!(a.card && a.card.images && a.card.images.sheet && a.card.images.sheet.url);
   return hasSheet ? 'green' : 'yellow';
 }
@@ -162,7 +164,7 @@ function renderTvAnchors(){
       <div class="char-tile-photo">${a.photo ? `<img src="${a.photo}">` : '<i class="ti ti-user"></i>'}</div>
       <div class="char-tile-status status-${tvAnchorStatus(a)}"></div>
       <div class="char-tile-name">${a.name}</div>
-      ${a.rubric ? `<div class="char-tile-role">${tvRubricLabel(a.rubric)}</div>` : ''}
+      <div class="char-tile-role">${tvRubricLabel(a.rubric)}</div>
     </div>`).join('');
   el.querySelectorAll('.char-tile').forEach(tile=>{
     tile.onclick = ()=>{
@@ -183,7 +185,7 @@ function tvOpenAnchorDetail(anchor){
       </div>
       <div class="char-card-body">
         <p class="char-card-name">${anchor.name}</p>
-        ${anchor.rubric ? `<span class="char-card-role">${tvRubricLabel(anchor.rubric)}</span>` : ''}
+        <span class="char-card-role">${tvRubricLabel(anchor.rubric)}</span>
         ${anchor.description ? `<p class="char-card-desc">${anchor.description}</p>` : ''}
         ${anchor.voiceId ? `<div class="gen-hint" style="margin-top:-8px;margin-bottom:14px;">Голос: ${anchor.voiceId}</div>` : ''}
         <div class="char-card-section-title">Character Card</div>
@@ -198,11 +200,13 @@ function tvOpenAnchorDetail(anchor){
           </div>
         </div>
         <button class="cf-btn primary" id="tvAnchorBuildBtn" style="width:100%;margin-top:12px;">${hasSheet ? 'Изменить Character Card' : 'Создать Character Card'}</button>
+        <button class="cf-btn" id="tvAnchorPersonaBtn" style="width:100%;margin-top:8px;">Персона / голос</button>
       </div>
     </div>`;
   document.getElementById('tvAnchorBack').onclick = tvCloseModal;
   document.getElementById('tvAnchorEdit').onclick = ()=> tvOpenAnchorForm(anchor);
   document.getElementById('tvAnchorBuildBtn').onclick = ()=> tvOpenAnchorCardBuilder(anchor);
+  document.getElementById('tvAnchorPersonaBtn').onclick = ()=> tvOpenAnchorPersona(anchor);
   document.getElementById('tvAnchorDelete').onclick = ()=>{
     if(!confirm('Удалить ведущего «' + anchor.name + '»?')) return;
     tvDeleteAnchorLocal(anchor.id);
@@ -220,7 +224,10 @@ function tvOpenAnchorForm(existing){
       <h3>${existing ? 'Изменить ведущего' : 'Новый ведущий'}</h3>
       <p class="sub">${existing ? 'Обновите данные ведущего.' : 'Имя, рубрика, описание, голос, одно фото. После сохранения можно собрать полную Character Card.'}</p>
       <div class="cf-field"><label>Имя</label><input type="text" id="tvAnchorName" placeholder="например, Анна Соколова" value="${existing ? existing.name : ''}"></div>
-      <div class="cf-field"><label>Рубрика</label><select id="tvAnchorRubric">${TV_RUBRICS.map(r=> `<option value="${r.key}"${existing && existing.rubric===r.key ? ' selected' : ''}>${r.label}</option>`).join('')}</select></div>
+      <div class="cf-field"><label>Рубрика</label><select id="tvAnchorRubric">
+        <option value=""${!existing || !existing.rubric ? ' selected' : ''}>Ведущий передачи целиком (без рубрики)</option>
+        ${TV_RUBRICS.map(r=> `<option value="${r.key}"${existing && existing.rubric===r.key ? ' selected' : ''}>${r.label}</option>`).join('')}
+      </select></div>
       <div class="cf-field"><label>Описание / характер</label><textarea id="tvAnchorDesc" placeholder="Внешность, манера, что важно помнить">${existing && existing.description ? existing.description : ''}</textarea></div>
       <div class="cf-field"><label>Голос (TTS id) <span style="color:var(--text-3);font-weight:400;">— пригодится во вкладке Студия</span></label><input type="text" id="tvAnchorVoice" placeholder="пока свободный текст" value="${existing && existing.voiceId ? existing.voiceId : ''}"></div>
       <div class="cf-field">
@@ -271,7 +278,7 @@ function tvOpenAnchorForm(existing){
     const isNewPhoto = photoDataUrl && photoDataUrl.indexOf('data:')===0;
     const payload = {
       name,
-      rubric: document.getElementById('tvAnchorRubric').value,
+      rubric: document.getElementById('tvAnchorRubric').value || null,
       description: document.getElementById('tvAnchorDesc').value.trim(),
       voiceId: document.getElementById('tvAnchorVoice').value.trim(),
     };
@@ -291,12 +298,62 @@ function tvOpenAnchorForm(existing){
   tvOpenModal();
 }
 
+// ---- Персона / voice — the character-bible fields (age, archetype, catchphrase, speech
+// quirks, sample lines...) a future text-generation pass ("Journalist" in CLAUDE.md) will
+// read to write voiceover that actually sounds like THIS host. Doesn't touch appearance —
+// that's Character Card's job — except visualStyle, which also feeds the card prompt. ----
+function tvBuildAnchorVoiceContext(anchor){
+  const p = anchor.persona || {};
+  const lines = ['Ведущий: ' + (anchor.name || '—') + ' (' + tvRubricLabel(anchor.rubric) + ')'];
+  TV_PERSONA_TEXT_FIELDS.forEach(f=>{ if(p[f.key]) lines.push(f.label + ': ' + p[f.key]); });
+  TV_PERSONA_LIST_FIELDS.forEach(f=>{
+    const items = (p[f.key] || []).filter(Boolean);
+    if(!items.length) return;
+    lines.push('');
+    lines.push(f.label + ':');
+    items.forEach(it=> lines.push('- ' + it));
+  });
+  return lines.join('\n');
+}
+function tvOpenAnchorPersona(anchor){
+  anchor.persona = anchor.persona || tvEmptyPersona();
+  const p = anchor.persona;
+  const body = document.getElementById('tvAnchorModalBody');
+  body.innerHTML = `
+    <div class="char-form card-builder">
+      <h3>Персона / голос — ${anchor.name}</h3>
+      <p class="sub">Не влияет на внешность (её задаёт Character Card) — это характер и манера речи, чтобы будущая генерация текста для выпуска звучала именно этим ведущим, а не обезличенно.</p>
+      ${TV_PERSONA_TEXT_FIELDS.map(f=> f.multiline
+        ? `<div class="cf-field"><label>${f.label}</label><textarea id="tvPersona_${f.key}" placeholder="${f.placeholder}" style="min-height:50px;">${p[f.key] || ''}</textarea></div>`
+        : `<div class="cf-field"><label>${f.label}</label><input type="text" id="tvPersona_${f.key}" placeholder="${f.placeholder}" value="${p[f.key] || ''}"></div>`
+      ).join('')}
+      ${TV_PERSONA_LIST_FIELDS.map(f=> `<div class="cf-field"><label>${f.label}</label><textarea id="tvPersona_${f.key}" placeholder="${f.placeholder}" style="min-height:70px;">${(p[f.key] || []).join('\n')}</textarea></div>`).join('')}
+      <div class="cf-actions">
+        <button class="cf-btn" id="tvPersonaBack">Назад к ведущему</button>
+        <button class="cf-btn primary" id="tvPersonaSave">Сохранить</button>
+      </div>
+      <div class="char-card-section-title" style="margin-top:16px;">Как это увидит модель</div>
+      <div class="ref-card-box" id="tvPersonaPreview"></div>
+    </div>`;
+  const updatePreview = ()=>{ document.getElementById('tvPersonaPreview').textContent = tvBuildAnchorVoiceContext(anchor); };
+  updatePreview();
+  document.getElementById('tvPersonaBack').onclick = ()=> tvOpenAnchorDetail(anchor);
+  document.getElementById('tvPersonaSave').onclick = ()=>{
+    TV_PERSONA_TEXT_FIELDS.forEach(f=>{ p[f.key] = document.getElementById('tvPersona_' + f.key).value.trim(); });
+    TV_PERSONA_LIST_FIELDS.forEach(f=>{ p[f.key] = document.getElementById('tvPersona_' + f.key).value.split('\n').map(s=> s.trim()).filter(Boolean); });
+    updatePreview();
+    tvSaveSoon();
+    renderTvAnchors();
+  };
+  tvOpenModal();
+}
+
 // ---- Character Card builder — the real, generation-driving reference set ----
 let tvAnchorCardBuilderOpenId = null;
 
 function tvOpenAnchorCardBuilder(anchor){
   tvAnchorCardBuilderOpenId = anchor.id;
-  if(!anchor.card) anchor.card = { inputSlots: tvEmptyCardInputSlots(), prompt: anchor.description || '', images: {} };
+  if(!anchor.card) anchor.card = { inputSlots: tvEmptyCardInputSlots(), prompt: anchor.description || (anchor.persona && anchor.persona.visualStyle) || '', images: {} };
   if(!anchor.card.inputSlots) anchor.card.inputSlots = tvEmptyCardInputSlots();
   if(!anchor.card.images) anchor.card.images = {};
   if(!anchor.card.inputSlots.front && anchor.photo) anchor.card.inputSlots.front = anchor.photo;

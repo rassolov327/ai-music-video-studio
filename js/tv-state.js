@@ -59,6 +59,36 @@ const TV_ANGLE_KEYS = ['wide', 'front', 'reverse', 'left', 'right'];
 const TV_ANGLE_UI_LABELS = { wide:'Общий план', front:'Спереди', reverse:'Разворот назад', left:'Слева', right:'Справа' };
 const TV_ANGLE_PROMPT_LABELS = { wide:'a wide establishing shot', front:'a front-facing shot', reverse:'the reverse angle, looking back the other way', left:'the camera turned to the left', right:'the camera turned to the right' };
 
+// ---- Anchor persona (voice/character bible) ----
+// Captures the kind of rich character-sheet Костян hands us for a real show host (age,
+// archetype, catchphrase, speech quirks, sample lines...) as structured fields on the
+// anchor itself, so a future text-generation pass ("Journalist" in CLAUDE.md) can write
+// voiceover that actually sounds like THIS specific host, not a generic one. Two field
+// shapes: short single-line text, and free-form lists (one item per line in the UI).
+// `multiline` renders as a textarea instead of a single-line input — for fields whose real
+// content tends to run to a sentence or more (still stored as a plain string, not a list).
+const TV_PERSONA_TEXT_FIELDS = [
+  { key:'ageRange',        label:'Возраст',          placeholder:'например, 28–32 года' },
+  { key:'archetype',       label:'Амплуа / образ',   placeholder:'например, ведущий-эксперт, «свой парень», техно-энтузиаст', multiline:true },
+  { key:'characterTraits', label:'Характер',         placeholder:'умный, ироничный, слегка саркастичный, увлечённый', multiline:true },
+  { key:'onCameraRole',    label:'Роль в кадре',     placeholder:'уверенный, но не пафосный, легко общается со зрителем', multiline:true },
+  { key:'visualStyle',     label:'Образ и стиль',    placeholder:'одежда, очки, причёска, аксессуары — тоже уходит в промпт Character Card', multiline:true },
+  { key:'catchphrase',     label:'Фраза-визитка',    placeholder:'коронная фраза ведущего' },
+];
+const TV_PERSONA_LIST_FIELDS = [
+  { key:'deliveryStyle',      label:'Манера и подача',        placeholder:'по одному пункту на строку' },
+  { key:'onCameraHabits',     label:'Привычки в кадре',       placeholder:'по одному пункту на строку' },
+  { key:'speechPatterns',     label:'Речевые особенности',    placeholder:'по одному пункту на строку' },
+  { key:'sampleLines',        label:'Примеры реплик',         placeholder:'по одной реплике на строку' },
+  { key:'additionalDetails',  label:'Дополнительные детали',  placeholder:'по одному пункту на строку' },
+];
+function tvEmptyPersona(){
+  const p = {};
+  TV_PERSONA_TEXT_FIELDS.forEach(f=> p[f.key]='');
+  TV_PERSONA_LIST_FIELDS.forEach(f=> p[f.key]=[]);
+  return p;
+}
+
 // ---- Сетка format template ----
 // Draft, derived from scripts/analyze-show-format.js's Gemini pass over 3 real reference
 // episodes (scripts/show-format-draft.json — 28.06/04.07/11.07.2002). Костян's own viewing
@@ -97,7 +127,9 @@ const tvState = {
   // Work tab — anchors (Character Card pattern) and studio backdrops (Object Card pattern).
   // Persisted locally (disk folder/IndexedDB, js/tv-persistence.js) — this array IS the
   // source of truth, restored from the workspace on load and saved after every change.
-  tvAnchors: [],    // [{ id, name, rubric, description, photo, voiceId, card:{inputSlots,prompt,images:{sheet:{url}}}, approved, _assetFiles }]
+  // `rubric: null` means "hosts the whole show" (like Богданов in the reference show, or
+  // Пушной in Галилео) rather than one dedicated rubric — a real, named case, not a gap.
+  tvAnchors: [],    // [{ id, name, rubric, description, photo, voiceId, persona:{...TV_PERSONA_TEXT_FIELDS/LIST_FIELDS}, card:{inputSlots,prompt,images:{sheet:{url}}}, approved, _assetFiles }]
   tvBackdrops: [],  // [{ id, name, description, photo, card:{inputSlots,prompt,images:{sheet:{url}}}, angleShots:{wide,front,reverse,left,right:{photo}}, approved, _assetFiles }]
 
   // Новости tab — two-pane picker: proposed items (left) vs items dragged into the episode
@@ -147,6 +179,7 @@ const tvState = {
 let tvAnchorSeq = 1, tvBackdropSeq = 1, tvNewsItemSeq = 1, tvGridBlockSeq = 1, tvTaskSeq = 1, tvArchiveSeq = 1;
 
 function tvRubricLabel(key){
+  if(!key) return 'Ведущий передачи';
   const r = TV_RUBRICS.find(r=> r.key===key);
   return r ? r.label : key;
 }

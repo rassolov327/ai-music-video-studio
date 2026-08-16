@@ -75,10 +75,20 @@ hand (no auto-upload yet).
 ## Tab structure (final, in this order)
 
 1. **Work** — create anchors (Character Card pattern, built) and virtual studio backdrops/
-   camera angles (Object Card + angle-shots pattern from `locations.js`, built). **Every
-   anchor is tied to one rubric** at creation time (`anchor.rubric`, a required `<select>`
-   over `TV_RUBRICS` in the anchor form) — mirrors the real show's structure of one
-   dedicated host per rubric, not one anchor reading everything.
+   camera angles (Object Card + angle-shots pattern from `locations.js`, built). Each anchor
+   picks a rubric at creation time (`anchor.rubric`, `<select>` over `TV_RUBRICS`) OR leaves
+   it unset — `rubric: null` means "hosts the whole show" (like Владимир Богданов in the
+   reference show, or Сергей Пушной in Галилео), a real, named case, not a missing value.
+   Mirrors the real show's structure of specialist rubric hosts plus one overall host.
+   Each anchor also has a **Персона** screen (`tvOpenAnchorPersona`, `js/tv-app.js`) —
+   structured character-bible fields (`TV_PERSONA_TEXT_FIELDS`/`TV_PERSONA_LIST_FIELDS` in
+   `js/tv-state.js`: age, archetype, character traits, on-camera role, visual style,
+   catchphrase, delivery style, on-camera habits, speech patterns, sample lines, misc
+   details) — separate from Character Card (appearance only). `tvBuildAnchorVoiceContext()`
+   assembles these into the plain-text block a future generation call would actually read;
+   the Персона screen shows this assembled text live so it's visible before any model call
+   exists. This is how new hosts get defined going forward — Костян hands over a character
+   sheet like a real show's on-air talent bible, it becomes these fields, not free prose.
 2. **Новости** — real-news aggregator for the matching week 25 years ago. UI: two-pane
    Total-Commander-style picker — left pane = system-proposed news items, right pane = items
    dragged in to include in the episode. Items are rubric-tagged. A calendar of known "big
@@ -160,7 +170,11 @@ thumbnails. Expand state is UI-only (`tvExpandedNewsIds`, a `Set`), not persiste
 ## Journalist — voiceover text only, must read as human-written
 
 Only ONE text output is needed per news item: what the anchor reads aloud. No separate
-print-article version. NOT YET BUILT.
+print-article version. NOT YET BUILT — but each anchor's Персона fields (see Work tab
+above, `tvBuildAnchorVoiceContext()`) already give this step real per-host material to
+work from once it exists: age/archetype/character, catchphrase, delivery style, on-camera
+habits, speech patterns, and real sample lines — so voiceover text can sound like THIS
+specific host, not a single undifferentiated "narrator" voice.
 
 The generation must be indistinguishable from a real human writer of that era. This is a
 prompting/context problem, not a model-choice problem:
@@ -267,9 +281,11 @@ Two parallel passes, then reconcile:
   `tvGridBlocks`, etc. `tvState` IS the source of truth (no server mirror).
 - `js/tv-persistence.js` — local disk/IndexedDB workspace persistence (see Architecture).
 - `js/tv-app.js` — tab-switching; full anchor Character Card flow (gallery → detail → quick
-  form → 6-slot reference builder → generated turnaround sheet); full backdrop flow (same,
-  plus a 5-slot independently-generated angle-shots screen, `object-card.js`/`locations.js`
-  pattern); "Собрать новости" on Новости.
+  form → 6-slot reference builder → generated turnaround sheet) plus a Персона screen
+  (character-bible fields — age/archetype/catchphrase/speech quirks/sample lines, see Work
+  tab above); full backdrop flow (same Character Card idea, plus a 5-slot independently-
+  generated angle-shots screen, `object-card.js`/`locations.js` pattern); "Собрать новости"
+  on Новости.
 - `server.js` — `POST /api/tv/gather-news` (real sourcing: Wayback Machine + Wikipedia,
   stateless — see "News sourcing"); anchor/backdrop Character/Object Card generation
   reuses the existing `/api/upload-reference-image` + `/api/generate-image/start`/`/status`
