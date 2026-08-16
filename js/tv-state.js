@@ -41,8 +41,10 @@ const TV_CARD_SHEET_HEIGHT = 900;
 // exactly 4 wide/establishing shots. The virtual editor (planned, not yet built) derives
 // medium/close-up framing from these 4 stills itself via crop/pan/zoom at render time; it
 // never asks for separate per-crop-size images, so there is no generation step here at all.
-const TV_STUDIO_ANGLE_KEYS = ['angle1', 'angle2', 'angle3', 'angle4'];
-const TV_STUDIO_ANGLE_LABELS = { angle1:'Общий план 1', angle2:'Общий план 2', angle3:'Общий план 3', angle4:'Общий план 4' };
+// Named directions, not "план 1/2/3/4" — the planned virtual editor needs to know which
+// way each shot actually faces to cut between them sensibly (step D in the staged plan).
+const TV_STUDIO_ANGLE_KEYS = ['front', 'left', 'right', 'back'];
+const TV_STUDIO_ANGLE_LABELS = { front:'Вперёд', left:'Влево', right:'Вправо', back:'Назад' };
 function tvEmptyStudioAngles(){
   const obj = {};
   TV_STUDIO_ANGLE_KEYS.forEach(k=> obj[k]=null);
@@ -122,7 +124,7 @@ const tvState = {
   tvAnchors: [],    // [{ id, name, rubric, description, photo, voiceId, persona:{...TV_PERSONA_TEXT_FIELDS/LIST_FIELDS}, card:{inputSlots,prompt,images:{sheet:{url}}}, approved, _assetFiles }]
   // Studios — one per rubric (or null-rubric for the general host). Manually uploaded only,
   // no card/generation step; each of the 4 slots IS the final asset, not a reference input.
-  tvStudios: [],    // [{ id, name, rubric, angles:{angle1,angle2,angle3,angle4:url|null}, _assetFiles }]
+  tvStudios: [],    // [{ id, name, rubric, angles:{front,left,right,back:url|null}, _assetFiles }]
 
   // Новости tab — two-pane picker: proposed items (left) vs items dragged into the episode
   // (right, `included:true`). `materialStatus` is 'ok' or 'мало материала' — when scarce,

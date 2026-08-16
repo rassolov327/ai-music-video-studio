@@ -571,22 +571,30 @@ function renderTvStudios(){
   });
 }
 
+// Carousel in the main photo slot — same pattern as showLocationCard()'s angle browser in
+// js/locations.js (.loc-card-photo-arrow/.loc-card-photo-label, shared styles.css classes),
+// adapted to studios' 4 named directions instead of locations' 5 angle keys.
 function tvOpenStudioDetail(studio){
-  const filled = TV_STUDIO_ANGLE_KEYS.filter(k=> studio.angles && studio.angles[k]);
-  const cover = filled.length ? studio.angles[filled[0]] : null;
+  const available = TV_STUDIO_ANGLE_KEYS.filter(k=> studio.angles && studio.angles[k]);
+  let viewIdx = 0;
   const body = document.getElementById('tvAnchorModalBody');
   body.innerHTML = `
     <div class="char-card">
-      <div class="char-card-photo">
-        ${cover ? `<img src="${cover}">` : '<i class="ti ti-camera" style="font-size:40px;"></i>'}
+      <div class="char-card-photo" id="tvStudioCardPhoto">
+        ${available.length
+          ? `<img src="${studio.angles[available[0]]}" id="tvStudioCardPhotoImg" class="tv-clickable-img">`
+          : '<i class="ti ti-camera" style="font-size:40px;"></i>'}
+        ${available.length > 1 ? `
+          <div class="loc-card-photo-arrow left" id="tvStudioPhotoPrev" title="Предыдущий план"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg></div>
+          <div class="loc-card-photo-arrow right" id="tvStudioPhotoNext" title="Следующий план"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></div>
+          <div class="loc-card-photo-label" id="tvStudioPhotoLabel">${TV_STUDIO_ANGLE_LABELS[available[0]]}</div>
+        ` : (available.length===1 ? `<div class="loc-card-photo-label">${TV_STUDIO_ANGLE_LABELS[available[0]]}</div>` : '')}
       </div>
       <div class="char-card-body">
         <p class="char-card-name">${studio.name}</p>
         <span class="char-card-role">${tvRubricLabel(studio.rubric)}</span>
-        <div class="char-card-section-title">Общие планы (${filled.length}/${TV_STUDIO_ANGLE_KEYS.length})</div>
-        ${filled.length
-          ? `<div class="char-card-angles">${filled.map(k=> `<div class="char-card-angle tv-clickable-img" data-angle-key="${k}" style="width:60px;height:60px;"><img src="${studio.angles[k]}"></div>`).join('')}</div>`
-          : `<div class="gen-hint" style="margin-top:0;">Планов пока нет — загрузите их в форме редактирования.</div>`}
+        <div class="char-card-section-title">Общие планы (${available.length}/${TV_STUDIO_ANGLE_KEYS.length})</div>
+        ${available.length ? '' : `<div class="gen-hint" style="margin-top:0;">Планов пока нет — загрузите их в форме редактирования.</div>`}
         <div class="char-card-actions">
           <button class="cf-btn" id="tvStudioBack">Закрыть</button>
           <div style="display:flex;gap:8px;">
@@ -596,11 +604,24 @@ function tvOpenStudioDetail(studio){
         </div>
       </div>
     </div>`;
+
+  if(available.length){
+    const imgEl = document.getElementById('tvStudioCardPhotoImg');
+    const labelEl = document.getElementById('tvStudioPhotoLabel');
+    function showAngle(i){
+      viewIdx = (i + available.length) % available.length;
+      const key = available[viewIdx];
+      if(imgEl) imgEl.src = studio.angles[key];
+      if(labelEl) labelEl.textContent = TV_STUDIO_ANGLE_LABELS[key];
+    }
+    if(available.length > 1){
+      document.getElementById('tvStudioPhotoPrev').onclick = (e)=>{ e.stopPropagation(); showAngle(viewIdx - 1); };
+      document.getElementById('tvStudioPhotoNext').onclick = (e)=>{ e.stopPropagation(); showAngle(viewIdx + 1); };
+    }
+    imgEl.onclick = ()=> tvOpenLightbox(studio.angles[available[viewIdx]]);
+  }
   document.getElementById('tvStudioBack').onclick = tvCloseModal;
   document.getElementById('tvStudioEdit').onclick = ()=> tvOpenStudioForm(studio);
-  body.querySelectorAll('.char-card-angle[data-angle-key]').forEach(el=>{
-    el.onclick = ()=> tvOpenLightbox(studio.angles[el.dataset.angleKey]);
-  });
   document.getElementById('tvStudioDelete').onclick = ()=>{
     if(!confirm('Удалить студию «' + studio.name + '»?')) return;
     tvDeleteStudioLocal(studio.id);
