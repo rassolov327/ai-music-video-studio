@@ -1915,7 +1915,11 @@ async function tvGatherNews(){
       coverageNotes.push('за месяц вместо недели: ' + data.filledFromFallback.map(tvRubricLabel).join(', '));
     }
     if(Array.isArray(data.emptyRubrics) && data.emptyRubrics.length){
-      coverageNotes.push('совсем ничего не нашлось (даже за месяц): ' + data.emptyRubrics.map(tvRubricLabel).join(', '));
+      // "даже за месяц" is only true if the month-wide retry actually ran — with the
+      // checkbox off (the default, see tvNewsSourceSelection), the server never attempted
+      // it at all, so saying so would be a flat lie about what was actually tried.
+      const label = tvState.tvNewsSourceSelection.monthFallback ? 'совсем ничего не нашлось (даже за месяц)' : 'ничего не нашлось за эту неделю';
+      coverageNotes.push(label + ': ' + data.emptyRubrics.map(tvRubricLabel).join(', '));
     }
     const baseText = data.items.length
       ? 'Добавлено: ' + addedCount + (skippedCount ? ', уже было: ' + skippedCount : '') + ' (реальные источники — проверьте ссылки)'

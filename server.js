@@ -731,49 +731,89 @@ async function tvGatherWaybackNews(range) {
 // verified this live against 16.08.2001, which showed a real dated article
 // ("Разнософт №11"). Every day of the target week gets its own direct fetch, so coverage
 // is guaranteed rather than dependent on whether Wayback happened to snapshot that day.
+//
+// A day-archive page is NOT unstructured prose — it's a real list of distinct articles,
+// each its own repeating `item-dir-ct item-dir-ct-2` block with a real per-article URL
+// (`<h2><a href="/197823/">Title</a></h2>`), date, and a real dated blurb. The first version
+// of this function flattened the whole page to one text blob and asked Gemini to find story
+// boundaries in it — real content was there, but most of it was silently lost: one busy day
+// (20.08.2001) turned out to hold 9 distinct real articles, confirmed by fetching and
+// inspecting the raw HTML directly, and the flat-text version surfaced barely any of them.
+// Parsing the real blocks directly means every real article gets its own real per-article
+// sourceUrl too (no more day-index URL shared across multiple stories).
+const TV_COMPUTERRA_ITEM_RE = /<h2><a href="([^"]+)">([\s\S]*?)<\/a><\/h2>[\s\S]*?<span\s+class="item-info-author">[\d.]+<\/span>[\s\S]*?<span\s*[\s\S]*?class="item-info-author">([\s\S]*?)<\/span>/;
+// old.computerra.ru occasionally resets the connection outright (ECONNRESET, no HTTP status
+// at all) under repeated rapid requests — confirmed live: several fetches failed this way
+// during testing, then succeeded again seconds later with no code change. One retry after a
+// short pause is cheap insurance against losing a whole day's real content to a transient
+// blip, given each day only gets fetched once per gather anyway.
+async function tvFetchWithRetry(url, attempts = 2) {
+  for (let i = 0; i < attempts; i++) {
+    try { return await fetch(url); }
+    catch (err) {
+      if (i === attempts - 1) throw err;
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+  }
+}
 async function tvGatherComputerraNews(range) {
   const start = new Date(range.start + 'T00:00:00Z');
   const end = new Date(range.end + 'T00:00:00Z');
   const days = [];
   for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) days.push(new Date(d));
 
-  const fetched = await Promise.all(days.map(async (d) => {
+  const perDay = await Promise.all(days.map(async (d) => {
     const year = d.getUTCFullYear(), month = d.getUTCMonth() + 1, day = d.getUTCDate();
-    const url = `https://old.computerra.ru/archive/${year}/${month}/${day}/`;
+    const dayUrl = `https://old.computerra.ru/archive/${year}/${month}/${day}/`;
     const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     try {
-      const pageRes = await fetch(url);
-      if (!pageRes.ok) return null; // some days genuinely have no archive page — not an error
-      const html = (await pageRes.text()).slice(0, 200000);
-      const text = tvStripHtml(html).slice(0, 4000);
-      if (text.length < 200) return null;
-      return { url, dateStr, text };
-    } catch (err) { console.warn('[tv] computerra fetch failed for', url, err.message); return null; }
+      const pageRes = await tvFetchWithRetry(dayUrl);
+      if (!pageRes.ok) return []; // some days genuinely have no archive page — not an error
+      const html = await pageRes.text();
+      const blocks = html.split('item-dir-ct item-dir-ct-2').slice(1);
+      const items = [];
+      for (const b of blocks) {
+        const m = b.match(TV_COMPUTERRA_ITEM_RE);
+        if (!m) continue;
+        const relUrl = m[1];
+        const title = tvStripHtml(m[2]);
+        const snippet = tvStripHtml(m[3]);
+        if (!title || !snippet || snippet.length < 15) continue;
+        const url = relUrl.startsWith('http') ? relUrl : `https://old.computerra.ru${relUrl}`;
+        items.push({ url, title, snippet, dateStr });
+      }
+      return items;
+    } catch (err) { console.warn('[tv] computerra fetch failed for', dayUrl, err.message); return []; }
   }));
-  const pages = fetched.filter(Boolean);
-  if (!pages.length) return [];
+  const rawItems = perDay.flat();
+  if (!rawItems.length) return [];
 
-  const sourceBlock = pages.map((p, i) => `[SOURCE ${i}: real page from old.computerra.ru, dated ${p.dateStr}]\n${p.text}`).join('\n\n');
+  // The same real article occasionally gets listed under more than one day (reprints /
+  // theme-issue cross-links) — de-dupe by its real per-article URL before spending a
+  // Gemini call on it twice.
+  const seenUrls = new Set();
+  const uniqueItems = rawItems.filter((it) => (seenUrls.has(it.url) ? false : (seenUrls.add(it.url), true)));
+
+  const sourceBlock = uniqueItems.map((it, i) => `[SOURCE ${i}: real Компьютерра article dated ${it.dateStr}, real title "${it.title}"]\n${it.snippet}`).join('\n\n');
   const instruction = [
-    'The following are real, literally-retrieved text snapshots of daily archive pages from Компьютерра (old.computerra.ru), a real Russian IT/technology magazine, for specific days of one historical week.',
-    'For EACH numbered source below, extract any IT/technology, video games, software, or internet NEWS STORIES that are LITERALLY PRESENT in that source\'s text — a short Russian title, a factual 1-3 sentence Russian summary based ONLY on the text given, and which sourceIndex it came from.',
-    'This is real scraped page content and may include navigation/menu/boilerplate text — ignore that. Do not add any fact, name, or number that is not literally present in the text.',
+    'The following are real, individually-identified articles from Компьютерра (old.computerra.ru), a real Russian IT/technology magazine, each already extracted from a real archived page for one specific historical week — the title and text given for each are REAL, not something you need to search for.',
+    'For EACH numbered source below, produce one structured item: rubric classification, a clean short Russian title (based on the real title given, tightened into news-headline style if needed), and a factual 1-3 sentence Russian summary based ONLY on the given text — never invent a fact, name, or number not present in it.',
     'rubric must be exactly one of: news, games, soft, hardware, internet, mobile.',
     'imageQuery: a short English search phrase (2-5 words) for finding a real illustrative photo of this story.',
-    'If a source has no real news story content, skip it entirely rather than inventing one.',
+    'Include EVERY source below as one item — these are already real, distinct, on-topic articles, not scraped noise, so skip a source only if its given text is truly too vague to summarize at all (this should be rare).',
     'Respond with ONLY the JSON object, nothing else.',
     '', sourceBlock,
   ].join('\n');
 
   const items = await tvCallGeminiStructuring(instruction, true);
   return items.map((it) => {
-    const src = pages[it.sourceIndex];
+    const src = uniqueItems[it.sourceIndex];
     if (!src) return null;
     return {
-      rubric: it.rubric, title: it.title, summary: it.summary, imageQuery: it.imageQuery,
+      rubric: it.rubric, title: it.title || src.title, summary: it.summary, imageQuery: it.imageQuery,
       source: 'computerra', sourcePrecision: 'week',
       sourceUrl: src.url, sourceDate: src.dateStr,
-      extract: src.text.slice(0, 500),
+      extract: src.snippet,
       media: [],
     };
   }).filter(Boolean);
