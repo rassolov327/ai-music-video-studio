@@ -1320,7 +1320,7 @@ function tvRenderMicItemsList(anchorId){
     const voiced = !!item.voiceUrl;
     const pending = item.voiceTaskId != null;
     return `<div class="tv-mic-item" data-item-id="${item.id}">
-      <div class="tv-mic-item-del" data-del-item="${item.id}" title="Удалить текст"><i class="ti ti-x" style="font-size:11px;"></i></div>
+      <div class="tv-mic-item-del" data-del-item="${item.id}" title="Удалить текст"><i class="ti ti-trash" style="font-size:13px;"></i></div>
       <div class="tv-mic-item-title">${item.title}</div>
       <div class="tv-mic-item-text">${item.articleText}</div>
       <div class="tv-mic-item-row">
