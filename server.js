@@ -930,20 +930,21 @@ app.post('/api/tv/write-article', async (req, res) => {
 // something more systematic (wrong field name, auth, KIE-side outage) rather than a
 // model-specific issue — worth telling me the exact error either way.
 //
-// Gemini 3.1 Flash TTS via KIE.ai (kie-gemini-tts below) is deliberately ALSO listed even
-// though it's paid and the exact same model is already free direct from Google above — the
-// point isn't quality, it's a genuinely separate quota/billing path (KIE credits, not the
-// GEMINI_API_KEY free tier), so it still works as a fallback on a day the free tier's rate
-// limit is exhausted. Real docs.kie.ai fetches for this one all 403'd/404'd (tried the
-// product page and several plausible docs paths) — unlike the ElevenLabs entries above,
-// this is a genuine best-effort guess at both the model id and the input shape, patterned
-// after every other model here (KIE's own {model, input:{text, voice}} convention), not
-// independently confirmed. Lower confidence than anything else in this file — say so if it
-// errors, that's expected until a real run corrects it. ----
+// Gemini TTS via KIE.ai (kie-gemini-tts below) is deliberately ALSO listed even though it's
+// paid and the exact same model is already free direct from Google above — the point isn't
+// quality, it's a genuinely separate quota/billing path (KIE credits, not the GEMINI_API_KEY
+// free tier), so it still works as a fallback on a day the free tier's rate limit is
+// exhausted. Real docs.kie.ai fetches for this one all 403'd/404'd — went through two wrong
+// guesses first: `gemini-3.1-flash-tts` (dot) and `gemini-3-1-flash-tts` (dash) both came
+// back "model name ... not supported" from KIE for real. A search then surfaced KIE's own
+// actually-confirmed Gemini TTS lineup: `gemini-2-5-flash-tts` / `gemini-2-5-pro-tts` — no
+// 3.1 tier listed at all, despite kie.ai/gemini-3.1-flash-tts existing as a marketing page.
+// Using gemini-2-5-flash-tts now — still not independently confirmed via real docs, but
+// backed by a real "supported model IDs" mention, one step better than a bare guess. ----
 const TV_VOICE_MODELS = [
   { id: 'gemini-tts', label: 'Gemini 2.5 Flash TTS (бесплатно)', costUsd: 0, blurb: 'Тот же ключ, что и для текста — уже проверена вживую, реально работает' },
   { id: 'gemini-tts-next', label: 'Gemini 3.1 Flash TTS (бесплатно)', costUsd: 0, blurb: 'Тот же ключ, новее — вживую ещё не проверялась', geminiModelKey: 'next' },
-  { id: 'kie-gemini-tts', label: 'Gemini 3.1 Flash TTS (KIE.ai)', costUsd: 0.03, blurb: 'Платно, через ключ KIE — отдельная квота на случай, если бесплатный Gemini лимит исчерпан; схема запроса не подтверждена доками, это догадка', provider: 'kie-gemini' },
+  { id: 'kie-gemini-tts', label: 'Gemini 2.5 Flash TTS (KIE.ai)', costUsd: 0.03, blurb: 'Платно, через ключ KIE — отдельная квота на случай, если бесплатный Gemini лимит исчерпан; 3.1 через KIE, похоже, не существует, взял подтверждённую 2.5', provider: 'kie-gemini' },
   { id: 'kie-elevenlabs-multi', label: 'ElevenLabs Multilingual v2 (KIE.ai)', costUsd: 0.05, blurb: 'Платно, через тот же ключ KIE — живее интонация, 60+ голосов на выбор, цена оценочная', provider: 'kie-elevenlabs' },
 ];
 app.get('/api/tv/voice-models', (req, res) => {
@@ -993,17 +994,13 @@ async function tvCallKieElevenLabsVoice(text, voiceId, speed) {
     'ElevenLabs'
   );
 }
-// Unverified — see the big comment above TV_VOICE_MODELS. First attempt used
-// 'gemini-3.1-flash-tts' (a dot, matching Google's own direct-API naming) and got back "The
-// model name you specified is not supported" from KIE — a real, specific error confirming
-// the id itself was wrong (not an auth/shape problem). KIE's Gemini category consistently
-// strips dots to dashes elsewhere (gemini-3-5-flash is the confirmed-real page/id for the
-// text model above), so this retries with the same convention applied to the TTS model.
-// Still not confirmed via real docs — a search even suggested KIE's actual current Gemini
-// TTS lineup might only go up to 2.5 (gemini-2-5-flash-tts/gemini-2-5-pro-tts), i.e. 3.1
-// TTS specifically may not exist on KIE at all yet despite the marketing page existing.
+// Unverified via real docs — see the big comment above TV_VOICE_MODELS for the two wrong
+// 3.1-tier guesses ('gemini-3.1-flash-tts', 'gemini-3-1-flash-tts') that KIE rejected for
+// real as "model name ... not supported". Using gemini-2-5-flash-tts now — a search
+// surfaced it as one of KIE's own stated "supported model IDs" for this category, so it's
+// backed by something more than pattern-matching, but still not a direct docs fetch.
 async function tvCallKieGeminiVoice(text, voiceId) {
-  return tvCallKieAudioTask('gemini-3-1-flash-tts', { text, voice: voiceId || 'Kore' }, 'Gemini TTS');
+  return tvCallKieAudioTask('gemini-2-5-flash-tts', { text, voice: voiceId || 'Kore' }, 'Gemini TTS');
 }
 function tvPcmToWav(pcmBuffer, sampleRate, numChannels, bitsPerSample) {
   const byteRate = sampleRate * numChannels * bitsPerSample / 8;
