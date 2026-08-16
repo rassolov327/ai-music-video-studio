@@ -4,10 +4,12 @@
 // server-side data store. `tvState` IS the source of truth; js/tv-persistence.js loads it
 // from and saves it to a local disk folder or IndexedDB (see that file's header comment).
 const TV_RUBRICS = [
-  { key:'news',     label:'Новости'  },
-  { key:'games',     label:'Игры'     },
-  { key:'soft',     label:'Софт'     },
-  { key:'internet', label:'Интернет' },
+  { key:'news',     label:'Новости'    },
+  { key:'games',    label:'Игры'       },
+  { key:'soft',     label:'Софт'       },
+  { key:'hardware', label:'Железо'     },
+  { key:'internet', label:'Интернет'   },
+  { key:'mobile',   label:'Мобильные технологии' },
 ];
 
 // One entry per tab — each tab has its own single approval gate ("утверждено / в выпуск"),
@@ -77,14 +79,16 @@ const TV_FORMAT_TEMPLATE = {
   jingleDurationSec: 4,      // graphic-bumper transition between blocks
   outroDurationSec: 32,      // anchor sign-off + close
   // News airs first (grouped, not interleaved — see comment above), then the deep-dive
-  // rubrics, with games always last to match all 3 analyzed episodes.
-  rubricOrder: ['news', 'soft', 'internet', 'games'],
+  // rubrics, with games always last to match all 3 analyzed episodes. hardware/mobile
+  // inserted alongside soft/internet — same "single-topic deep-dive" shape as those,
+  // just not separately analyzed in the 3-episode pass (added later, per Костян).
+  rubricOrder: ['news', 'hardware', 'soft', 'internet', 'mobile', 'games'],
   // Per-story estimate within a rubric block, seconds — used only to show an approximate
   // timeline length before any real VO/cutaway material exists. 'news' matches CLAUDE.md's
   // "full-screen cutaway stills/clips (5-15 sec each, VO continues underneath)" plus a
   // short anchor open/close; the others are the observed deep-dive segment range (60-220s),
   // 'games' skewed up since it's consistently the episode's biggest single block.
-  storyDurationSec: { news: 30, soft: 100, internet: 100, games: 160 },
+  storyDurationSec: { news: 30, soft: 100, hardware: 100, internet: 100, mobile: 100, games: 160 },
 };
 
 const tvState = {

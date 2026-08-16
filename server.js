@@ -638,7 +638,7 @@ async function tvGatherWaybackNews(range) {
     'The following are real, literally-retrieved text snapshots of archived tech-news website pages from one specific historical week.',
     'For EACH numbered source below, extract any IT/technology, video games, software, or internet NEWS STORIES that are LITERALLY PRESENT in that source\'s text — a short Russian title, a factual 1-3 sentence Russian summary based ONLY on the text given, and which sourceIndex it came from.',
     'This is real scraped page content and may include navigation/ad/boilerplate text — ignore that. Do not add any fact, name, or number that is not literally present in the text.',
-    'rubric must be exactly one of: news, games, soft, internet.',
+    'rubric must be exactly one of: news, games, soft, hardware, internet, mobile.',
     'imageQuery: a short English search phrase (2-5 words) for finding a real illustrative photo of this story — normally the product/company/game name mentioned in the text.',
     'If a source has no real news story content, skip it entirely rather than inventing one.',
     'Respond with ONLY the JSON object, nothing else.',
@@ -660,11 +660,16 @@ async function tvGatherWaybackNews(range) {
   }).filter(Boolean);
 }
 
-// Wikipedia category naming conventions that hold reliably across most years.
+// Wikipedia category naming conventions that hold reliably across most years. hardware's
+// pattern is a best-effort guess (less consistently populated per-year than the others) —
+// harmless if it comes back empty for a given year, tvFetchWikiCategoryMembers already
+// degrades to an empty list rather than erroring.
 const TV_WIKI_CATEGORY_PATTERNS = {
   games: (year) => `Category:${year} video games`,
   soft: (year) => `Category:${year} software`,
+  hardware: (year) => `Category:${year} computer hardware`,
   internet: (year) => `Category:Internet properties established in ${year}`,
+  mobile: (year) => `Category:${year} mobile phones`,
   news: (year) => `Category:${year} in computing`,
 };
 const TV_WIKI_UA = { 'User-Agent': 'TAKE-ONE-TV/1.0 (retro tech news research tool; contact via repo)' };
@@ -711,7 +716,7 @@ async function tvGatherWikipediaNews(range) {
   const instruction = [
     'The following are real, literally-retrieved Wikipedia article summaries about IT/technology, video games, software, or internet topics from one specific historical year.',
     'For EACH numbered source below that describes a genuinely news-worthy event or release, produce one structured item: a short Russian title, a factual 1-3 sentence Russian summary based ONLY on the text given, and which sourceIndex it came from.',
-    'rubric must be exactly one of: news, games, soft, internet — use the rubric hint as a starting point but correct it if the actual content clearly belongs elsewhere.',
+    'rubric must be exactly one of: news, games, soft, hardware, internet, mobile — use the rubric hint as a starting point but correct it if the actual content clearly belongs elsewhere.',
     'imageQuery: a short English search phrase (2-5 words) for finding a real illustrative photo of this story — normally the subject\'s own name.',
     'Do not add any fact not present in the given text. Skip sources that are too vague to be real news-worthy items.',
     'Respond with ONLY the JSON object, nothing else.',

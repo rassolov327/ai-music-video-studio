@@ -230,8 +230,9 @@ Two parallel passes, then reconcile:
    truth where they disagree with the model's read, especially anything about craft/feel
    that a transcript can't capture.
 3. **Draft template written and wired**: `TV_FORMAT_TEMPLATE` (`js/tv-state.js`) — fixed
-   intro/host-intro/jingle/outro durations, rubric order (news → soft → internet → games,
-   games always last), per-story duration guidelines. `tvAutoPopulateGrid()` (`js/tv-app.js`,
+   intro/host-intro/jingle/outro durations, rubric order (news → hardware → soft → internet
+   → mobile → games, games always last), per-story duration guidelines.
+   `tvAutoPopulateGrid()` (`js/tv-app.js`,
    "Собрать сетку" button on Сетка) builds `tvState.tvGridBlocks` from it: included news
    items grouped by rubric, with fixed bumper blocks between groups. This is explicitly a
    DRAFT from the AI-only pass (Костян hasn't reconciled his own viewing notes against it
