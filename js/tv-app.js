@@ -1925,7 +1925,7 @@ async function tvGatherNews(){
     // network error...) instead of letting it look identical to "genuinely found nothing" —
     // this is exactly the ambiguity that made "может у нас лимиты на gemini?" unanswerable
     // from the screen alone.
-    const TV_SOURCE_NAMES = { wayback:'Wayback Machine', wikipedia:'Wikipedia', computerra:'Компьютерра' };
+    const TV_SOURCE_NAMES = { wayback:'Wayback Machine', wikipedia:'Wikipedia', computerra:'Компьютерра', gemini:'Обработка (Gemini)', monthFallback:'Расширение до месяца' };
     const errorNotes = data.sourceErrors && typeof data.sourceErrors==='object'
       ? Object.keys(data.sourceErrors).map(k=> (TV_SOURCE_NAMES[k]||k) + ': ' + data.sourceErrors[k])
       : [];

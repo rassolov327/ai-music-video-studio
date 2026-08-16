@@ -645,7 +645,15 @@ const TV_WAYBACK_SITES = [
 // Real article pages only — never spend a fetch on a stylesheet/script/feed/sitemap/icon.
 const TV_WAYBACK_SKIP_PATH_RE = /\.(css|js|xml|rss|json|png|jpe?g|gif|svg|ico|woff2?|ttf|pdf)(\?|$)|\/(feed|rss|sitemap|robots\.txt|favicon\.ico)(\/|$)/i;
 
-async function tvGatherWaybackNews(range) {
+// Returns RAW real records only — no Gemini call here. Every gather source used to make its
+// own separate Gemini structuring call (up to 4 per single "Собрать новости" click: Wayback,
+// Компьютерра, Wikipedia, plus the opt-in month-fallback), and against the free tier's 20
+// requests/minute cap that burned through quota fast, especially across repeated clicks
+// while testing ("Quota exceeded... limit: 20... Please retry in 26s" — the exact error
+// Костян hit). All real per-source fetching now returns a common raw-record shape
+// ({kind, promptLabel, promptText, sourceUrl, sourceDate, sourcePrecision, media, rawTitle})
+// so tvStructureRawRecords() below can combine everything into ONE Gemini call per gather.
+async function tvFetchWaybackRaw(range) {
   const from = range.start.replace(/-/g, '');
   const to = range.end.replace(/-/g, '');
   // Sites run in parallel (each independently try/caught, one bad site can't block the
@@ -654,7 +662,7 @@ async function tvGatherWaybackNews(range) {
   const perSite = await Promise.all(TV_WAYBACK_SITES.map(async (site) => {
     try {
       // matchType=domain + collapse=urlkey: the CDX API's DEFAULT match mode is 'exact' —
-      // querying the bare domain with no matchType (the previous version of this code) only
+      // querying the bare domain with no matchType (an earlier version of this code) only
       // ever matches that literal homepage URL, never any article page under it. Confirmed
       // against the CDX server's own docs (github.com/internetarchive/wayback/blob/master/
       // wayback-cdx-server/README.md) — this was the main reason so few real stories came
@@ -687,40 +695,23 @@ async function tvGatherWaybackNews(range) {
           const html = (await pageRes.text()).slice(0, 200000); // cap before stripping, some archived pages are huge
           const text = tvStripHtml(html).slice(0, 4000);
           if (text.length < 200) continue; // too little real content to be worth sending
-          pages.push({ site, timestamp, original, text });
+          const dateStr = `${timestamp.slice(0, 4)}-${timestamp.slice(4, 6)}-${timestamp.slice(6, 8)}`;
+          pages.push({
+            kind: 'wayback',
+            promptLabel: `real archived page from ${site}, dated ${dateStr}`,
+            promptText: text,
+            sourceUrl: `https://web.archive.org/web/${timestamp}/${original}`,
+            sourceDate: dateStr,
+            sourcePrecision: 'week',
+            media: [],
+            rawTitle: null,
+          });
         } catch (err) { console.warn('[tv] wayback page fetch failed for', site, timestamp, err.message); }
       }
       return pages;
     } catch (err) { console.warn('[tv] wayback CDX request failed for', site, err.message); return []; }
   }));
-  const pages = perSite.flat();
-  if (!pages.length) return [];
-
-  const sourceBlock = pages.map((p, i) => `[SOURCE ${i}: real archived page from ${p.site}, dated ${p.timestamp.slice(0, 4)}-${p.timestamp.slice(4, 6)}-${p.timestamp.slice(6, 8)}]\n${p.text}`).join('\n\n');
-  const instruction = [
-    'The following are real, literally-retrieved text snapshots of archived tech-news website pages from one specific historical week.',
-    'For EACH numbered source below, extract any IT/technology, video games, software, or internet NEWS STORIES that are LITERALLY PRESENT in that source\'s text — a short Russian title, a factual 1-3 sentence Russian summary based ONLY on the text given, and which sourceIndex it came from.',
-    'This is real scraped page content and may include navigation/ad/boilerplate text — ignore that. Do not add any fact, name, or number that is not literally present in the text.',
-    'rubric must be exactly one of: news, games, soft, hardware, internet, mobile.',
-    'imageQuery: a short English search phrase (2-5 words) for finding a real illustrative photo of this story — normally the product/company/game name mentioned in the text.',
-    'If a source has no real news story content, skip it entirely rather than inventing one.',
-    'Respond with ONLY the JSON object, nothing else.',
-    '', sourceBlock,
-  ].join('\n');
-
-  const items = await tvCallGeminiStructuring(instruction, true);
-  return items.map((it) => {
-    const src = pages[it.sourceIndex];
-    if (!src) return null;
-    return {
-      rubric: it.rubric, title: it.title, summary: it.summary, imageQuery: it.imageQuery,
-      source: 'wayback', sourcePrecision: 'week',
-      sourceUrl: `https://web.archive.org/web/${src.timestamp}/${src.original}`,
-      sourceDate: `${src.timestamp.slice(0, 4)}-${src.timestamp.slice(4, 6)}-${src.timestamp.slice(6, 8)}`,
-      extract: src.text.slice(0, 500),
-      media: [],
-    };
-  }).filter(Boolean);
+  return perSite.flat();
 }
 
 // Компьютерра (old.computerra.ru) — the exact period Russian IT magazine CLAUDE.md's
@@ -756,7 +747,7 @@ async function tvFetchWithRetry(url, attempts = 2) {
     }
   }
 }
-async function tvGatherComputerraNews(range) {
+async function tvFetchComputerraRaw(range) {
   const start = new Date(range.start + 'T00:00:00Z');
   const end = new Date(range.end + 'T00:00:00Z');
   const days = [];
@@ -789,34 +780,19 @@ async function tvGatherComputerraNews(range) {
   if (!rawItems.length) return [];
 
   // The same real article occasionally gets listed under more than one day (reprints /
-  // theme-issue cross-links) — de-dupe by its real per-article URL before spending a
-  // Gemini call on it twice.
+  // theme-issue cross-links) — de-dupe by its real per-article URL before it reaches Gemini.
   const seenUrls = new Set();
   const uniqueItems = rawItems.filter((it) => (seenUrls.has(it.url) ? false : (seenUrls.add(it.url), true)));
-
-  const sourceBlock = uniqueItems.map((it, i) => `[SOURCE ${i}: real Компьютерра article dated ${it.dateStr}, real title "${it.title}"]\n${it.snippet}`).join('\n\n');
-  const instruction = [
-    'The following are real, individually-identified articles from Компьютерра (old.computerra.ru), a real Russian IT/technology magazine, each already extracted from a real archived page for one specific historical week — the title and text given for each are REAL, not something you need to search for.',
-    'For EACH numbered source below, produce one structured item: rubric classification, a clean short Russian title (based on the real title given, tightened into news-headline style if needed), and a factual 1-3 sentence Russian summary based ONLY on the given text — never invent a fact, name, or number not present in it.',
-    'rubric must be exactly one of: news, games, soft, hardware, internet, mobile.',
-    'imageQuery: a short English search phrase (2-5 words) for finding a real illustrative photo of this story.',
-    'Include EVERY source below as one item — these are already real, distinct, on-topic articles, not scraped noise, so skip a source only if its given text is truly too vague to summarize at all (this should be rare).',
-    'Respond with ONLY the JSON object, nothing else.',
-    '', sourceBlock,
-  ].join('\n');
-
-  const items = await tvCallGeminiStructuring(instruction, true);
-  return items.map((it) => {
-    const src = uniqueItems[it.sourceIndex];
-    if (!src) return null;
-    return {
-      rubric: it.rubric, title: it.title || src.title, summary: it.summary, imageQuery: it.imageQuery,
-      source: 'computerra', sourcePrecision: 'week',
-      sourceUrl: src.url, sourceDate: src.dateStr,
-      extract: src.snippet,
-      media: [],
-    };
-  }).filter(Boolean);
+  return uniqueItems.map((it) => ({
+    kind: 'computerra',
+    promptLabel: `real Компьютерра article dated ${it.dateStr}, real title "${it.title}"`,
+    promptText: it.snippet,
+    sourceUrl: it.url,
+    sourceDate: it.dateStr,
+    sourcePrecision: 'week',
+    media: [],
+    rawTitle: it.title,
+  }));
 }
 
 // Wikipedia category naming conventions that hold reliably across most years. hardware's
@@ -854,7 +830,7 @@ async function tvFetchWikiSummary(title) {
     thumbnail: data.thumbnail && data.thumbnail.source,
   };
 }
-async function tvGatherWikipediaNews(range) {
+async function tvFetchWikipediaRaw(range) {
   const year = Number(range.start.slice(0, 4));
   const summaries = [];
   for (const rubric of Object.keys(TV_WIKI_CATEGORY_PATTERNS)) {
@@ -872,28 +848,49 @@ async function tvGatherWikipediaNews(range) {
       }
     } catch (err) { console.warn('[tv] wikipedia category fetch failed for', rubric, err.message); }
   }
-  if (!summaries.length) return [];
+  return summaries.map((s) => ({
+    kind: 'wikipedia',
+    promptLabel: `rubric hint "${s.rubricHint}", real Wikipedia article "${s.title}"`,
+    promptText: s.extract,
+    sourceUrl: s.pageUrl,
+    sourceDate: null,
+    sourcePrecision: 'year',
+    media: s.thumbnail ? [{ type: 'image', url: s.thumbnail, title: s.title }] : [],
+    rawTitle: s.title,
+  }));
+}
 
-  const sourceBlock = summaries.map((s, i) => `[SOURCE ${i}: rubric hint "${s.rubricHint}", real Wikipedia article "${s.title}"]\n${s.extract}`).join('\n\n');
+// Combines raw records from however many sources were enabled into ONE Gemini structuring
+// call — this is the fix for hitting the free tier's 20 requests/minute cap: every source
+// used to make its own separate call (up to 3 per gather, plus a 4th for the opt-in
+// month-fallback), which added up fast across repeated clicks. The instruction below covers
+// all three record kinds generically (raw scraped page text may have noise to skip through;
+// Компьютерра/Wikipedia records are already real, individually-identified articles that
+// should almost always produce an item) since a single combined prompt can't special-case
+// per source without ballooning back into per-source calls.
+async function tvStructureRawRecords(rawRecords) {
+  if (!rawRecords.length) return [];
+  const sourceBlock = rawRecords.map((r, i) => `[SOURCE ${i}: ${r.promptLabel}]\n${r.promptText}`).join('\n\n');
   const instruction = [
-    'The following are real, literally-retrieved Wikipedia article summaries about IT/technology, video games, software, or internet topics from one specific historical year.',
-    'For EACH numbered source below that describes a genuinely news-worthy event or release, produce one structured item: a short Russian title, a factual 1-3 sentence Russian summary based ONLY on the text given, and which sourceIndex it came from.',
-    'rubric must be exactly one of: news, games, soft, hardware, internet, mobile — use the rubric hint as a starting point but correct it if the actual content clearly belongs elsewhere.',
-    'imageQuery: a short English search phrase (2-5 words) for finding a real illustrative photo of this story — normally the subject\'s own name.',
-    'Do not add any fact not present in the given text. Skip sources that are too vague to be real news-worthy items.',
+    'The following are real source records about IT/technology, video games, software, or internet topics — some are literally-retrieved text from archived tech-news web pages (may contain navigation/ad/boilerplate noise mixed with real story text), some are real individually-identified Компьютерра magazine articles with their own real titles (already real distinct stories, not noise), some are real Wikipedia article summaries. Every record is REAL — retrieved or extracted directly, never invented.',
+    'For EACH numbered source below, if it contains a genuine IT/technology/games/software/internet news story, produce one structured item: a short Russian title, a factual 1-3 sentence Russian summary based ONLY on the given text, and which sourceIndex it came from. Never invent a fact, name, or number not present in the given text.',
+    'rubric must be exactly one of: news, games, soft, hardware, internet, mobile — use any rubric hint given as a starting point but correct it if the content clearly belongs elsewhere.',
+    'imageQuery: a short English search phrase (2-5 words) for finding a real illustrative photo of this story.',
+    'A source whose label says it is already a real individually-identified article (Компьютерра) should almost always produce an item — skip it only if its given text is truly too vague to summarize. A source that is raw scraped page text may have no real story content at all — skip those rather than inventing one.',
     'Respond with ONLY the JSON object, nothing else.',
     '', sourceBlock,
   ].join('\n');
 
   const items = await tvCallGeminiStructuring(instruction, true);
   return items.map((it) => {
-    const src = summaries[it.sourceIndex];
+    const src = rawRecords[it.sourceIndex];
     if (!src) return null;
     return {
-      rubric: it.rubric, title: it.title, summary: it.summary, imageQuery: it.imageQuery,
-      source: 'wikipedia', sourcePrecision: 'year',
-      sourceUrl: src.pageUrl, sourceDate: null, extract: src.extract,
-      media: src.thumbnail ? [{ type: 'image', url: src.thumbnail, title: src.title }] : [],
+      rubric: it.rubric, title: it.title || src.rawTitle, summary: it.summary, imageQuery: it.imageQuery,
+      source: src.kind, sourcePrecision: src.sourcePrecision,
+      sourceUrl: src.sourceUrl, sourceDate: src.sourceDate,
+      extract: src.promptText.slice(0, 500),
+      media: src.media,
     };
   }).filter(Boolean);
 }
@@ -957,13 +954,27 @@ app.post('/api/tv/gather-news', async (req, res) => {
     // a real problem (Gemini quota/rate-limit, safety block, malformed JSON) looked
     // IDENTICAL on screen to "genuinely nothing was found" — no way to tell them apart.
     // sourceErrors now carries the real message per source through to the client.
+    //
+    // All three sources' raw fetching runs in parallel (each independently try/caught —
+    // one source failing to fetch never blocks the others), but the actual Gemini call is
+    // ONE combined call over everything gathered, not one per source. This is the direct
+    // fix for hitting the free tier's 20 requests/minute quota ("Please retry in 26s") —
+    // up to 3 separate structuring calls per click (4 counting the opt-in month-fallback)
+    // burned through it fast, especially across repeated clicks while testing.
     const sourceErrors = {};
-    const [waybackItems, wikipediaItems, computerraItems] = await Promise.all([
-      sel.wayback ? tvGatherWaybackNews(range).catch((err) => { console.warn('[tv] wayback pass failed entirely:', err.message); sourceErrors.wayback = err.message; return []; }) : [],
-      sel.wikipedia ? tvGatherWikipediaNews(range).catch((err) => { console.warn('[tv] wikipedia pass failed entirely:', err.message); sourceErrors.wikipedia = err.message; return []; }) : [],
-      sel.computerra ? tvGatherComputerraNews(range).catch((err) => { console.warn('[tv] computerra pass failed entirely:', err.message); sourceErrors.computerra = err.message; return []; }) : [],
+    const [waybackRaw, wikipediaRaw, computerraRaw] = await Promise.all([
+      sel.wayback ? tvFetchWaybackRaw(range).catch((err) => { console.warn('[tv] wayback fetch failed entirely:', err.message); sourceErrors.wayback = err.message; return []; }) : [],
+      sel.wikipedia ? tvFetchWikipediaRaw(range).catch((err) => { console.warn('[tv] wikipedia fetch failed entirely:', err.message); sourceErrors.wikipedia = err.message; return []; }) : [],
+      sel.computerra ? tvFetchComputerraRaw(range).catch((err) => { console.warn('[tv] computerra fetch failed entirely:', err.message); sourceErrors.computerra = err.message; return []; }) : [],
     ]);
-    let items = [...waybackItems, ...wikipediaItems, ...computerraItems];
+    let items;
+    try {
+      items = await tvStructureRawRecords([...waybackRaw, ...wikipediaRaw, ...computerraRaw]);
+    } catch (err) {
+      console.warn('[tv] combined structuring call failed:', err.message);
+      sourceErrors.gemini = err.message;
+      items = [];
+    }
 
     // Костян's requirement: every rubric should end up with at least one real item, and if
     // one genuinely can't be found for the exact week, say so honestly rather than silently
@@ -972,13 +983,16 @@ app.post('/api/tv/gather-news', async (req, res) => {
     // tagged sourcePrecision:'month'. Off by default: a month-wide item isn't really "the
     // selected week" any more than Wikipedia's year-precision is, so this stays opt-in the
     // same way. Rubrics that STILL come back empty after that stay in emptyRubrics — no
-    // further fallback, no recall/invention.
+    // further fallback, no recall/invention. This is a second, separate Gemini call, but
+    // only fires when actually needed (empty rubrics AND the checkbox is on) — not on every
+    // gather like the three main sources used to be.
     let emptyRubrics = TV_ALL_RUBRIC_KEYS.filter((r) => !items.some((i) => i.rubric === r));
     let filledFromFallback = [];
     if (emptyRubrics.length && sel.monthFallback) {
       try {
         const monthRange = tvMonthRange(range);
-        const fallbackItems = await tvGatherWaybackNews(monthRange);
+        const monthRaw = await tvFetchWaybackRaw(monthRange);
+        const fallbackItems = await tvStructureRawRecords(monthRaw);
         const stillMissing = new Set(emptyRubrics);
         const picked = fallbackItems.filter((i) => stillMissing.has(i.rubric));
         picked.forEach((i) => { i.sourcePrecision = 'month'; });
@@ -987,6 +1001,7 @@ app.post('/api/tv/gather-news', async (req, res) => {
         emptyRubrics = emptyRubrics.filter((r) => !filledFromFallback.includes(r));
       } catch (err) {
         console.warn('[tv] month-wide fallback pass failed:', err.message);
+        sourceErrors.monthFallback = err.message;
       }
     }
 
