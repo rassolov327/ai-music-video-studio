@@ -153,36 +153,71 @@ tab), not per-item checkboxes scattered everywhere.
 The user wants this to cost nothing beyond what's already paid for (KIE, and Gemini stays
 on its free tier). Do NOT use Gemini's paid Grounding-with-Google-Search tool. Костян's hard
 requirement: **only real, sourced topics — no inventing** — and **strict week-level
-accuracy**, not just "some year." `POST /api/tv/gather-news` (`server.js`) now runs two
-real sources in parallel, merged, with no recall/invention fallback at all (if both come
-back empty for a week, the response is an empty list):
+accuracy**, not just "some year." `POST /api/tv/gather-news` (`server.js`) now runs three
+real sources in parallel, merged, with no recall/invention fallback at all (if all three
+come back empty for a week, the response is an empty list). Deliberately mixed EN + RU —
+not limited to the Russian-language segment.
 
-1. **Wayback Machine (week-precise, primary)** — `tvGatherWaybackNews()`: for a curated
-   list of real period tech sites (`TV_WAYBACK_SITES` — cnet.com, zdnet.com, wired.com,
-   gamespot.com, ign.com, compulenta.ru, ixbt.com), queries the CDX API
-   (`web.archive.org/cdx/search/cdx?url=...&from=...&to=...`) for real snapshots within the
-   *exact* target week, fetches each snapshot's real page content, strips it to plain text
+1. **Wayback Machine (week-precise)** — `tvGatherWaybackNews()`: for a curated list of real
+   period tech sites (`TV_WAYBACK_SITES` — 14 sites: cnet.com, zdnet.com, wired.com,
+   gamespot.com, ign.com, theregister.co.uk, arstechnica.com, slashdot.org, pcworld.com,
+   compulenta.ru, ixbt.com, 3dnews.ru, overclockers.ru, cnews.ru), queries the CDX API with
+   `matchType=domain&collapse=urlkey` for real ARTICLE pages archived anywhere under the
+   domain within the *exact* target week (an earlier version queried the bare domain with no
+   `matchType`, which the CDX API's default `exact` mode resolves to ONLY that literal
+   homepage URL — confirmed against the CDX server's own docs as the main reason so few
+   items came back; fixed), fetches each page's real content, strips it to plain text
    (`tvStripHtml`), then feeds it to Gemini with a strict "extract only what's literally
    present in this text, do not add anything" instruction — this is the "Structuring" step:
    organizing real retrieved text, never searching/recalling. Every item's `sourceUrl` is a
-   real, clickable archive.org snapshot link; `sourceDate` is the real archived date.
-2. **Wikipedia (year-precise, supplementary)** — `tvGatherWikipediaNews()`: known-stable
-   per-rubric category name patterns (`Category:{year} video games` etc.) → real category
-   member titles → real page summaries (REST `/api/rest_v1/page/summary/{title}`, includes
-   a real extract + thumbnail image) → same Gemini structuring treatment. Fills gaps Wayback
-   can't cover, but only ever at year precision (Wikipedia's category system has no week
-   granularity) — every such item is tagged `sourcePrecision:'year'` so the UI can show the
-   user which is which.
-3. **Images/photos for cutaways** — Wikipedia page summaries already include a thumbnail
-   where available (used directly). Wikimedia Commons API / archive.org magazine scans /
-   YouTube Data API remain a future upgrade for richer material, not wired in yet.
+   real, clickable archive.org snapshot link; `sourceDate` is the real archived date. The
+   14-site list is research-based, not individually confirmed against live captures (see
+   caveat below).
+2. **Компьютерра (week-precise, `old.computerra.ru`)** — `tvGatherComputerraNews()`: the
+   exact period Russian IT outlet this file's own Journalist section names as the style
+   reference. No CDX/snapshot-timing luck involved at all — the outlet keeps a real,
+   permanently live per-day archive index at a confirmed URL pattern,
+   `old.computerra.ru/archive/{year}/{month}/{day}/` (month/day NOT zero-padded). Every day
+   of the target week gets its own direct fetch (guaranteed to exist, unlike a Wayback
+   snapshot), same Gemini structuring treatment as Wayback. Confirmed live end-to-end
+   (unlike Wayback, `old.computerra.ru` IS reachable from this environment) — a real fetch
+   of 16.08.2001 returned the real article "Разнософт №11" dated exactly that day.
+3. **Wikipedia (year-precise, supplementary)** — `tvGatherWikipediaNews()`: known-stable
+   per-rubric category name patterns (`Category:{year} video games` etc.) → up to 25 real
+   category member titles, top 12 used → real page summaries (REST
+   `/api/rest_v1/page/summary/{title}`, includes a real extract + thumbnail image) → same
+   Gemini structuring treatment. Fills gaps the other two can't cover, but only ever at year
+   precision (Wikipedia's category system has no week granularity) — every such item is
+   tagged `sourcePrecision:'year'` so the UI can show the user which is which. Confirmed
+   live (this API IS reachable from this environment).
+4. **Rubric-coverage fallback + honesty** — if a rubric still has zero items after all three
+   week-precise passes, `tvMonthRange()` widens to a ~30-day window and re-runs the Wayback
+   pass only, tagging results `sourcePrecision:'month'`. Rubrics still empty after that stay
+   in `emptyRubrics`; rubrics that needed the wider window land in `filledFromFallback` —
+   both are reported honestly in the Новости UI hint text (`tvGatherNews()`, `js/tv-app.js`),
+   never silently left unexplained.
+5. **Manual add** — a "+" above the "В выпуске" pane (`tvOpenManualNewsForm()`,
+   `js/tv-app.js`) lets Костян add a story directly (title/rubric/content/his own photos),
+   tagged `source:'manual'`, landing `included:true` immediately. A separate "Очистить"
+   above "Предложено" (`tvClearProposedNews()`) archives everything still-proposed-but-not-
+   included so a fresh "Собрать новости" run doesn't treat them as duplicates and can
+   re-propose the same real stories (the dedup check in `tvGatherNews()` only looks at
+   `!n.archived` items) — "В выпуске" is left untouched by this button on purpose.
+6. **Images/photos for cutaways** — Wikipedia page summaries already include a thumbnail
+   where available (used directly), everything else gets a real Wikimedia Commons search
+   (`tvSearchCommonsImage()`). archive.org magazine scans / YouTube Data API remain a future
+   upgrade for richer material, not wired in yet — see the archive.org full-text search API
+   (`archive.org/services/search/v1/scrape`) as a promising researched-but-not-built lead for
+   digitized period magazines.
 
-**Caveat, unverified end-to-end**: `web.archive.org` was not reachable from the tooling
-used to build this (blocked in that sandbox) — the CDX query shape and page-fetch approach
-are correct per Wayback's public docs, but this genuinely needs a real run on Костян's
-machine/deployment to confirm the Wayback pass actually returns results. If it comes back
-consistently empty, the Wikipedia pass alone still keeps the feature usable (just at
-year-level precision) while that gets debugged.
+**Caveat, partially unverified end-to-end**: `web.archive.org` is not reachable from the
+tooling used to build this (confirmed twice — hangs, then a 504 from an intermediate proxy)
+— the CDX query shape and page-fetch approach are correct per Wayback's own public docs, but
+the Wayback pass genuinely needs a real run on Костян's machine/deployment to confirm it
+returns results, and the 14-site list needs a real run to see which sites actually yield
+material. Wikipedia and Компьютерра, by contrast, ARE confirmed live end-to-end from this
+environment — if Wayback comes back consistently empty, those two alone still keep the
+feature usable.
 
 **Calendar**: Новости tab shows a small month-grid calendar (`renderTvNewsCalendar()`,
 `#tvNewsCalendar`) with the target week's 7 days highlighted, computed client-side

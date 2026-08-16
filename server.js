@@ -717,6 +717,62 @@ async function tvGatherWaybackNews(range) {
   }).filter(Boolean);
 }
 
+// Компьютерра (old.computerra.ru) — the exact period Russian IT magazine CLAUDE.md's
+// Journalist section already names as the style reference. Unlike the Wayback pass above,
+// this needs no CDX lookup / snapshot-timing luck at all: the outlet keeps a real,
+// permanently live per-day archive index at a confirmed URL pattern —
+// old.computerra.ru/archive/{year}/{month}/{day}/, month/day NOT zero-padded — Костян
+// verified this live against 16.08.2001, which showed a real dated article
+// ("Разнософт №11"). Every day of the target week gets its own direct fetch, so coverage
+// is guaranteed rather than dependent on whether Wayback happened to snapshot that day.
+async function tvGatherComputerraNews(range) {
+  const start = new Date(range.start + 'T00:00:00Z');
+  const end = new Date(range.end + 'T00:00:00Z');
+  const days = [];
+  for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) days.push(new Date(d));
+
+  const fetched = await Promise.all(days.map(async (d) => {
+    const year = d.getUTCFullYear(), month = d.getUTCMonth() + 1, day = d.getUTCDate();
+    const url = `https://old.computerra.ru/archive/${year}/${month}/${day}/`;
+    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    try {
+      const pageRes = await fetch(url);
+      if (!pageRes.ok) return null; // some days genuinely have no archive page — not an error
+      const html = (await pageRes.text()).slice(0, 200000);
+      const text = tvStripHtml(html).slice(0, 4000);
+      if (text.length < 200) return null;
+      return { url, dateStr, text };
+    } catch (err) { console.warn('[tv] computerra fetch failed for', url, err.message); return null; }
+  }));
+  const pages = fetched.filter(Boolean);
+  if (!pages.length) return [];
+
+  const sourceBlock = pages.map((p, i) => `[SOURCE ${i}: real page from old.computerra.ru, dated ${p.dateStr}]\n${p.text}`).join('\n\n');
+  const instruction = [
+    'The following are real, literally-retrieved text snapshots of daily archive pages from Компьютерра (old.computerra.ru), a real Russian IT/technology magazine, for specific days of one historical week.',
+    'For EACH numbered source below, extract any IT/technology, video games, software, or internet NEWS STORIES that are LITERALLY PRESENT in that source\'s text — a short Russian title, a factual 1-3 sentence Russian summary based ONLY on the text given, and which sourceIndex it came from.',
+    'This is real scraped page content and may include navigation/menu/boilerplate text — ignore that. Do not add any fact, name, or number that is not literally present in the text.',
+    'rubric must be exactly one of: news, games, soft, hardware, internet, mobile.',
+    'imageQuery: a short English search phrase (2-5 words) for finding a real illustrative photo of this story.',
+    'If a source has no real news story content, skip it entirely rather than inventing one.',
+    'Respond with ONLY the JSON object, nothing else.',
+    '', sourceBlock,
+  ].join('\n');
+
+  const items = await tvCallGeminiStructuring(instruction, true);
+  return items.map((it) => {
+    const src = pages[it.sourceIndex];
+    if (!src) return null;
+    return {
+      rubric: it.rubric, title: it.title, summary: it.summary, imageQuery: it.imageQuery,
+      source: 'computerra', sourcePrecision: 'week',
+      sourceUrl: src.url, sourceDate: src.dateStr,
+      extract: src.text.slice(0, 500),
+      media: [],
+    };
+  }).filter(Boolean);
+}
+
 // Wikipedia category naming conventions that hold reliably across most years. hardware's
 // pattern is a best-effort guess (less consistently populated per-year than the others) —
 // harmless if it comes back empty for a given year, tvFetchWikiCategoryMembers already
@@ -844,11 +900,12 @@ app.post('/api/tv/gather-news', async (req, res) => {
     const { weekStart, weekEnd } = req.body || {};
     const range = (weekStart && weekEnd) ? { start: weekStart, end: weekEnd } : tvHistoricalWeekRange();
 
-    const [waybackItems, wikipediaItems] = await Promise.all([
+    const [waybackItems, wikipediaItems, computerraItems] = await Promise.all([
       tvGatherWaybackNews(range).catch((err) => { console.warn('[tv] wayback pass failed entirely:', err.message); return []; }),
       tvGatherWikipediaNews(range).catch((err) => { console.warn('[tv] wikipedia pass failed entirely:', err.message); return []; }),
+      tvGatherComputerraNews(range).catch((err) => { console.warn('[tv] computerra pass failed entirely:', err.message); return []; }),
     ]);
-    let items = [...waybackItems, ...wikipediaItems];
+    let items = [...waybackItems, ...wikipediaItems, ...computerraItems];
 
     // Костян's requirement: every rubric should end up with at least one real item, and if
     // one genuinely can't be found for the exact week, say so honestly rather than silently
