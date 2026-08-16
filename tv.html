@@ -296,7 +296,10 @@
     <div class="tv-news-rubric-filters" id="tvNewsRubricFilters"></div>
     <div class="tv-news-panes">
       <div class="tv-news-pane">
-        <div class="tv-news-pane-head">Предложено</div>
+        <div class="tv-news-pane-head" style="display:flex;align-items:center;justify-content:space-between;">
+          <span>Предложено</span>
+          <button class="tv-news-return-btn" id="tvClearProposedNewsBtn" title="Убрать всё «Предложено» в архив (не трогая «В выпуске»), чтобы «Собрать новости» могло найти новости заново">Очистить</button>
+        </div>
         <div id="tvNewsLeftPane"></div>
         <div class="tv-news-bulk-actions" id="tvNewsBulkActions" style="display:none;">
           <span id="tvNewsBulkCount"></span>
@@ -308,7 +311,6 @@
         <div class="tv-news-pane-head" style="display:flex;align-items:center;justify-content:space-between;">
           <span>В выпуске</span>
           <div style="display:flex;align-items:center;gap:6px;">
-            <button class="tv-news-return-btn" id="tvClearIncludedNewsBtn" title="Убрать всё «В выпуске» в архив, чтобы «Собрать новости» могло найти те же новости заново">Очистить</button>
             <button class="tv-news-add-btn" id="tvAddManualNewsBtn" title="Добавить новость вручную">+</button>
           </div>
         </div>
