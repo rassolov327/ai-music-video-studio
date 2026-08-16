@@ -10,8 +10,15 @@
 <style>
   /* /TV-specific layout — reuses styles.css only for CSS vars/fonts, not for markup
      structure (that assumes the main app's #app shell), so this page defines its own. */
-  html, body{ overflow:auto; }
-  body.tv-body{ background:var(--bg-app); color:var(--text-1); font-family:var(--font-ui); min-height:100vh; }
+  /* styles.css (shared with TAKE:ONE's fixed-viewport SPA) sets html/body to
+     height:100%+overflow:hidden — /TV's pages need to actually scroll, but giving BOTH
+     html and body their own overflow:auto produces two independent scrollbars (each one
+     tall enough to overflow the other). Only html scrolls; body flows naturally under it. */
+  html{ overflow-y:auto; overflow-x:hidden; }
+  body.tv-body{
+    background:var(--bg-app); color:var(--text-1); font-family:var(--font-ui);
+    height:auto; min-height:100vh; overflow:visible;
+  }
   .tv-topbar{
     display:flex; align-items:center; gap:16px; padding:0 16px; height:48px;
     background:var(--bg-panel); border-bottom:1px solid var(--line);
