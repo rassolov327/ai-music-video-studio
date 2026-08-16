@@ -90,8 +90,49 @@ function tvUpdateFolderButton(){
     btn.title = 'Хранить /TV как настоящие файлы на диске';
   }
 }
+// ---- migrate already-uploaded/generated assets into a newly connected folder ----
+// Anything persisted before a folder was connected only ever reached IndexedDB's blob
+// store — tvPersistBlobAsset still records a fileName for it (so tvSerialize/tvLoadBlobAsset
+// behave the same either way), but no actual file exists on disk yet. Connecting a folder
+// later must not silently strand that older material in browser storage — this copies every
+// asset-backed field's real bytes into the folder's assets/ subfolder for real.
+async function tvCopyAssetToDisk(assetKey, fileName){
+  if(!fileName) return false;
+  try{
+    const blob = await tvIdbGet(TV_STORE_ASSETS, assetKey);
+    if(!blob) return false; // nothing in IndexedDB — already disk-only, or never existed
+    const assetsDir = await tvGetAssetsDirHandle(true);
+    const fileHandle = await assetsDir.getFileHandle(fileName, { create:true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(blob);
+    await writable.close();
+    return true;
+  } catch(err){
+    console.warn('[tv-persistence] could not migrate asset to disk', assetKey, err);
+    return false;
+  }
+}
+async function tvMigrateAssetsToDisk(){
+  if(!tvDiskDirHandle) return;
+  for(const anchor of tvState.tvAnchors){
+    if(!anchor._assetFiles) continue;
+    if(anchor._assetFiles.photo) await tvCopyAssetToDisk('anchor:' + anchor.id + ':photo', anchor._assetFiles.photoFile);
+    if(anchor._assetFiles.sheet) await tvCopyAssetToDisk('anchor:' + anchor.id + ':sheet', anchor._assetFiles.sheetFile);
+  }
+  for(const studio of tvState.tvStudios){
+    if(!studio._assetFiles) continue;
+    for(const key of TV_STUDIO_ANGLE_KEYS){
+      if(studio._assetFiles['angle_' + key]){
+        await tvCopyAssetToDisk('studio:' + studio.id + ':angle:' + key, studio._assetFiles['angle_' + key + 'File']);
+      }
+    }
+  }
+}
+
 // Always just WRITES current state into the freshly chosen folder — never loads from it —
-// so re-picking a folder mid-session can never silently clobber live work.
+// so re-picking a folder mid-session can never silently clobber live work. Existing assets
+// get migrated in (see tvMigrateAssetsToDisk above) before the project JSON is written, so
+// the file names it references already exist for real by the time the write happens.
 async function tvChooseDiskFolder(){
   if(!TV_SUPPORTS_DISK_FOLDER) return false;
   let handle;
@@ -103,6 +144,7 @@ async function tvChooseDiskFolder(){
   tvDiskDirHandle = handle;
   tvPendingReconnectHandle = null;
   await tvIdbSet(TV_STORE_HANDLE, 'tv', handle);
+  await tvMigrateAssetsToDisk();
   await tvSaveNow();
   tvUpdateFolderButton();
   return true;
