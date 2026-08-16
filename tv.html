@@ -307,7 +307,10 @@
       <div class="tv-news-pane">
         <div class="tv-news-pane-head" style="display:flex;align-items:center;justify-content:space-between;">
           <span>В выпуске</span>
-          <button class="tv-news-add-btn" id="tvAddManualNewsBtn" title="Добавить новость вручную">+</button>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <button class="tv-news-return-btn" id="tvClearIncludedNewsBtn" title="Убрать всё «В выпуске» в архив, чтобы «Собрать новости» могло найти те же новости заново">Очистить</button>
+            <button class="tv-news-add-btn" id="tvAddManualNewsBtn" title="Добавить новость вручную">+</button>
+          </div>
         </div>
         <div id="tvNewsRightPane"></div>
       </div>

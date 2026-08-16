@@ -885,6 +885,19 @@ function tvPruneOldArchive(){
   tvState.tvNewsItems = tvState.tvNewsItems.filter(n=> !(n.archived && n.archivedAt && n.archivedAt < cutoff));
   if(tvState.tvNewsItems.length !== before) tvSaveSoon();
 }
+// Archives everything currently "В выпуске" so a fresh "Собрать новости" run doesn't treat
+// them as duplicates (tvGatherNews()'s dedup check only looks at !n.archived items — see
+// there) and can re-propose the same real story into "Предложено" again. Archiving rather
+// than deleting keeps the existing 30-day "Вернуть" undo window (tvPruneOldArchive) instead
+// of losing any assignment/article/voice work already done on these items for good.
+function tvClearIncludedNews(){
+  const included = tvState.tvNewsItems.filter(n=> n.included && !n.archived);
+  if(!included.length) return;
+  included.forEach(n=>{ n.archived = true; n.archivedAt = Date.now(); });
+  renderTvNewsPickers();
+  renderTvNewsSubTabs();
+  tvSaveSoon();
+}
 function tvSwitchNewsSubTab(tab){
   tvNewsSubTab = tab;
   tvSelectedNewsIds.clear();
@@ -1971,6 +1984,8 @@ function wireTvPageTabs(){
   if(gatherNewsBtn) gatherNewsBtn.onclick = tvGatherNews;
   const addManualNewsBtn = document.getElementById('tvAddManualNewsBtn');
   if(addManualNewsBtn) addManualNewsBtn.onclick = ()=> tvOpenManualNewsForm();
+  const clearIncludedNewsBtn = document.getElementById('tvClearIncludedNewsBtn');
+  if(clearIncludedNewsBtn) clearIncludedNewsBtn.onclick = tvClearIncludedNews;
   const autoPopulateGridBtn = document.getElementById('tvAutoPopulateGridBtn');
   if(autoPopulateGridBtn) autoPopulateGridBtn.onclick = tvAutoPopulateGrid;
   const sendToWritingBtn = document.getElementById('tvSendToWritingBtn');
