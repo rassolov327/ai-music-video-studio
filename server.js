@@ -952,10 +952,16 @@ app.post('/api/tv/gather-news', async (req, res) => {
       ? sources
       : { wayback: true, computerra: true, wikipedia: true, monthFallback: true };
 
+    // Every source pass used to swallow its own failure into a bare console.warn (server-
+    // side only — Костян has no way to see server logs) and just return an empty array, so
+    // a real problem (Gemini quota/rate-limit, safety block, malformed JSON) looked
+    // IDENTICAL on screen to "genuinely nothing was found" — no way to tell them apart.
+    // sourceErrors now carries the real message per source through to the client.
+    const sourceErrors = {};
     const [waybackItems, wikipediaItems, computerraItems] = await Promise.all([
-      sel.wayback ? tvGatherWaybackNews(range).catch((err) => { console.warn('[tv] wayback pass failed entirely:', err.message); return []; }) : [],
-      sel.wikipedia ? tvGatherWikipediaNews(range).catch((err) => { console.warn('[tv] wikipedia pass failed entirely:', err.message); return []; }) : [],
-      sel.computerra ? tvGatherComputerraNews(range).catch((err) => { console.warn('[tv] computerra pass failed entirely:', err.message); return []; }) : [],
+      sel.wayback ? tvGatherWaybackNews(range).catch((err) => { console.warn('[tv] wayback pass failed entirely:', err.message); sourceErrors.wayback = err.message; return []; }) : [],
+      sel.wikipedia ? tvGatherWikipediaNews(range).catch((err) => { console.warn('[tv] wikipedia pass failed entirely:', err.message); sourceErrors.wikipedia = err.message; return []; }) : [],
+      sel.computerra ? tvGatherComputerraNews(range).catch((err) => { console.warn('[tv] computerra pass failed entirely:', err.message); sourceErrors.computerra = err.message; return []; }) : [],
     ]);
     let items = [...waybackItems, ...wikipediaItems, ...computerraItems];
 
@@ -991,7 +997,7 @@ app.post('/api/tv/gather-news', async (req, res) => {
       delete item.imageQuery; // internal-only, not needed by the client
     }));
 
-    res.json({ items, weekStart: range.start, weekEnd: range.end, emptyRubrics, filledFromFallback });
+    res.json({ items, weekStart: range.start, weekEnd: range.end, emptyRubrics, filledFromFallback, sourceErrors });
   } catch (err) {
     console.error('[server] /api/tv/gather-news failed:', err);
     res.status(500).json({ error: 'server_error', message: String(err && err.message || err) });

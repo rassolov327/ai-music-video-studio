@@ -1921,11 +1921,22 @@ async function tvGatherNews(){
       const label = tvState.tvNewsSourceSelection.monthFallback ? 'совсем ничего не нашлось (даже за месяц)' : 'ничего не нашлось за эту неделю';
       coverageNotes.push(label + ': ' + data.emptyRubrics.map(tvRubricLabel).join(', '));
     }
+    // Surface each source's REAL failure reason (Gemini quota/rate-limit, safety block,
+    // network error...) instead of letting it look identical to "genuinely found nothing" —
+    // this is exactly the ambiguity that made "может у нас лимиты на gemini?" unanswerable
+    // from the screen alone.
+    const TV_SOURCE_NAMES = { wayback:'Wayback Machine', wikipedia:'Wikipedia', computerra:'Компьютерра' };
+    const errorNotes = data.sourceErrors && typeof data.sourceErrors==='object'
+      ? Object.keys(data.sourceErrors).map(k=> (TV_SOURCE_NAMES[k]||k) + ': ' + data.sourceErrors[k])
+      : [];
     const baseText = data.items.length
       ? 'Добавлено: ' + addedCount + (skippedCount ? ', уже было: ' + skippedCount : '') + ' (реальные источники — проверьте ссылки)'
       : 'За эту неделю ничего не нашлось в реальных источниках. Попробуйте ещё раз позже, или добавьте новость вручную.';
-    hint.textContent = coverageNotes.length ? baseText + '. ' + coverageNotes.join('; ') + '.' : baseText;
-    if(coverageNotes.length) hint.style.color = 'var(--warn)';
+    let fullText = coverageNotes.length ? baseText + '. ' + coverageNotes.join('; ') + '.' : baseText;
+    if(errorNotes.length) fullText += ' Ошибки источников — ' + errorNotes.join('; ') + '.';
+    hint.textContent = fullText;
+    if(errorNotes.length) hint.style.color = 'var(--danger)';
+    else if(coverageNotes.length) hint.style.color = 'var(--warn)';
   } catch(err){
     if(hint){ hint.textContent = err.message; hint.style.color = 'var(--danger)'; }
   } finally {
