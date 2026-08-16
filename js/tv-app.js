@@ -1803,7 +1803,14 @@ async function tvGatherNews(){
       body: JSON.stringify({ weekStart: week.start, weekEnd: week.end }),
     });
     const data = await res.json().catch(()=> null);
-    if(!res.ok || !data || !Array.isArray(data.items)) throw new Error((data && data.message) || 'Не удалось собрать новости.');
+    // Always carry the real HTTP status in the message shown on screen — a bare "не
+    // удалось" with no code is undiagnosable; if the server didn't even return JSON
+    // (e.g. an uncaught error slipping past its route's try/catch), say so explicitly
+    // instead of a generic fallback.
+    if(!res.ok || !data || !Array.isArray(data.items)){
+      const detail = data && data.message ? data.message : (res.ok ? 'сервер вернул неожиданный ответ' : 'сервер не вернул текст ошибки');
+      throw new Error('Не удалось собрать новости (HTTP ' + res.status + '): ' + detail);
+    }
 
     // Dedup against whatever's still active (not archived) — re-running the gather for
     // the same week shouldn't duplicate what's already there.

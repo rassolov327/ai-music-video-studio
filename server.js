@@ -798,46 +798,57 @@ app.post('/api/tv/gather-news', async (req, res) => {
   if (!GEMINI_API_KEY) {
     return res.status(503).json({ error: 'not_configured', message: 'GEMINI_API_KEY is not set on the server yet.' });
   }
-  const { weekStart, weekEnd } = req.body || {};
-  const range = (weekStart && weekEnd) ? { start: weekStart, end: weekEnd } : tvHistoricalWeekRange();
+  // Every other route in this file wraps its body in try/catch so a failure always comes
+  // back as {error,message} JSON the client can actually show — this route was missing
+  // that (the only one), so any uncaught throw here (Wayback/Wikipedia network errors that
+  // slip past their own .catch, a Gemini structuring-call exception, etc.) fell through to
+  // Express's default HTML error page. The client's res.json() then failed to parse it,
+  // producing the content-free "Не удалось собрать новости." fallback with no code at all.
+  try {
+    const { weekStart, weekEnd } = req.body || {};
+    const range = (weekStart && weekEnd) ? { start: weekStart, end: weekEnd } : tvHistoricalWeekRange();
 
-  const [waybackItems, wikipediaItems] = await Promise.all([
-    tvGatherWaybackNews(range).catch((err) => { console.warn('[tv] wayback pass failed entirely:', err.message); return []; }),
-    tvGatherWikipediaNews(range).catch((err) => { console.warn('[tv] wikipedia pass failed entirely:', err.message); return []; }),
-  ]);
-  let items = [...waybackItems, ...wikipediaItems];
+    const [waybackItems, wikipediaItems] = await Promise.all([
+      tvGatherWaybackNews(range).catch((err) => { console.warn('[tv] wayback pass failed entirely:', err.message); return []; }),
+      tvGatherWikipediaNews(range).catch((err) => { console.warn('[tv] wikipedia pass failed entirely:', err.message); return []; }),
+    ]);
+    let items = [...waybackItems, ...wikipediaItems];
 
-  // Костян's requirement: every rubric should end up with at least one real item, and if
-  // one genuinely can't be found for the exact week, say so honestly rather than silently
-  // leaving it empty — then widen to a ~30-day window (still real, sourced items, never
-  // invented) as a fallback, clearly tagged sourcePrecision:'month' so the UI can show the
-  // difference. Rubrics that STILL come back empty after that stay in emptyRubrics — no
-  // further fallback, no recall/invention.
-  let emptyRubrics = TV_ALL_RUBRIC_KEYS.filter((r) => !items.some((i) => i.rubric === r));
-  let filledFromFallback = [];
-  if (emptyRubrics.length) {
-    try {
-      const monthRange = tvMonthRange(range);
-      const fallbackItems = await tvGatherWaybackNews(monthRange);
-      const stillMissing = new Set(emptyRubrics);
-      const picked = fallbackItems.filter((i) => stillMissing.has(i.rubric));
-      picked.forEach((i) => { i.sourcePrecision = 'month'; });
-      items = items.concat(picked);
-      filledFromFallback = [...new Set(picked.map((i) => i.rubric))];
-      emptyRubrics = emptyRubrics.filter((r) => !filledFromFallback.includes(r));
-    } catch (err) {
-      console.warn('[tv] month-wide fallback pass failed:', err.message);
+    // Костян's requirement: every rubric should end up with at least one real item, and if
+    // one genuinely can't be found for the exact week, say so honestly rather than silently
+    // leaving it empty — then widen to a ~30-day window (still real, sourced items, never
+    // invented) as a fallback, clearly tagged sourcePrecision:'month' so the UI can show the
+    // difference. Rubrics that STILL come back empty after that stay in emptyRubrics — no
+    // further fallback, no recall/invention.
+    let emptyRubrics = TV_ALL_RUBRIC_KEYS.filter((r) => !items.some((i) => i.rubric === r));
+    let filledFromFallback = [];
+    if (emptyRubrics.length) {
+      try {
+        const monthRange = tvMonthRange(range);
+        const fallbackItems = await tvGatherWaybackNews(monthRange);
+        const stillMissing = new Set(emptyRubrics);
+        const picked = fallbackItems.filter((i) => stillMissing.has(i.rubric));
+        picked.forEach((i) => { i.sourcePrecision = 'month'; });
+        items = items.concat(picked);
+        filledFromFallback = [...new Set(picked.map((i) => i.rubric))];
+        emptyRubrics = emptyRubrics.filter((r) => !filledFromFallback.includes(r));
+      } catch (err) {
+        console.warn('[tv] month-wide fallback pass failed:', err.message);
+      }
     }
+
+    await Promise.all(items.map(async (item) => {
+      if (item.media && item.media.length) return; // already has a real thumbnail (Wikipedia)
+      const img = await tvSearchCommonsImage(item.imageQuery || item.title);
+      if (img) item.media = [img];
+      delete item.imageQuery; // internal-only, not needed by the client
+    }));
+
+    res.json({ items, weekStart: range.start, weekEnd: range.end, emptyRubrics, filledFromFallback });
+  } catch (err) {
+    console.error('[server] /api/tv/gather-news failed:', err);
+    res.status(500).json({ error: 'server_error', message: String(err && err.message || err) });
   }
-
-  await Promise.all(items.map(async (item) => {
-    if (item.media && item.media.length) return; // already has a real thumbnail (Wikipedia)
-    const img = await tvSearchCommonsImage(item.imageQuery || item.title);
-    if (img) item.media = [img];
-    delete item.imageQuery; // internal-only, not needed by the client
-  }));
-
-  res.json({ items, weekStart: range.start, weekEnd: range.end, emptyRubrics, filledFromFallback });
 });
 
 // ---- text-writing (Journalist) — turns a sourced news item into the anchor's on-air read,
