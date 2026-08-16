@@ -260,7 +260,23 @@ function tvOpenAnchorForm(existing){
         ${TV_RUBRICS.map(r=> `<option value="${r.key}"${existing && existing.rubric===r.key ? ' selected' : ''}>${r.label}</option>`).join('')}
       </select></div>
       <div class="cf-field"><label>Описание / характер</label><textarea id="tvAnchorDesc" placeholder="Внешность, манера, что важно помнить">${existing && existing.description ? existing.description : ''}</textarea></div>
-      <div class="cf-field"><label>Голос (TTS id) <span style="color:var(--text-3);font-weight:400;">— пригодится во вкладке Студия</span></label><input type="text" id="tvAnchorVoice" placeholder="пока свободный текст" value="${existing && existing.voiceId ? existing.voiceId : ''}"></div>
+      <div class="cf-field"><label>Голос — TTS <span style="color:var(--text-3);font-weight:400;">— используется при озвучке в Микрофонной</span></label>
+        <select id="tvAnchorVoice">
+          ${TV_GEMINI_VOICES.map(v=> `<option value="${v.id}"${existing && existing.voiceId===v.id ? ' selected' : ''}>${v.id} — ${v.label}</option>`).join('')}
+        </select>
+      </div>
+      <div class="cf-field"><label>Скорость чтения</label>
+        <select id="tvAnchorVoiceSpeed">
+          <option value="slow"${existing && existing.voiceSpeed==='slow' ? ' selected' : ''}>Медленно</option>
+          <option value="normal"${!existing || !existing.voiceSpeed || existing.voiceSpeed==='normal' ? ' selected' : ''}>Нормально</option>
+          <option value="fast"${existing && existing.voiceSpeed==='fast' ? ' selected' : ''}>Быстро</option>
+        </select>
+      </div>
+      <div class="cf-field">
+        <button class="cf-btn" type="button" id="tvAnchorVoicePreviewBtn" style="width:100%;">▶ Прослушать тестовый кусочек</button>
+        <div class="gen-hint" id="tvAnchorVoicePreviewHint" style="margin-top:6px;"></div>
+        <audio id="tvAnchorVoicePreviewAudio" controls style="width:100%;margin-top:6px;display:none;"></audio>
+      </div>
       <div class="cf-field">
         <label>Фото</label>
         <label class="photo-drop${existing && existing.photo ? ' has-photo' : ''}" id="tvAnchorPhotoDrop">
@@ -298,6 +314,40 @@ function tvOpenAnchorForm(existing){
   const saveBtn = document.getElementById('tvAnchorSave');
   nameInput.addEventListener('input', ()=>{ saveBtn.disabled = nameInput.value.trim().length===0; });
 
+  // Preview uses whatever's currently picked in the selects, even before Save — so trying
+  // a few voices/speeds doesn't require saving the anchor each time just to hear them.
+  document.getElementById('tvAnchorVoicePreviewBtn').onclick = async ()=>{
+    const previewBtn = document.getElementById('tvAnchorVoicePreviewBtn');
+    const hint = document.getElementById('tvAnchorVoicePreviewHint');
+    const audioEl = document.getElementById('tvAnchorVoicePreviewAudio');
+    previewBtn.disabled = true; previewBtn.textContent = 'Генерация…';
+    hint.textContent = ''; hint.style.color = '';
+    try{
+      const res = await fetch('/api/tv/generate-voice', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: 'Добрый вечер. В эфире технические новости.',
+          voiceName: document.getElementById('tvAnchorVoice').value,
+          voiceSpeed: document.getElementById('tvAnchorVoiceSpeed').value,
+          model: 'gemini-tts',
+        }),
+      });
+      if(!res.ok){
+        const data = await res.json().catch(()=> null);
+        throw new Error((data && data.message) || 'Не удалось сгенерировать пример.');
+      }
+      const blob = await res.blob();
+      audioEl.src = URL.createObjectURL(blob);
+      audioEl.style.display = '';
+      audioEl.play();
+    } catch(err){
+      hint.textContent = err.message;
+      hint.style.color = 'var(--danger)';
+    } finally {
+      previewBtn.disabled = false; previewBtn.textContent = '▶ Прослушать тестовый кусочек';
+    }
+  };
+
   document.getElementById('tvAnchorCancel').onclick = ()=> existing ? tvOpenAnchorDetail(existing) : tvCloseModal();
   saveBtn.onclick = async ()=>{
     const name = nameInput.value.trim();
@@ -311,7 +361,8 @@ function tvOpenAnchorForm(existing){
       name,
       rubric: document.getElementById('tvAnchorRubric').value || null,
       description: document.getElementById('tvAnchorDesc').value.trim(),
-      voiceId: document.getElementById('tvAnchorVoice').value.trim(),
+      voiceId: document.getElementById('tvAnchorVoice').value,
+      voiceSpeed: document.getElementById('tvAnchorVoiceSpeed').value,
     };
     if(!isNewPhoto) payload.photo = photoDataUrl;
     const anchor = tvSaveAnchorLocal(payload, existing || null);
@@ -1054,8 +1105,34 @@ function tvTaskModelOptions(kind){
 function tvFormatCost(costUsd){
   return costUsd ? ('$' + costUsd.toFixed(2)) : 'бесплатно';
 }
+// Same idea as the main app's updateTasksBadge() (js/tasks.js) — count draft + in-flight
+// tasks so the TASKS tab shows at a glance whether anything needs attention.
+function tvUpdateTasksBadge(){
+  const badge = document.getElementById('tvTasksBadge');
+  if(!badge) return;
+  const total = tvState.tvTaskQueue.filter(t=> t.status==='draft' || t.status==='running').length;
+  badge.style.display = total ? '' : 'none';
+  badge.textContent = String(total);
+}
+// Thumb = the news item's own illustration when it has one (same media Новости already
+// collected), so a TASKS tile is recognizable at a glance instead of being plain text.
+function tvTaskThumbHtml(item){
+  const img = item && item.media && item.media[0] && item.media[0].url;
+  return `<div class="task-tile-thumb">${img ? `<img src="${img}">` : '<i class="ti ti-news" style="font-size:22px;color:var(--text-3);"></i>'}</div>`;
+}
+// Who's actually responsible for this piece — small avatar + name, same idea as the
+// anchor tiles elsewhere, so a TASKS tile answers "whose job is this" without opening it.
+function tvTaskAnchorRowHtml(item){
+  const anchor = item && tvState.tvAnchors.find(a=> a.id===item.assignedAnchorId);
+  if(!anchor) return '';
+  return `<div class="tv-task-anchor-row">
+    <span class="tv-task-anchor-photo">${anchor.photo ? `<img src="${anchor.photo}">` : '<i class="ti ti-user"></i>'}</span>
+    <span class="tv-task-anchor-name">${anchor.name}</span>
+  </div>`;
+}
 function renderTvTasks(){
   const el = document.getElementById('tvTasksBox');
+  tvUpdateTasksBadge();
   if(!el) return;
   if(!tvState.tvTaskQueue.length){
     el.innerHTML = `<div class="tv-empty-hint">Задач пока нет.</div>`;
@@ -1074,9 +1151,11 @@ function renderTvTasks(){
            </select>`
         : `<div class="gen-hint" style="margin:0;">Модели недоступны.</div>`;
       return `<div class="task-tile draft" data-task-id="${t.id}">
+        ${tvTaskThumbHtml(item)}
         <div class="task-tile-body">
           <div class="task-tile-scene">${kindLabel}</div>
           <div class="task-tile-shot">${title}</div>
+          ${tvTaskAnchorRowHtml(item)}
           <div class="tv-task-model-row">${modelHtml}</div>
           <button class="cf-btn primary task-tile-send-btn" style="width:100%;margin-top:8px;" data-run="${t.id}" ${t.model?'':'disabled'}>Сгенерировать</button>
           <button class="cf-btn" style="width:100%;margin-top:6px;" data-remove="${t.id}">Убрать из очереди</button>
@@ -1085,9 +1164,11 @@ function renderTvTasks(){
     }
     const statusLabel = t.status==='running' ? 'генерация…' : t.status==='done' ? 'готово' : t.status==='failed' ? 'ошибка' : t.status;
     return `<div class="task-tile" data-task-id="${t.id}">
+      ${tvTaskThumbHtml(item)}
       <div class="task-tile-body">
         <div class="task-tile-scene">${kindLabel}</div>
         <div class="task-tile-shot">${title}</div>
+        ${tvTaskAnchorRowHtml(item)}
         <div class="task-tile-status ${t.status}">${statusLabel}</div>
         ${t.status==='running' ? `<div class="task-tile-spin"></div>` : ''}
         ${t.status==='failed' ? `<div class="task-tile-error">${(t.errorMessage||'').replace(/</g,'&lt;')}</div>` : ''}
@@ -1152,7 +1233,7 @@ async function tvRunTvTask(taskId){
       const anchor = tvState.tvAnchors.find(a=> a.id===item.assignedAnchorId);
       const res = await fetch('/api/tv/generate-voice', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: item.articleText, voiceName: anchor && anchor.voiceId, model: task.model }),
+        body: JSON.stringify({ text: item.articleText, voiceName: anchor && anchor.voiceId, voiceSpeed: anchor && anchor.voiceSpeed, model: task.model }),
       });
       if(res.status===401) throw new Error('Нужно войти в аккаунт — откройте / и авторизуйтесь, затем вернитесь на /tv.');
       if(!res.ok){
@@ -1160,7 +1241,9 @@ async function tvRunTvTask(taskId){
         throw new Error((data && data.message) || 'Не удалось озвучить текст.');
       }
       const blob = await res.blob();
-      const persisted = await tvPersistBlobAssetDirect('newsitem:' + item.id + ':voice', blob, '.wav');
+      // No hardcoded extension — Gemini always returns WAV, but ElevenLabs (KIE) returns
+      // MP3, so this has to follow the actual Content-Type the server sent back.
+      const persisted = await tvPersistBlobAssetDirect('newsitem:' + item.id + ':voice', blob);
       item.voiceUrl = persisted ? persisted.url : URL.createObjectURL(blob);
       item._assetFiles = item._assetFiles || {};
       item._assetFiles.voice = !!persisted;
@@ -1237,6 +1320,7 @@ function tvRenderMicItemsList(anchorId){
     const voiced = !!item.voiceUrl;
     const pending = item.voiceTaskId != null;
     return `<div class="tv-mic-item" data-item-id="${item.id}">
+      <div class="tv-mic-item-del" data-del-item="${item.id}" title="Удалить текст"><i class="ti ti-x" style="font-size:11px;"></i></div>
       <div class="tv-mic-item-title">${item.title}</div>
       <div class="tv-mic-item-text">${item.articleText}</div>
       <div class="tv-mic-item-row">
@@ -1257,6 +1341,34 @@ function tvRenderMicItemsList(anchorId){
       tvRenderMicItemsList(anchorId);
     };
   });
+  listEl.querySelectorAll('[data-del-item]').forEach(btn=>{
+    btn.onclick = ()=>{
+      const id = Number(btn.dataset.delItem);
+      if(!confirm('Удалить этот текст? Он пропадёт из Микрофонной вместе с озвучкой (если была).')) return;
+      tvDeleteMicItemText(id);
+      tvRenderMicItemsList(anchorId);
+      renderTvMic();
+    };
+  });
+}
+// "Delete text" — clears the article/voice for this item so it drops out of Микрофонная's
+// (otherwise ever-growing) list. Doesn't undo the assignment itself, just the written/voiced
+// output, same way a TASKS tile's "Убрать из очереди" clears a pending task without deleting
+// the underlying news item.
+function tvDeleteMicItemText(itemId){
+  const item = tvState.tvNewsItems.find(n=> n.id===itemId);
+  if(!item) return;
+  tvState.tvTaskQueue = tvState.tvTaskQueue.filter(t=> t.id!==item.articleTaskId && t.id!==item.voiceTaskId);
+  item.articleText = null;
+  item.articleTaskId = null;
+  item.voiceUrl = null;
+  item.voiceTaskId = null;
+  item._assetFiles = item._assetFiles || {};
+  delete item._assetFiles.voice;
+  delete item._assetFiles.voiceFile;
+  tvSaveSoon();
+  renderTvTasks();
+  renderTvRedaktsiya();
 }
 function tvSendToVoicing(itemId){
   const item = tvState.tvNewsItems.find(n=> n.id===itemId);

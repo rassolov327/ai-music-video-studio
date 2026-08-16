@@ -123,8 +123,14 @@
 
   /* ---- Микрофонная: anchor tiles + expanded item list ---- */
   .tv-mic-item{
-    border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-bottom:8px; background:var(--bg-panel-2);
+    position:relative; border:1px solid var(--line); border-radius:8px; padding:10px 32px 10px 12px;
+    margin-bottom:8px; background:var(--bg-panel-2);
   }
+  .tv-mic-item-del{
+    position:absolute; top:8px; right:8px; width:18px; height:18px; border-radius:5px;
+    display:flex; align-items:center; justify-content:center; color:var(--text-3); cursor:pointer;
+  }
+  .tv-mic-item-del:hover{ background:rgba(217,105,95,.15); color:var(--danger); }
   .tv-mic-item-title{ font-size:12.5px; color:var(--text-1); margin-bottom:6px; }
   .tv-mic-item-text{ font-size:12px; color:var(--text-2); line-height:1.5; white-space:pre-wrap; margin-bottom:8px; }
   .tv-mic-item-row{ display:flex; align-items:center; gap:8px; }
@@ -139,6 +145,13 @@
 
   /* ---- TASKS: draft model-picker row (before a task is actually sent) ---- */
   .tv-task-model-row{ display:flex; align-items:center; gap:6px; margin-top:8px; }
+  .tv-task-anchor-row{ display:flex; align-items:center; gap:6px; margin-top:6px; }
+  .tv-task-anchor-photo{
+    width:20px; height:20px; border-radius:50%; overflow:hidden; flex:0 0 auto;
+    background:var(--bg-panel-2); display:flex; align-items:center; justify-content:center; color:var(--text-3);
+  }
+  .tv-task-anchor-photo img{ width:100%; height:100%; object-fit:cover; }
+  .tv-task-anchor-name{ font-size:11px; color:var(--text-2); }
   .tv-news-media img{ width:70px; height:52px; object-fit:cover; border-radius:5px; border:1px solid var(--line); }
 
   .tv-cal{ margin-bottom:12px; max-width:280px; border:1px solid var(--line); border-radius:8px; background:var(--bg-panel-2); padding:10px 12px; }
@@ -223,7 +236,7 @@
     <div class="tv-page-tab" data-tv-page="studio">Редакция</div>
     <div class="tv-page-tab" data-tv-page="mic">Микрофонная</div>
     <div class="tv-page-tab" data-tv-page="grid">Сетка</div>
-    <div class="tv-page-tab" data-tv-page="tasks">TASKS</div>
+    <div class="tv-page-tab" data-tv-page="tasks">TASKS<span class="page-tab-badge" id="tvTasksBadge" style="display:none;">0</span></div>
     <div class="tv-page-tab" data-tv-page="archive">Архив</div>
     <div class="tv-page-tab" data-tv-page="air">Эфир</div>
   </div>

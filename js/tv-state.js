@@ -36,6 +36,23 @@ function tvEmptyCardInputSlots(){
 const TV_CARD_SHEET_WIDTH = 1600;
 const TV_CARD_SHEET_HEIGHT = 900;
 
+// Gemini's named native-TTS voices, each with Google's own short style descriptor —
+// populates the anchor's voice picker (js/tv-app.js's tvOpenAnchorForm). Per public Gemini
+// TTS docs at the time this was built, not independently re-verified against a live call —
+// if a name here gets rejected by the API, check ai.google.dev's current voice list first.
+const TV_GEMINI_VOICES = [
+  { id:'Zephyr', label:'Яркий' }, { id:'Puck', label:'Задорный' }, { id:'Charon', label:'Информативный' },
+  { id:'Kore', label:'Уверенный' }, { id:'Fenrir', label:'Возбуждённый' }, { id:'Leda', label:'Молодой' },
+  { id:'Orus', label:'Твёрдый' }, { id:'Aoede', label:'Лёгкий' }, { id:'Callirrhoe', label:'Непринуждённый' },
+  { id:'Autonoe', label:'Яркий' }, { id:'Enceladus', label:'Придыхательный' }, { id:'Iapetus', label:'Чёткий' },
+  { id:'Umbriel', label:'Непринуждённый' }, { id:'Algieba', label:'Плавный' }, { id:'Despina', label:'Плавный' },
+  { id:'Erinome', label:'Чёткий' }, { id:'Algenib', label:'Хрипловатый' }, { id:'Rasalgethi', label:'Информативный' },
+  { id:'Laomedeia', label:'Задорный' }, { id:'Achernar', label:'Мягкий' }, { id:'Alnilam', label:'Твёрдый' },
+  { id:'Schedar', label:'Ровный' }, { id:'Gacrux', label:'Зрелый' }, { id:'Pulcherrima', label:'Напористый' },
+  { id:'Achird', label:'Дружелюбный' }, { id:'Zubenelgenubi', label:'Обычный' }, { id:'Vindemiatrix', label:'Мягкий' },
+  { id:'Sadachbia', label:'Живой' }, { id:'Sadaltager', label:'Знающий' }, { id:'Sulafat', label:'Тёплый' },
+];
+
 // Studios — one dedicated "corner" per rubric (or the null-rubric general host, who "живёт
 // в своей студии" same as any rubric anchor). Manually uploaded only, never AI-generated —
 // exactly 4 wide/establishing shots. The virtual editor (planned, not yet built) derives

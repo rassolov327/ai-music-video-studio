@@ -794,30 +794,88 @@ app.post('/api/tv/gather-news', async (req, res) => {
 });
 
 // ---- text-writing (Journalist) — turns a sourced news item into the anchor's on-air read,
-// in that specific host's voice. Only Gemini for now (free tier, same key already used for
-// gather-news) — Claude/GPT via KIE.ai would be a real paid alternative but their exact
-// createTask request shape for text/chat completion hasn't been verified against KIE's docs
-// yet (unlike the image/video/lipsync models above, whose field names were confirmed the
-// hard way — see LIPSYNC_MODELS's comment). Don't add one here without a real, confirmed
-// request shape; a guessed one would just fail the same way those did on the first attempt. ----
+// in that specific host's voice. Gemini is the free option (same key already used for
+// gather-news). The two paid options go through KIE.ai (same KIE_API_KEY as everything
+// else) — request shapes below come from real docs.kie.ai pages fetched while building
+// this (docs.kie.ai/market/chat/gpt-5-4, and the Claude-Code integration guide confirming
+// the /claude base + standard Anthropic Messages API shape), NOT guessed — but neither has
+// actually been called for real yet (no live KIE_API_KEY while building this), so treat
+// them as "should work per the docs" rather than fully proven, unlike the image/video/
+// lipsync models above (whose exact shapes were confirmed the hard way over real attempts —
+// see LIPSYNC_MODELS's comment). costUsd on both is a rough estimate (short text call,
+// no real bill yet) — correct against KIE's dashboard once one actually runs.
 const TV_TEXT_MODELS = [
   { id: 'gemini-text', label: 'Gemini (бесплатно)', costUsd: 0, blurb: 'Тот же ключ и тир, что уже используется для сбора новостей' },
+  { id: 'kie-gpt-5-4', label: 'GPT 5.4 (KIE.ai)', costUsd: 0.02, blurb: 'Платно, через тот же ключ KIE — короткий текстовый вызов, цена оценочная', provider: 'kie-gpt' },
+  { id: 'kie-claude-sonnet', label: 'Claude Sonnet (KIE.ai)', costUsd: 0.02, blurb: 'Платно, через тот же ключ KIE — короткий текстовый вызов, цена оценочная', provider: 'kie-claude' },
 ];
 app.get('/api/tv/text-models', (req, res) => {
   res.json({ models: TV_TEXT_MODELS });
 });
-// No requireAuth — same call as here as /api/tv/gather-news makes: free-tier Gemini, $0
-// cost, nothing to bill or track per-user. Add requireAuth + checkUserCanAfford back only
-// once a real paid model (e.g. Claude/GPT via KIE) is wired into TV_TEXT_MODELS.
+async function tvCallGeminiText(prompt) {
+  const geminiRes = await fetch(`${GEMINI_BASE}/models/${GEMINI_MODEL}:generateContent`, {
+    method: 'POST',
+    headers: { 'x-goog-api-key': GEMINI_API_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }] }] }),
+  });
+  const data = await geminiRes.json().catch(() => null);
+  if (!geminiRes.ok) throw new Error((data && data.error && data.error.message) || ('Gemini rejected the request (HTTP ' + geminiRes.status + ').'));
+  const text = data && data.candidates && data.candidates[0] && data.candidates[0].content
+    && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text;
+  if (!text) throw new Error('Gemini returned an empty response — it may have been blocked by a safety filter.');
+  return text;
+}
+// docs.kie.ai/market/chat/gpt-5-4: POST https://api.kie.ai/codex/v1/responses, a synchronous
+// chat-completions-style endpoint (not the async createTask+webhook pattern the image/video
+// models use). The docs page showed the REQUEST shape but not the response body — the
+// output_text/output[].content[] paths below are OpenAI's own Responses API convention,
+// not independently confirmed for KIE's proxy specifically.
+async function tvCallKieGptText(prompt) {
+  const res = await fetch(`${KIE_BASE}/codex/v1/responses`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${KIE_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: 'gpt-5-4', input: [{ role: 'user', content: [{ type: 'input_text', text: prompt }] }] }),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new Error((data && data.error && data.error.message) || ('KIE.ai (GPT) rejected the request (HTTP ' + res.status + ').'));
+  const text = (data && data.output_text)
+    || (data && data.output && data.output[0] && data.output[0].content && data.output[0].content[0] && data.output[0].content[0].text);
+  if (!text) throw new Error('KIE.ai (GPT) returned no text — response shape may differ from what was assumed.');
+  return text;
+}
+// The Claude-Code-via-KIE integration guide confirms the base is https://api.kie.ai/claude,
+// proxying Anthropic's own Messages API (/v1/messages) as-is — same request/response shape
+// as api.anthropic.com, just a different base URL + key. Model id is a best-current-guess
+// (claude-sonnet-5), not confirmed against KIE's own proxy specifically.
+async function tvCallKieClaudeText(prompt) {
+  const res = await fetch(`${KIE_BASE}/claude/v1/messages`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${KIE_API_KEY}`, 'Content-Type': 'application/json', 'anthropic-version': '2023-06-01' },
+    body: JSON.stringify({ model: 'claude-sonnet-5', max_tokens: 500, messages: [{ role: 'user', content: prompt }] }),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new Error((data && data.error && data.error.message) || ('KIE.ai (Claude) rejected the request (HTTP ' + res.status + ').'));
+  const text = data && data.content && data.content[0] && data.content[0].text;
+  if (!text) throw new Error('KIE.ai (Claude) returned no text.');
+  return text;
+}
+// No requireAuth on the free Gemini path — same reasoning as /api/tv/gather-news: $0 cost,
+// nothing to bill. The two paid KIE paths below DO cost real money per call but still skip
+// requireAuth/checkUserCanAfford for now, matching /TV's whole billing model (Костян is the
+// only user of /TV right now; the shared credits system exists for TAKE:ONE's main users,
+// not /TV specifically) — revisit if /TV ever gets more than one real user.
 app.post('/api/tv/write-article', async (req, res) => {
-  if (!GEMINI_API_KEY) {
-    return res.status(503).json({ error: 'not_configured', message: 'GEMINI_API_KEY is not set on the server yet.' });
-  }
   const { title, summary, extract, rubric, sourceDate, personaContext, model } = req.body || {};
   if (!title || !personaContext) {
     return res.status(400).json({ error: 'bad_request', message: 'title and personaContext are both required.' });
   }
   const matched = TV_TEXT_MODELS.find(m => m.id === model) || TV_TEXT_MODELS[0];
+  if (matched.provider && !KIE_API_KEY) {
+    return res.status(503).json({ error: 'not_configured', message: 'KIE_API_KEY is not set on the server yet.' });
+  }
+  if (!matched.provider && !GEMINI_API_KEY) {
+    return res.status(503).json({ error: 'not_configured', message: 'GEMINI_API_KEY is not set on the server yet.' });
+  }
   const year = (sourceDate && parseInt(String(sourceDate).slice(0, 4), 10)) || (new Date().getUTCFullYear() - 25);
 
   const prompt = [
@@ -837,16 +895,10 @@ app.post('/api/tv/write-article', async (req, res) => {
   ].filter(Boolean).join('\n\n');
 
   try {
-    const geminiRes = await fetch(`${GEMINI_BASE}/models/${GEMINI_MODEL}:generateContent`, {
-      method: 'POST',
-      headers: { 'x-goog-api-key': GEMINI_API_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }] }] }),
-    });
-    const data = await geminiRes.json().catch(() => null);
-    if (!geminiRes.ok) throw new Error((data && data.error && data.error.message) || ('Gemini rejected the request (HTTP ' + geminiRes.status + ').'));
-    const text = data && data.candidates && data.candidates[0] && data.candidates[0].content
-      && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text;
-    if (!text) throw new Error('Gemini returned an empty response — it may have been blocked by a safety filter.');
+    let text;
+    if (matched.provider === 'kie-gpt') text = await tvCallKieGptText(prompt);
+    else if (matched.provider === 'kie-claude') text = await tvCallKieClaudeText(prompt);
+    else text = await tvCallGeminiText(prompt);
     res.json({ text: text.trim(), model: matched.id });
   } catch (err) {
     console.error('[server] /api/tv/write-article failed:', err);
@@ -858,15 +910,58 @@ app.post('/api/tv/write-article', async (req, res) => {
 // (native audio output, same generateContent shape as everything else Gemini here, just
 // with responseModalities:['AUDIO']) returns raw PCM inline as base64 — wrapped into a
 // standard WAV header below so the browser's <audio> element can actually play it without
-// needing a separate decoder. ElevenLabs via KIE.ai would be the paid alternative (better
-// emotional range) but — same caveat as TV_TEXT_MODELS above — its createTask request shape
-// hasn't been confirmed against KIE's real docs, so it's not wired here yet. ----
+// needing a separate decoder. ElevenLabs Turbo 2.5 via KIE.ai is the paid alternative
+// (better emotional range, 56 named voices) — request shape confirmed from a real
+// docs.kie.ai fetch while building this (model id `elevenlabs/text-to-speech-turbo-2-5`,
+// input: {text, voice, ...}), same async createTask+recordInfo pattern the image/video
+// models already use here, NOT the synchronous shape the KIE text models above use. Never
+// actually run against a real KIE_API_KEY while building this, so the poll timing/response
+// envelope leans on extractResultUrl()'s already-proven-in-production shape rather than
+// being independently re-verified for this specific model. ----
 const TV_VOICE_MODELS = [
   { id: 'gemini-tts', label: 'Gemini TTS (бесплатно)', costUsd: 0, blurb: 'Тот же ключ, что и для текста — нативная генерация речи' },
+  { id: 'kie-elevenlabs-turbo', label: 'ElevenLabs Turbo 2.5 (KIE.ai)', costUsd: 0.05, blurb: 'Платно, через тот же ключ KIE — живее интонация, 56 голосов на выбор, цена оценочная', provider: 'kie-elevenlabs' },
 ];
 app.get('/api/tv/voice-models', (req, res) => {
   res.json({ models: TV_VOICE_MODELS });
 });
+async function tvCallKieElevenLabsVoice(text, voiceId, speed) {
+  const createRes = await fetch(`${KIE_BASE}/api/v1/jobs/createTask`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${KIE_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'elevenlabs/text-to-speech-turbo-2-5',
+      // voice: our anchor.voiceId currently holds a Gemini voice NAME (e.g. "Kore"), not an
+      // ElevenLabs voice ID — the two engines don't share an id space, so this falls back to
+      // a default ElevenLabs voice ("James") whenever a Gemini name is passed in. A real
+      // fix needs a separate per-provider voice field on the anchor (see CLAUDE.md).
+      input: { text, voice: voiceId || 'EkK5I93UQWFDigLMpZcX', speed: speed || 1 },
+    }),
+  });
+  const createData = await createRes.json().catch(() => null);
+  const taskId = createData && createData.data && createData.data.taskId;
+  if (!createRes.ok || !taskId) {
+    throw new Error((createData && createData.msg) || ('KIE.ai (ElevenLabs) rejected the request (HTTP ' + createRes.status + ').'));
+  }
+  const deadline = Date.now() + 40000;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    const pollRes = await fetch(`${KIE_BASE}/api/v1/jobs/recordInfo?taskId=${encodeURIComponent(taskId)}`, {
+      headers: { Authorization: `Bearer ${KIE_API_KEY}` },
+    });
+    const pollData = await pollRes.json().catch(() => null);
+    const d = pollData && pollData.data;
+    if (!d) continue;
+    const state = (d.state || '').toLowerCase();
+    const flag = Number(d.successFlag);
+    if (state === 'fail' || flag === 2 || d.failMsg) throw new Error(d.failMsg || 'ElevenLabs (KIE) generation failed.');
+    if (state === 'success' || flag === 1) {
+      const url = extractResultUrl(d);
+      if (url) return url;
+    }
+  }
+  throw new Error('ElevenLabs (KIE) generation timed out.');
+}
 function tvPcmToWav(pcmBuffer, sampleRate, numChannels, bitsPerSample) {
   const byteRate = sampleRate * numChannels * bitsPerSample / 8;
   const blockAlign = numChannels * bitsPerSample / 8;
@@ -887,22 +982,42 @@ function tvPcmToWav(pcmBuffer, sampleRate, numChannels, bitsPerSample) {
   header.writeUInt32LE(dataSize, 40);
   return Buffer.concat([header, pcmBuffer]);
 }
-// No requireAuth — same reasoning as write-article above: free-tier Gemini TTS, $0 cost.
+// No requireAuth — same reasoning as write-article above (/TV has one real user right now;
+// the shared credits system exists for TAKE:ONE's main users, not /TV specifically).
 app.post('/api/tv/generate-voice', async (req, res) => {
-  if (!GEMINI_API_KEY) {
-    return res.status(503).json({ error: 'not_configured', message: 'GEMINI_API_KEY is not set on the server yet.' });
-  }
-  const { text, voiceName, model } = req.body || {};
+  const { text, voiceName, voiceSpeed, model } = req.body || {};
   if (!text) {
     return res.status(400).json({ error: 'bad_request', message: 'text is required.' });
   }
   const matched = TV_VOICE_MODELS.find(m => m.id === model) || TV_VOICE_MODELS[0];
+  if (matched.provider === 'kie-elevenlabs' && !KIE_API_KEY) {
+    return res.status(503).json({ error: 'not_configured', message: 'KIE_API_KEY is not set on the server yet.' });
+  }
+  if (!matched.provider && !GEMINI_API_KEY) {
+    return res.status(503).json({ error: 'not_configured', message: 'GEMINI_API_KEY is not set on the server yet.' });
+  }
   try {
+    if (matched.provider === 'kie-elevenlabs') {
+      const speedNum = { slow: 0.85, normal: 1, fast: 1.15 }[voiceSpeed] || 1;
+      const audioUrl = await tvCallKieElevenLabsVoice(text, voiceName, speedNum);
+      const audioRes = await fetch(audioUrl);
+      if (!audioRes.ok) throw new Error('Could not download the generated audio from KIE.ai.');
+      const buf = Buffer.from(await audioRes.arrayBuffer());
+      res.set('Content-Type', audioRes.headers.get('content-type') || 'audio/mpeg');
+      res.set('X-TV-Voice-Model', matched.id);
+      return res.send(buf);
+    }
+    // Gemini's native TTS has no separate numeric speed parameter — the documented way to
+    // steer delivery is a natural-language style prefix ("Say cheerfully: ...") that the
+    // model is tuned to treat as a direction rather than something to read aloud. Mirrors
+    // that convention in Russian; best-effort, not independently confirmed to be reliable.
+    const speedPrefix = voiceSpeed === 'slow' ? 'Прочитай медленно и размеренно: '
+      : voiceSpeed === 'fast' ? 'Прочитай быстро и энергично: ' : '';
     const geminiRes = await fetch(`${GEMINI_BASE}/models/${GEMINI_TTS_MODEL}:generateContent`, {
       method: 'POST',
       headers: { 'x-goog-api-key': GEMINI_API_KEY, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text }] }],
+        contents: [{ role: 'user', parts: [{ text: speedPrefix + text }] }],
         generationConfig: {
           responseModalities: ['AUDIO'],
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voiceName || 'Kore' } } },
