@@ -14,7 +14,7 @@ const TV_RUBRICS = [
 
 // One entry per tab — each tab has its own single approval gate ("утверждено / в выпуск"),
 // not per-item checkboxes scattered around.
-const TV_TABS = ['work', 'news', 'studio', 'grid', 'tasks', 'archive', 'air'];
+const TV_TABS = ['work', 'news', 'studio', 'grid', 'montage', 'tasks', 'archive', 'air'];
 
 // Character Card input slots for anchors — same 6-angle set characters.js uses
 // (js/state.js CARD_INPUT_SLOTS), duplicated here since tv.html doesn't load state.js.
@@ -204,13 +204,16 @@ const tvState = {
   // script and, while a writing task is queued/running, which tvTaskQueue entry produced it
   // (cleared once the result lands in articleText). voiceUrl/voiceTaskId — same idea for the
   // spoken-audio step (Микрофонная tab), voiceUrl null means "not voiced yet" (crossed-out
-  // speaker icon in the UI).
+  // speaker icon in the UI). voiceDurationSec — the real clip's length in seconds, measured
+  // once via tvGetAudioDuration() the moment voicing finishes (tvRunTvTask, js/tv-app.js);
+  // Сетка's hronometraž (renderTvGrid) uses this instead of TV_FORMAT_TEMPLATE's flat guess
+  // whenever it's set.
   tvNewsItems: [], // [{ id, rubric, title, summary, extract, sourceDate, sourceUrl,
                     //    source:'wayback'|'wikipedia'|'manual', sourcePrecision:'week'|'month'|'year'|null,
                     //    media:[{type,url,title,id}], materialStatus, isAnniversary, included,
                     //    archived, archivedAt, gatheredForWeek, assignedAnchorId,
                     //    assignedStudioId, articleText, articleTaskId, voiceUrl, voiceTaskId,
-                    //    _assetFiles, approvedForRelease, sortOrder }]
+                    //    voiceDurationSec, _assetFiles, approvedForRelease, sortOrder }]
 
   // Сетка tab — the assembled timeline, grouped into rubric blocks (all of one rubric
   // together before the next rubric starts). Auto-populated from TV_FORMAT_TEMPLATE by
@@ -224,8 +227,8 @@ const tvState = {
   // rubric_intro block is silently skipped in the final assembly (straight to that rubric's
   // jingle); host_intro/outro can be left empty too.
   tvGridBlocks: [], // [{ id, blockType:'intro'|'host_intro'|'jingle'|'rubric_intro'|'outro'|'story',
-                     //    rubric, newsItemId, sortOrder, estimatedDurationSec, voTrack, cutaways:[],
-                     //    anchorId, text, voiceUrl, voiceTaskId, _assetFiles }]
+                     //    rubric, newsItemId, sortOrder, estimatedDurationSec, voiceDurationSec,
+                     //    voTrack, cutaways:[], anchorId, text, voiceUrl, voiceTaskId, _assetFiles }]
 
   // TASKS / Архив — direct analogs of the main app's taskQueue / archive. Same two-phase
   // tile lifecycle as js/tasks.js: status:'draft' (queued, model not chosen/sent yet) ->
@@ -253,7 +256,15 @@ const tvState = {
   tvEpisode: null, // { id, weekStartDate, sourceWeekStartDate, status, renderUrl }
 
   // One approval flag per tab — the "утверждено / в выпуск" gate.
-  approvals: { work:false, news:false, studio:false, grid:false, tasks:false, archive:false, air:false },
+  approvals: { work:false, news:false, studio:false, grid:false, montage:false, tasks:false, archive:false, air:false },
+
+  // Монтаж tab — "В монтаж" (js/tv-app.js's tvSendToMontage(), gated on approvals.grid)
+  // snapshots the current Сетка block count/timestamp here. Placeholder only — the actual
+  // virtual editor (CLAUDE.md's "Studios + virtual editor" stages C-F) isn't built yet;
+  // Костян's explicit instruction was to stop at "create the section", not the process
+  // itself, and to drop the earlier idea of a timeline bolted onto Сетка in favor of this
+  // separate tab.
+  tvMontage: { sentAt: null, blockCount: 0 },
 
   // dev has its own, separate Postgres DB from main (deliberate isolation — see
   // CLAUDE.md) — so /TV can't compute "KIE credits minus tokens owed to users" the way

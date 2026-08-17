@@ -338,6 +338,7 @@ function tvSerialize(){
     tvAnniversaryEvents: tvState.tvAnniversaryEvents,
     tvEpisode: tvState.tvEpisode,
     approvals: tvState.approvals,
+    tvMontage: tvState.tvMontage,
     tvNewsSourceSelection: tvState.tvNewsSourceSelection,
     tvOwedToUsers: tvState.tvOwedToUsers,
     seq: { tvAnchorSeq, tvStudioSeq, tvNewsItemSeq, tvGridBlockSeq, tvTaskSeq, tvArchiveSeq },
@@ -445,6 +446,7 @@ async function tvApplyWorkspaceData(data){
   if(Array.isArray(data.tvAnniversaryEvents)) tvState.tvAnniversaryEvents = data.tvAnniversaryEvents;
   if(data.tvEpisode) tvState.tvEpisode = data.tvEpisode;
   if(data.approvals) Object.assign(tvState.approvals, data.approvals);
+  if(data.tvMontage) Object.assign(tvState.tvMontage, data.tvMontage);
   if(data.tvNewsSourceSelection) Object.assign(tvState.tvNewsSourceSelection, data.tvNewsSourceSelection);
   if(typeof data.tvOwedToUsers === 'number') tvState.tvOwedToUsers = data.tvOwedToUsers;
   if(data.seq){
@@ -466,6 +468,7 @@ async function tvApplyWorkspaceData(data){
   if(typeof renderTvMic==='function') renderTvMic();
   if(typeof renderTvTasks==='function') renderTvTasks();
   if(typeof renderTvGrid==='function') renderTvGrid();
+  if(typeof renderTvMontage==='function') renderTvMontage();
   if(typeof tvSyncOwedInput==='function') tvSyncOwedInput();
   if(typeof tvRenderCreditsIndicator==='function') tvRenderCreditsIndicator();
 }

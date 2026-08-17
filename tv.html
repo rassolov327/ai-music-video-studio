@@ -208,6 +208,25 @@
   .tv-grid-item-rubric{ font-size:10.5px; color:var(--accent-text); border:1px solid var(--accent-dim); border-radius:4px; padding:1px 6px; flex:0 0 auto; }
   .tv-grid-item-title{ flex:1; color:var(--text-1); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .tv-grid-item-dur{ font-family:var(--font-mono); font-size:11px; color:var(--text-3); flex:0 0 auto; }
+  .tv-grid-item-dur.real{ color:var(--accent-text); font-weight:600; }
+
+  /* ---- drag-and-drop reordering: whole rubric groups + stories within a group ---- */
+  .tv-grid-drag-handle{
+    flex:0 0 auto; color:var(--text-3); font-size:14px; line-height:1; cursor:grab;
+    user-select:none; padding:0 2px; letter-spacing:-1px;
+  }
+  .tv-grid-drag-handle:active{ cursor:grabbing; }
+  .tv-grid-group{ border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+  .tv-grid-group-head{
+    display:flex; align-items:center; gap:8px; padding:6px 10px;
+    background:var(--bg-panel-2); border-bottom:1px solid var(--line); font-size:11.5px; color:var(--text-2);
+  }
+  .tv-grid-group-head .tv-grid-item-dur{ margin-left:auto; }
+  .tv-grid-group-body{ display:flex; flex-direction:column; gap:6px; padding:6px; }
+  .tv-grid-item.dragging{ opacity:.35; }
+  .tv-grid-group.dragging{ opacity:.35; }
+  .tv-grid-drop-before{ box-shadow: 0 -2px 0 0 var(--accent) inset; }
+  .tv-grid-drop-after{ box-shadow: 0 2px 0 0 var(--accent) inset; }
 
   .tv-placeholder-box{ border:1px dashed var(--line); border-radius:8px; padding:24px; text-align:center; color:var(--text-3); font-size:12.5px; }
 
@@ -271,6 +290,7 @@
     <div class="tv-page-tab" data-tv-page="studio">Редакция</div>
     <div class="tv-page-tab" data-tv-page="mic">Микрофонная</div>
     <div class="tv-page-tab" data-tv-page="grid">Сетка</div>
+    <div class="tv-page-tab" data-tv-page="montage">МОНТАЖ</div>
     <div class="tv-page-tab" data-tv-page="tasks">TASKS<span class="page-tab-badge" id="tvTasksBadge" style="display:none;">0</span></div>
     <div class="tv-page-tab" data-tv-page="archive">Архив</div>
     <div class="tv-page-tab" data-tv-page="air">Эфир</div>
@@ -393,9 +413,25 @@
       <div class="tv-page-title">Сетка</div>
       <div class="tv-page-desc">Монтажная сетка выпуска — рубрики идут блоками.</div>
     </div>
-    <button class="tv-btn primary" id="tvAutoPopulateGridBtn">Собрать сетку</button>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span class="gen-hint" id="tvSendToMontageHint" style="margin:0;"></span>
+      <button class="tv-btn" id="tvSendToMontageBtn" title="Сначала утвердите сетку кнопкой выше">В монтаж</button>
+      <button class="tv-btn primary" id="tvAutoPopulateGridBtn">Собрать сетку</button>
+    </div>
   </div>
   <div id="tvGridTrack"></div>
+</div>
+
+<!-- 4.5. Монтаж — placeholder for the future virtual editor; just receives the approved
+     grid for now, no actual editing logic yet (Костян's explicit scope for this pass). -->
+<div class="tv-page hidden" data-tv-page="montage">
+  <div class="tv-page-head">
+    <div>
+      <div class="tv-page-title">Монтаж</div>
+      <div class="tv-page-desc">Виртуальный монтажёр собирает выпуск из утверждённых блоков Сетки — раздел пока не построен, только принимает утверждённую сетку.</div>
+    </div>
+  </div>
+  <div id="tvMontageBox"></div>
 </div>
 
 <!-- 5. TASKS — generation queue -->

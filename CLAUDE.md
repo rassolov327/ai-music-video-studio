@@ -126,22 +126,43 @@ hand (no auto-upload yet).
    broadcast algorithm (a fixed template extracted from the reference show — see "Show
    format analysis" below, not re-derived by AI each week). Holds the VO track (from
    Студия), music, and color-coded blocks per rubric. **Rubrics air as grouped blocks** (all
-   "Игры" together, then all "Софт", etc.) — reordering within the right-pane picker only
-   reorders within a rubric's own block, never across rubrics. Blocks arrive ALREADY
-   pre-filled with concrete found/generated material (not abstract placeholder slots) — the
-   user just previews and approves or swaps it. Real broadcast "package" editing style:
-   anchor is lipsync-animated only for on-camera open/close of a story; the middle is
-   full-screen cutaway stills/clips (5-15 sec each, VO continues underneath) — NOT the
-   anchor animated for the whole segment. Fixed jingles/station stings (a FIXED set reused
-   every week, like a real recurring show — not regenerated per episode). Future additions
-   planned: volume mixers, possibly ad blocks.
-6. **TASKS** (BUILT for `kind:'article'`/`'voice'`, same two-phase tile lifecycle as
+   "Игры" together, then all "Софт", etc.). Blocks arrive ALREADY pre-filled with concrete
+   found/generated material (not abstract placeholder slots) — the user just previews and
+   approves or swaps it. Real broadcast "package" editing style: anchor is lipsync-animated
+   only for on-camera open/close of a story; the middle is full-screen cutaway stills/clips
+   (5-15 sec each, VO continues underneath) — NOT the anchor animated for the whole segment.
+   Fixed jingles/station stings (a FIXED set reused every week, like a real recurring show —
+   not regenerated per episode). Future additions planned: volume mixers, possibly ad blocks.
+   - **Drag-and-drop reordering — BUILT.** Native HTML5 DnD (no library), two levels: whole
+     rubric groups relative to each other (grab the group's header bar), and individual
+     stories within their own rubric's group (each story has its own small drag handle) —
+     a story can never be dragged into a different rubric's group. A blue insertion line
+     shows above/below the hovered drop target depending on cursor position
+     (`tvWireGridDragAndDrop`, `js/tv-app.js`). `tvGroupGridBlocks()` derives the
+     rubric_intro?+jingle+story* groupings structurally from the flat, sortOrder-sorted
+     block list every render, rather than tracking group membership as separate state — stays
+     correct no matter how blocks get reordered.
+   - **Real hronometraž — BUILT.** Once a story/host block actually has real voicing,
+     `renderTvGrid()` uses the real clip length (`voiceDurationSec`, measured once via
+     `tvGetAudioDuration()` — an `Audio` element's `loadedmetadata` event — the moment
+     voicing finishes in `tvRunTvTask`) instead of `TV_FORMAT_TEMPLATE`'s flat per-rubric
+     guess. Real vs. estimated durations are visually distinguished (no `~` prefix, accent
+     color) and the summary line reports how many blocks have real timing so far.
+6. **Монтаж** (BUILT as a placeholder — the actual virtual editor is NOT built, deliberately
+   scoped down to "just create the section" per Костян's explicit instruction) — new tab
+   between Сетка and TASKS. "В монтаж" on Сетка (gated on that tab's own "утверждено" flag)
+   snapshots the current block count/timestamp into `tvState.tvMontage` and switches to this
+   tab. This is also where the earlier "click a Сетка block to open a timeline" idea (Studios
+   + virtual editor stage E's second half, below) formally moved — Костян explicitly dropped
+   binding a timeline directly to Сетка in favor of this separate tab once the virtual editor
+   gets built.
+7. **TASKS** (BUILT for `kind:'article'`/`'voice'`, same two-phase tile lifecycle as
    `js/tasks.js`: draft — model picker with cost shown, waits for a manual "Сгенерировать"
    click — never auto-starts — then running/done/failed) — generation queue with model
    selection. Other kinds (image/video/lipsync for Сетка's shots) are a future extension of
    the same tile pattern, not built yet.
-7. **Архив** — direct analog of TAKE:ONE's Archive.
-8. **Эфир** — final render/output of the finished episode.
+8. **Архив** — direct analog of TAKE:ONE's Archive.
+9. **Эфир** — final render/output of the finished episode.
 
 ## Approval mechanic
 
@@ -360,16 +381,17 @@ instruction — do not batch-implement the remaining stages without checking in 
   of the 4 angles, what crop/shot-size, what camera movement. Camera movement is Ken Burns
   only (pan/push/pull on a still image) — explicitly nothing more elaborate. Output is data
   only at this stage (no image processing yet) — one shot list per Сетка block.
-- **E. Сетка timeline + Inspector — NOT YET BUILT.** Two parts: (1) drag-to-reorder for
-  rubric blocks specifically (their relative order in the episode) — NOT story order within
-  a rubric, which stays picker-controlled, and NOT the fixed bumpers (intro/jingle/outro).
-  (2) Clicking a block opens a timeline reusing TAKE:ONE's own scene/shot editor
-  (`js/timeline.js`, `js/scenes-preview.js`) almost directly: a VO track, a music track, and
-  a shots track populated from step D's output, with an Inspector panel (same shape as
+- **E. Timeline + Inspector — NOT YET BUILT, home moved to Монтаж.** Drag-to-reorder for
+  rubric blocks AND for stories within a rubric's own group is already BUILT, in Сетка
+  itself (see "Tab structure" above) — broader than originally staged here, per Костян's
+  later explicit ask. What's still not built: a real timeline reusing TAKE:ONE's own
+  scene/shot editor (`js/timeline.js`, `js/scenes-preview.js`) — a VO track, a music track,
+  and a shots track populated from step D's output, with an Inspector panel (same shape as
   `renderInspectorPanel()` in `scenes-preview.js` — `SHOT_SIZES`, `CAMERA_MOVES`, and a
-  location-angle-style picker over the block's 4 studio shots) so Костян can review/override
-  what the virtual editor chose, the same way he already edits AI-video shot parameters in
-  the main app.
+  location-angle-style picker over the block's 4 studio shots). Костян explicitly dropped
+  the earlier idea of opening this by clicking a Сетка block — it now belongs in the new
+  **Монтаж** tab (built as an empty placeholder, see "Tab structure") once this stage
+  actually gets built.
 - **F. Render integration — NOT YET BUILT.** Applying the chosen crop + Ken Burns movement
   to the studio's static photos happens only at final render (`render.js`, ffmpeg) — until
   then every studio photo is untouched, and framing/movement is only ever stored as data on
@@ -472,8 +494,8 @@ Two parallel passes, then reconcile:
 
 ## Already built (as of this file's writing — verify current state, may be stale)
 
-- `tv.html` — entry page, 8-tab structure (Work, Новости, Редакция, Микрофонная, Сетка,
-  TASKS, Архив, Эфир). Top-right: save-status pill + "connect folder" button. Bottom-right:
+- `tv.html` — entry page, 9-tab structure (Work, Новости, Редакция, Микрофонная, Сетка,
+  Монтаж, TASKS, Архив, Эфир). Top-right: save-status pill + "connect folder" button. Bottom-right:
   KIE credits indicator (personal balance = live KIE balance minus a manually-entered
   "roздано пользователям" number, since dev's Postgres has no record of main's real users —
   see `js/tv-app.js`'s `tvSyncOwedInput`/`tvRenderCreditsIndicator`).

@@ -24,6 +24,7 @@ function showTvPage(page){
   if(page==='mic') renderTvMic();
   if(page==='tasks') renderTvTasks();
   if(page==='grid') renderTvGrid();
+  if(page==='montage') renderTvMontage();
 }
 
 function renderTvApprovalButton(){
@@ -38,6 +39,7 @@ function toggleTvApproval(){
   const tab = tvState.activeTab;
   tvState.approvals[tab] = !tvState.approvals[tab];
   renderTvApprovalButton();
+  if(tab==='grid') tvUpdateSendToMontageButton();
 }
 
 // ---- shared modal (anchor detail / form / Character Card builder swap into this) ----
@@ -1418,6 +1420,19 @@ function renderTvTasks(){
     };
   });
 }
+// Real length of a just-generated voice clip, via the browser's own audio decoder rather
+// than trusting any provider-reported value (none of them return one) — resolves null on
+// a load error instead of throwing, since a missing real duration should just fall back to
+// the old estimate (renderTvGrid), not break voicing.
+function tvGetAudioDuration(url){
+  return new Promise((resolve)=>{
+    const audio = new Audio();
+    audio.preload = 'metadata';
+    audio.onloadedmetadata = ()=> resolve(audio.duration || null);
+    audio.onerror = ()=> resolve(null);
+    audio.src = url;
+  });
+}
 // Actually runs a task against the server — the ONLY place either Gemini route gets called
 // from. Writes the result straight onto the news item or grid block (articleText/voiceUrl,
 // or text/voiceUrl); the task tile itself just flips to 'done'/'failed' and stays until
@@ -1485,6 +1500,11 @@ async function tvRunTvTask(taskId){
       target.ref._assetFiles.voice = !!persisted;
       target.ref._assetFiles.voiceFile = persisted ? persisted.fileName : undefined;
       target.ref.voiceTaskId = null;
+      // Real timing, once real audio exists — Сетка's hronometraž was a flat per-rubric
+      // guess (TV_FORMAT_TEMPLATE.storyDurationSec) until now, since no real VO existed to
+      // measure. Same field name whether target.ref is a news item or a grid block —
+      // tvResolveTaskTarget already normalized that away.
+      target.ref.voiceDurationSec = await tvGetAudioDuration(target.ref.voiceUrl);
     }
     task.status = 'done';
     tvSaveSoon();
@@ -1704,6 +1724,86 @@ function tvGridBlockStatus(b){
   if(b.text) return 'yellow';
   return 'red';
 }
+// Real audio duration (voiceDurationSec, measured once via tvGetAudioDuration when voicing
+// completes — see tvRunTvTask) once it exists, otherwise the flat TV_FORMAT_TEMPLATE guess.
+// 'story' blocks carry no voice of their own — the real clip lives on the news item
+// (item.voiceDurationSec); host_intro/rubric_intro/outro carry it directly on the block.
+// Fixed bumpers (intro/jingle) never get real voicing at all, always the estimate.
+function tvGridBlockDurationInfo(b){
+  if(b.blockType==='story'){
+    const item = tvState.tvNewsItems.find(n=> n.id===b.newsItemId);
+    if(item && item.voiceDurationSec) return { sec: item.voiceDurationSec, real: true };
+    return { sec: b.estimatedDurationSec||0, real: false };
+  }
+  if(TV_GRID_HOST_BLOCK_TYPES.includes(b.blockType) && b.voiceDurationSec){
+    return { sec: b.voiceDurationSec, real: true };
+  }
+  return { sec: b.estimatedDurationSec||0, real: false };
+}
+function tvGridDurHtml(info){
+  const rounded = Math.round(info.sec);
+  return info.real
+    ? `<span class="tv-grid-item-dur real" title="По реальной озвучке">${rounded}с</span>`
+    : `<span class="tv-grid-item-dur">~${rounded}с</span>`;
+}
+// Splits the flat, sortOrder-sorted block list into renderable rows: fixed/host singles
+// (intro, host_intro, the closing jingle, outro) pass through untouched; every rubric's
+// own rubric_intro?+jingle+story* run gets bundled into one "group" row so it can be
+// dragged as a single unit (see tvReorderGridGroup) without ever splitting a rubric's
+// jingle from its stories. Purely structural pattern matching — stays correct no matter
+// what order the groups/stories are currently in, not tied to fixed array positions.
+function tvGroupGridBlocks(blocks){
+  const rows = [];
+  let i = 0;
+  while(i < blocks.length){
+    const b = blocks[i];
+    if(b.blockType==='rubric_intro'){
+      const rubric = b.rubric;
+      const group = [b];
+      i++;
+      if(blocks[i] && blocks[i].blockType==='jingle'){ group.push(blocks[i]); i++; }
+      while(blocks[i] && blocks[i].blockType==='story' && blocks[i].rubric===rubric){ group.push(blocks[i]); i++; }
+      rows.push({ type:'group', rubric, blocks: group });
+      continue;
+    }
+    // The first rubric has no rubric_intro of its own (host_intro already teased it) — its
+    // group starts directly at the jingle that precedes its story blocks.
+    if(b.blockType==='jingle' && blocks[i+1] && blocks[i+1].blockType==='story'){
+      const rubric = blocks[i+1].rubric;
+      const group = [b];
+      i++;
+      while(blocks[i] && blocks[i].blockType==='story' && blocks[i].rubric===rubric){ group.push(blocks[i]); i++; }
+      rows.push({ type:'group', rubric, blocks: group });
+      continue;
+    }
+    rows.push({ type:'single', block: b });
+    i++;
+  }
+  return rows;
+}
+function tvGridBlockRowHtml(b, durHtml, draggableStory){
+  const handle = draggableStory ? `<span class="tv-grid-drag-handle" draggable="true" data-story-handle="${b.id}" title="Перетащить">⠿</span>` : '';
+  if(b.blockType==='story'){
+    const item = tvState.tvNewsItems.find(n=> n.id===b.newsItemId);
+    return `<div class="tv-grid-item" data-story-row="${b.id}" data-story-rubric="${b.rubric}">
+      ${handle}
+      <span class="tv-grid-item-rubric">${tvRubricLabel(b.rubric)}</span>
+      <span class="tv-grid-item-title">${item ? item.title : '— новость удалена —'}</span>
+      ${durHtml}
+    </div>`;
+  }
+  if(TV_GRID_HOST_BLOCK_TYPES.includes(b.blockType)){
+    return `<div class="tv-grid-item clickable" data-block-id="${b.id}">
+      <span class="tv-redak-status-dot status-${tvGridBlockStatus(b)}"></span>
+      <span class="tv-grid-item-title">${TV_GRID_FIXED_LABELS[b.blockType] || b.blockType}${b.blockType==='rubric_intro' ? ' — ' + tvRubricLabel(b.rubric) : ''}</span>
+      ${durHtml}
+    </div>`;
+  }
+  return `<div class="tv-grid-item fixed">
+    <span class="tv-grid-item-title">${TV_GRID_FIXED_LABELS[b.blockType] || b.blockType}</span>
+    ${durHtml}
+  </div>`;
+}
 function renderTvGrid(){
   const el = document.getElementById('tvGridTrack');
   if(!el) return;
@@ -1713,35 +1813,187 @@ function renderTvGrid(){
     return;
   }
   const blocks = [...tvState.tvGridBlocks].sort((a,b)=> a.sortOrder-b.sortOrder);
-  const totalSec = blocks.reduce((sum,b)=> sum + (b.estimatedDurationSec||0), 0);
-  const rows = blocks.map(b=>{
-    if(b.blockType==='story'){
-      const item = tvState.tvNewsItems.find(n=> n.id===b.newsItemId);
-      return `<div class="tv-grid-item">
-        <span class="tv-grid-item-rubric">${tvRubricLabel(b.rubric)}</span>
-        <span class="tv-grid-item-title">${item ? item.title : '— новость удалена —'}</span>
-        <span class="tv-grid-item-dur">~${b.estimatedDurationSec}с</span>
-      </div>`;
+  const durInfoById = new Map(blocks.map(b=> [b.id, tvGridBlockDurationInfo(b)]));
+  const totalSec = blocks.reduce((sum,b)=> sum + durInfoById.get(b.id).sec, 0);
+  const realCount = blocks.filter(b=> durInfoById.get(b.id).real).length;
+
+  const groupedRows = tvGroupGridBlocks(blocks);
+  const rowsHtml = groupedRows.map(row=>{
+    if(row.type==='single'){
+      return tvGridBlockRowHtml(row.block, tvGridDurHtml(durInfoById.get(row.block.id)), false);
     }
-    if(TV_GRID_HOST_BLOCK_TYPES.includes(b.blockType)){
-      return `<div class="tv-grid-item clickable" data-block-id="${b.id}">
-        <span class="tv-redak-status-dot status-${tvGridBlockStatus(b)}"></span>
-        <span class="tv-grid-item-title">${TV_GRID_FIXED_LABELS[b.blockType] || b.blockType}${b.blockType==='rubric_intro' ? ' — ' + tvRubricLabel(b.rubric) : ''}</span>
-        <span class="tv-grid-item-dur">~${b.estimatedDurationSec}с</span>
-      </div>`;
-    }
-    return `<div class="tv-grid-item fixed">
-      <span class="tv-grid-item-title">${TV_GRID_FIXED_LABELS[b.blockType] || b.blockType}</span>
-      <span class="tv-grid-item-dur">~${b.estimatedDurationSec}с</span>
+    const groupSec = row.blocks.reduce((s,b)=> s + durInfoById.get(b.id).sec, 0);
+    const storyCount = row.blocks.filter(b=> b.blockType==='story').length;
+    const bodyHtml = row.blocks.map(b=> tvGridBlockRowHtml(b, tvGridDurHtml(durInfoById.get(b.id)), b.blockType==='story')).join('');
+    return `<div class="tv-grid-group" data-group-rubric="${row.rubric}">
+      <div class="tv-grid-group-head" draggable="true" data-group-handle="${row.rubric}" title="Перетащить всю рубрику">
+        <span class="tv-grid-drag-handle">⠿</span>
+        <span>${tvRubricLabel(row.rubric)} — ${storyCount} ${storyCount===1?'новость':'новостей'}</span>
+        <span class="tv-grid-item-dur">~${Math.round(groupSec)}с</span>
+      </div>
+      <div class="tv-grid-group-body">${bodyHtml}</div>
     </div>`;
   }).join('');
-  el.innerHTML = `<div class="gen-hint" style="margin-bottom:10px;">Черновая оценка хронометража: ~${Math.round(totalSec/60)} мин (${totalSec} сек) — уточнится, когда появится реальная озвучка.</div><div class="tv-grid-flow">${rows}</div>`;
+
+  const durationNote = realCount
+    ? `Хронометраж: ~${Math.round(totalSec/60)} мин (${Math.round(totalSec)} сек) — из них по реальной озвучке: ${realCount} из ${blocks.length} блоков.`
+    : `Черновая оценка хронометража: ~${Math.round(totalSec/60)} мин (${Math.round(totalSec)} сек) — уточнится, когда появится реальная озвучка.`;
+  el.innerHTML = `<div class="gen-hint" style="margin-bottom:10px;">${durationNote} Рубрики и новости внутри них можно перетаскивать за ручку ⠿.</div><div class="tv-grid-flow">${rowsHtml}</div>`;
   el.querySelectorAll('[data-block-id]').forEach(row=>{
     row.onclick = ()=>{
       const block = tvState.tvGridBlocks.find(b=> b.id===Number(row.dataset.blockId));
       if(block) tvOpenGridBlockEditor(block);
     };
   });
+  tvWireGridDragAndDrop(el);
+  tvUpdateSendToMontageButton();
+}
+// ---- drag-and-drop reordering — whole rubric groups relative to each other, and stories
+// within one rubric's own group. Native HTML5 DnD (no library): a small drag-handle glyph
+// starts the drag (not the whole row, so clicking a host block to open its editor still
+// works), dragover shows an insertion line above/below the hovered target depending on
+// cursor position, drop reorders the underlying tvGridBlocks array and reassigns
+// sortOrder to match the new positions. Stories only ever reorder within their own
+// rubric's group — dragging one over a different rubric's row is a no-op (guarded by the
+// rubric check below), matching Костян's requirement that a story never crosses rubrics. ----
+let tvGridDragState = null; // { kind:'group', rubric } | { kind:'story', id, rubric }
+function tvClearGridDropMarkers(container){
+  container.querySelectorAll('.tv-grid-drop-before,.tv-grid-drop-after').forEach(x=> x.classList.remove('tv-grid-drop-before','tv-grid-drop-after'));
+}
+function tvWireGridDragAndDrop(container){
+  container.querySelectorAll('[data-group-handle]').forEach(handle=>{
+    handle.addEventListener('dragstart', (e)=>{
+      const rubric = handle.dataset.groupHandle;
+      tvGridDragState = { kind:'group', rubric };
+      handle.closest('.tv-grid-group').classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', 'group:' + rubric);
+    });
+    handle.addEventListener('dragend', ()=>{
+      const group = handle.closest('.tv-grid-group');
+      if(group) group.classList.remove('dragging');
+      tvGridDragState = null;
+      tvClearGridDropMarkers(container);
+    });
+  });
+  container.querySelectorAll('.tv-grid-group').forEach(groupEl=>{
+    groupEl.addEventListener('dragover', (e)=>{
+      if(!tvGridDragState || tvGridDragState.kind!=='group' || tvGridDragState.rubric===groupEl.dataset.groupRubric) return;
+      e.preventDefault();
+      const rect = groupEl.getBoundingClientRect();
+      const before = (e.clientY - rect.top) < rect.height/2;
+      tvClearGridDropMarkers(container);
+      groupEl.classList.add(before ? 'tv-grid-drop-before' : 'tv-grid-drop-after');
+    });
+    groupEl.addEventListener('drop', (e)=>{
+      if(!tvGridDragState || tvGridDragState.kind!=='group' || tvGridDragState.rubric===groupEl.dataset.groupRubric) return;
+      e.preventDefault();
+      const rect = groupEl.getBoundingClientRect();
+      const before = (e.clientY - rect.top) < rect.height/2;
+      tvReorderGridGroup(tvGridDragState.rubric, groupEl.dataset.groupRubric, before);
+    });
+  });
+  container.querySelectorAll('[data-story-handle]').forEach(handle=>{
+    handle.addEventListener('dragstart', (e)=>{
+      e.stopPropagation();
+      const row = handle.closest('[data-story-row]');
+      tvGridDragState = { kind:'story', id: Number(handle.dataset.storyHandle), rubric: row.dataset.storyRubric };
+      row.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', 'story:' + handle.dataset.storyHandle);
+    });
+    handle.addEventListener('dragend', (e)=>{
+      e.stopPropagation();
+      const row = handle.closest('[data-story-row]');
+      if(row) row.classList.remove('dragging');
+      tvGridDragState = null;
+      tvClearGridDropMarkers(container);
+    });
+  });
+  container.querySelectorAll('[data-story-row]').forEach(row=>{
+    row.addEventListener('dragover', (e)=>{
+      if(!tvGridDragState || tvGridDragState.kind!=='story') return;
+      if(tvGridDragState.rubric!==row.dataset.storyRubric || tvGridDragState.id===Number(row.dataset.storyRow)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const rect = row.getBoundingClientRect();
+      const before = (e.clientY - rect.top) < rect.height/2;
+      tvClearGridDropMarkers(container);
+      row.classList.add(before ? 'tv-grid-drop-before' : 'tv-grid-drop-after');
+    });
+    row.addEventListener('drop', (e)=>{
+      if(!tvGridDragState || tvGridDragState.kind!=='story') return;
+      const targetId = Number(row.dataset.storyRow);
+      if(tvGridDragState.rubric!==row.dataset.storyRubric || tvGridDragState.id===targetId) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const rect = row.getBoundingClientRect();
+      const before = (e.clientY - rect.top) < rect.height/2;
+      tvReorderGridStory(tvGridDragState.id, targetId, before);
+    });
+  });
+}
+function tvReorderGridGroup(draggedRubric, targetRubric, before){
+  const blocks = [...tvState.tvGridBlocks].sort((a,b)=> a.sortOrder-b.sortOrder);
+  const groups = tvGroupGridBlocks(blocks);
+  const draggedIdx = groups.findIndex(g=> g.type==='group' && g.rubric===draggedRubric);
+  if(draggedIdx<0) return;
+  const [draggedGroup] = groups.splice(draggedIdx, 1);
+  const targetIdx = groups.findIndex(g=> g.type==='group' && g.rubric===targetRubric);
+  if(targetIdx<0) return;
+  groups.splice(before ? targetIdx : targetIdx+1, 0, draggedGroup);
+  const newBlocks = groups.flatMap(g=> g.type==='group' ? g.blocks : [g.block]);
+  newBlocks.forEach((b,i)=> { b.sortOrder = i; });
+  tvState.tvGridBlocks = newBlocks;
+  tvSaveSoon();
+  renderTvGrid();
+}
+function tvReorderGridStory(draggedId, targetId, before){
+  const blocks = [...tvState.tvGridBlocks].sort((a,b)=> a.sortOrder-b.sortOrder);
+  const draggedIdx = blocks.findIndex(b=> b.id===draggedId);
+  if(draggedIdx<0) return;
+  const [draggedBlock] = blocks.splice(draggedIdx, 1);
+  const targetIdx = blocks.findIndex(b=> b.id===targetId);
+  if(targetIdx<0) return;
+  blocks.splice(before ? targetIdx : targetIdx+1, 0, draggedBlock);
+  blocks.forEach((b,i)=> { b.sortOrder = i; });
+  tvState.tvGridBlocks = blocks;
+  tvSaveSoon();
+  renderTvGrid();
+}
+// ---- Монтаж — placeholder tab (data-tv-page="montage") between Сетка and TASKS. "В
+// монтаж" (gated on the Сетка tab's own "утверждено" flag — Костян's framing: "утверждённую
+// сетку") just snapshots the current block count/timestamp; the real virtual editor is
+// explicitly NOT built yet (Studios + virtual editor stages C-F in CLAUDE.md) — this is
+// only the receiving section, per Костян's own scope for this pass. ----
+function tvUpdateSendToMontageButton(){
+  const btn = document.getElementById('tvSendToMontageBtn');
+  if(!btn) return;
+  const approved = !!tvState.approvals.grid;
+  btn.disabled = !approved;
+  btn.title = approved ? 'Отправить утверждённую сетку в монтаж' : 'Сначала утвердите сетку кнопкой выше';
+}
+function tvSendToMontage(){
+  if(!tvState.approvals.grid) return;
+  tvState.tvMontage = { sentAt: Date.now(), blockCount: tvState.tvGridBlocks.length };
+  tvSaveSoon();
+  const hint = document.getElementById('tvSendToMontageHint');
+  if(hint){
+    hint.textContent = 'Отправлено в монтаж: ' + tvState.tvGridBlocks.length + ' блоков.';
+    setTimeout(()=>{ if(hint.textContent.indexOf('Отправлено')===0) hint.textContent=''; }, 4000);
+  }
+  showTvPage('montage');
+}
+function renderTvMontage(){
+  const el = document.getElementById('tvMontageBox');
+  if(!el) return;
+  const m = tvState.tvMontage || { sentAt:null, blockCount:0 };
+  if(!m.sentAt){
+    el.innerHTML = `<div class="tv-empty-hint">Пока ничего не отправлено. Утвердите Сетку и нажмите «В монтаж».</div>`;
+    return;
+  }
+  const dt = new Date(m.sentAt);
+  el.innerHTML = `<div class="tv-empty-hint">Сетка отправлена в монтаж ${dt.toLocaleString('ru-RU')} — ${m.blockCount} блоков.<br>Сам виртуальный монтажёр ещё не построен — сюда он будет собирать выпуск из этих блоков.</div>`;
 }
 // Recomputes tvGridBlocks[].anchorId whenever it's still unset and exactly one null-rubric
 // anchor now exists — same "recheck every render" rule as Редакция's story assignment, so
@@ -2174,6 +2426,8 @@ function wireTvPageTabs(){
   if(clearProposedNewsBtn) clearProposedNewsBtn.onclick = tvClearProposedNews;
   const autoPopulateGridBtn = document.getElementById('tvAutoPopulateGridBtn');
   if(autoPopulateGridBtn) autoPopulateGridBtn.onclick = tvAutoPopulateGrid;
+  const sendToMontageBtn = document.getElementById('tvSendToMontageBtn');
+  if(sendToMontageBtn) sendToMontageBtn.onclick = tvSendToMontage;
   const sendToWritingBtn = document.getElementById('tvSendToWritingBtn');
   if(sendToWritingBtn) sendToWritingBtn.onclick = tvSendToWriting;
   document.querySelectorAll('#tvNewsSubTabs .tv-subtab').forEach(tab=>{
