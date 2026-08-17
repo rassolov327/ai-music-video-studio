@@ -233,11 +233,40 @@ thumbnails. Expand state is UI-only (`tvExpandedNewsIds`, a `Set`), not persiste
 Only ONE text output is needed per news item: what the anchor reads aloud. No separate
 print-article version. **v1 BUILT** (`POST /api/tv/write-article`, `server.js`) — Gemini
 only, free tier, no `requireAuth` (same reasoning as `/api/tv/gather-news`: $0 cost, nothing
-to bill). Client sends title/summary/extract/rubric/sourceDate plus
+to bill). Client sends title/summary/extract/rubric/sourceDate/sourceUrl/source plus
 `tvBuildAnchorVoiceContext(anchor)`'s assembled persona text; the server prompt tells Gemini
 which real year it's writing for (derived from `sourceDate`) and to use only the facts in
 `extract`. Dispatched from a TASKS tile (`kind:'article'`), never auto-started — see
 Редакция above for how a task gets queued.
+
+- **Full-article read for Компьютерра, at write-time only** — `tvFetchComputerraFullArticle()`
+  re-fetches the item's own real per-article page (`sourceUrl`, e.g.
+  `old.computerra.ru/197827/` — a real individual article, not the day-index page) and
+  extracts `<div class="article">...<div class="bottom">` (confirmed live: the real article
+  wrapper, right before the shared page footer), replacing the short gather-time blurb with
+  the real full body (several thousand characters vs. ~150). Only for `source==='computerra'`
+  and only when actually writing (not at gather-time, which stays cheap since most gathered
+  items never get written) — the other two sources' `extract` already IS the real fetched
+  text (Wayback) or the real Wikipedia summary, nothing shorter to upgrade from.
+- **Character personality, applied at write-time** — this is deliberately where Костян wants
+  "the magic" of who the anchor really is to come through, not just tone. Two NEW persona
+  list fields (`catchphrases`, `signatureActions` — `TV_PERSONA_LIST_FIELDS`,
+  `js/tv-state.js`) hold MULTIPLE variants each; `tvRunTvTask()` (`js/tv-app.js`) picks one of
+  each at random per article (`tvPickRandom()`) — not the same catchphrase every single
+  time — and sends them as `chosenCatchphrase`/`chosenAction`. The prompt weaves the
+  catchphrase in only where it fits naturally, and turns the action into ONE parenthetical
+  stage-direction remark in the text itself, e.g. `(Макс достаёт из кармана планку памяти)`
+  — explicitly told to Gemini as filming notation, not something to be read aloud.
+  `catchphrases` sits alongside the older single `catchphrase` field (used as a fallback when
+  the new list is empty) rather than replacing it — no migration needed, nothing lost for
+  anchors set up before this existed.
+- **Parenthetical remarks never reach TTS** — `/api/tv/generate-voice` strips `(...)`
+  segments before sending text to any provider (`spokenText`, a simple regex strip); the
+  stored `articleText` keeps them intact. They're meant to eventually feed the not-yet-built
+  virtual editor (see "Studios + virtual editor" below) — Костян's framing: the system
+  should "understand" these remarks well enough to tell a future video-generation step what
+  physical action the anchor performs during that beat, once that stage exists. Not wired
+  into Сетка/video generation yet — deliberately out of scope for this pass.
 
 The generation must be indistinguishable from a real human writer of that era. This is a
 prompting/context problem, not a model-choice problem — v1's prompt covers the anachronism

@@ -89,6 +89,20 @@ const TV_PERSONA_LIST_FIELDS = [
   { key:'onCameraHabits',     label:'Привычки в кадре',       placeholder:'по одному пункту на строку' },
   { key:'speechPatterns',     label:'Речевые особенности',    placeholder:'по одному пункту на строку' },
   { key:'sampleLines',        label:'Примеры реплик',         placeholder:'по одной реплике на строку' },
+  // Multiple variants, not one canonical phrase — tvRunTvTask (js/tv-app.js) picks ONE at
+  // random per article so the same catchphrase doesn't repeat every single time. Separate
+  // from the older single `catchphrase` text field above, which stays as a fallback when
+  // this list is empty (no migration needed — nothing is lost for anchors set up before
+  // this existed).
+  { key:'catchphrases',       label:'Коронные фразочки (варианты)', placeholder:'несколько вариантов, по одному на строку — при написании берётся случайная' },
+  // Physical business/stage-direction remarks — e.g. "достаёт из кармана планку памяти".
+  // tvRunTvTask picks one at random per article and the write-article prompt inserts it as
+  // a parenthetical remark in the text, e.g. "(Макс достаёт из кармана планку памяти)".
+  // /api/tv/generate-voice strips these before TTS (never read aloud) — they're a note for
+  // filming, meant to eventually feed the not-yet-built virtual editor / video generation
+  // (see CLAUDE.md's "Studios + virtual editor" section) so it knows what physical action
+  // the anchor performs during that beat.
+  { key:'signatureActions',   label:'Фирменные действия в кадре', placeholder:'например: достаёт из кармана планку памяти — по одному на строку' },
   { key:'additionalDetails',  label:'Дополнительные детали',  placeholder:'по одному пункту на строку' },
 ];
 function tvEmptyPersona(){

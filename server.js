@@ -1211,8 +1211,31 @@ async function tvCallKieClaudeText(prompt) {
 // requireAuth/checkUserCanAfford for now, matching /TV's whole billing model (Костян is the
 // only user of /TV right now; the shared credits system exists for TAKE:ONE's main users,
 // not /TV specifically) — revisit if /TV ever gets more than one real user.
+// Компьютерра's day-archive blurb (`extract`, saved at gather-time) is short — the real
+// article, at its own per-article URL, is much richer (confirmed live: a real article body
+// ran several thousand characters once stripped, vs. ~150 chars of blurb). Re-fetching it
+// only NOW, at write-time, rather than for every gathered item up front, keeps the gather
+// step cheap (most gathered items never get written) and only pays the extra fetch for
+// stories Костян actually picked. Only Компьютерра — the other sources' `extract` already
+// IS the real fetched page text (Wayback) or the real Wikipedia summary (no separate
+// "short version" to upgrade from).
+async function tvFetchComputerraFullArticle(sourceUrl) {
+  const res = await fetch(sourceUrl);
+  if (!res.ok) return null;
+  const html = await res.text();
+  // Real per-article pages wrap the actual story in <div class="article">...<!-- fin -->,
+  // right before the page's shared <div class="bottom"> footer — confirmed live against a
+  // real article (old.computerra.ru/197827/, "VIAдук для Pentium 4"). Falls back to the
+  // whole page if that landmark ever moves, rather than failing outright.
+  const start = html.indexOf('<div class="article">');
+  const end = html.indexOf('<div class="bottom">');
+  const slice = (start >= 0 && end > start) ? html.slice(start, end) : html;
+  const text = tvStripHtml(slice);
+  return text.length > 100 ? text.slice(0, 6000) : null;
+}
+
 app.post('/api/tv/write-article', async (req, res) => {
-  const { title, summary, extract, rubric, sourceDate, personaContext, model } = req.body || {};
+  const { title, summary, extract, rubric, sourceDate, sourceUrl, source, personaContext, chosenCatchphrase, chosenAction, model } = req.body || {};
   if (!title || !personaContext) {
     return res.status(400).json({ error: 'bad_request', message: 'title and personaContext are both required.' });
   }
@@ -1225,11 +1248,19 @@ app.post('/api/tv/write-article', async (req, res) => {
   }
   const year = (sourceDate && parseInt(String(sourceDate).slice(0, 4), 10)) || (new Date().getUTCFullYear() - 25);
 
+  let fullExtract = extract;
+  if (source === 'computerra' && sourceUrl) {
+    try {
+      const full = await tvFetchComputerraFullArticle(sourceUrl);
+      if (full) fullExtract = full;
+    } catch (err) { console.warn('[tv] computerra full-article fetch failed for', sourceUrl, err.message); }
+  }
+
   const prompt = [
     `Ты пишешь текст, который ведущий прочитает в кадре в эфире российской телепередачи про технологии, выходящей в ${year} году. Это не статья — это устная речь для эфира.`,
     `Тема сюжета: «${title}».`,
     summary ? `Краткое содержание: ${summary}` : '',
-    extract ? `Реальный исходный текст по теме (используй только факты отсюда, ничего не выдумывай):\n${extract}` : '',
+    fullExtract ? `Реальный исходный текст по теме (используй только факты отсюда, ничего не выдумывай):\n${fullExtract}` : '',
     `Рубрика: ${rubric || 'не указана'}.`,
     `Вот кто ведёт эту рубрику — пиши строго от его лица, с его манерой и характером:`,
     personaContext,
@@ -1237,8 +1268,12 @@ app.post('/api/tv/write-article', async (req, res) => {
     `- Только реальные факты из исходного текста выше — ничего не придумывай и не домысливай.`,
     `- Никаких понятий и технологий, которых ещё не существовало на момент ${year} года.`,
     `- Никаких списков, подзаголовков, канцелярских оборотов, штампов вроде "подводя итог" или искусственной "сбалансированности". Живая устная речь для эфира — с ритмом, характерными для ведущего словами-паразитами и репликами, реальным мнением, а не нейтральным пересказом.`,
-    `- Длина — на 20-40 секунд эфирного времени (примерно 50-100 слов).`,
-    `Ответь только самим текстом для эфира, без пояснений и без кавычек вокруг него.`,
+    // The two lines below are where the character's personality is actually meant to show
+    // through, per Костян: "должна происходить та самая магия, где раскрывается личность".
+    chosenCatchphrase ? `- У этого ведущего есть коронная фраза: «${chosenCatchphrase}». Вплети её туда, где она органично звучит — не обязательно в самом начале, и не заставляй её звучать, если не подходит по смыслу.` : '',
+    chosenAction ? `- У этого ведущего есть фирменное действие в кадре: «${chosenAction}». Добавь ОДНУ ремарку об этом действии в скобках в подходящем месте текста — например "(${chosenAction})". Это режиссёрская ремарка для съёмки, а не текст на озвучку — она не должна звучать как часть устной речи, только как пометка в скобках.` : '',
+    `- Длина — на 20-40 секунд эфирного времени (примерно 50-100 слов), не считая ремарки в скобках.`,
+    `Ответь только самим текстом для эфира (с ремаркой в скобках, если она есть), без пояснений и без кавычек вокруг него.`,
   ].filter(Boolean).join('\n\n');
 
   try {
@@ -1421,12 +1456,18 @@ app.post('/api/tv/generate-voice', async (req, res) => {
   if (!matched.provider && !GEMINI_API_KEY) {
     return res.status(503).json({ error: 'not_configured', message: 'GEMINI_API_KEY is not set on the server yet.' });
   }
+  // Parenthetical remarks (e.g. "(Макс достаёт из кармана планку памяти)") are stage
+  // directions for filming, baked into articleText by /api/tv/write-article — never meant
+  // to be read aloud. Strip them here, right before they'd reach any TTS provider; the
+  // stored articleText itself keeps them intact for later (Сетка / a future virtual editor
+  // reading them as shot instructions — see CLAUDE.md's "Studios + virtual editor" section).
+  const spokenText = text.replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim() || text;
   try {
     if (matched.provider === 'kie-elevenlabs' || matched.provider === 'kie-gemini') {
       const speedNum = { slow: 0.85, normal: 1, fast: 1.15 }[voiceSpeed] || 1;
       const audioUrl = matched.provider === 'kie-gemini'
-        ? await tvCallKieGeminiVoice(text, voiceName)
-        : await tvCallKieElevenLabsVoice(text, voiceName, speedNum);
+        ? await tvCallKieGeminiVoice(spokenText, voiceName)
+        : await tvCallKieElevenLabsVoice(spokenText, voiceName, speedNum);
       const audioRes = await fetch(audioUrl);
       if (!audioRes.ok) throw new Error('Could not download the generated audio from KIE.ai.');
       const buf = Buffer.from(await audioRes.arrayBuffer());
@@ -1445,7 +1486,7 @@ app.post('/api/tv/generate-voice', async (req, res) => {
       method: 'POST',
       headers: { 'x-goog-api-key': GEMINI_API_KEY, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: speedPrefix + text }] }],
+        contents: [{ role: 'user', parts: [{ text: speedPrefix + spokenText }] }],
         generationConfig: {
           responseModalities: ['AUDIO'],
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voiceName || 'Kore' } } },

@@ -398,6 +398,12 @@ function tvBuildAnchorVoiceContext(anchor){
   });
   return lines.join('\n');
 }
+// Picks one random truthy entry from a list — used for catchphrases/signature actions so
+// each written article gets a different one instead of the model settling on a favorite.
+function tvPickRandom(arr){
+  const items = (arr || []).filter(Boolean);
+  return items.length ? items[Math.floor(Math.random() * items.length)] : null;
+}
 function tvOpenAnchorPersona(anchor){
   anchor.persona = anchor.persona || tvEmptyPersona();
   const p = anchor.persona;
@@ -1415,9 +1421,22 @@ async function tvRunTvTask(taskId){
       const anchor = target.anchor;
       if(!anchor) throw new Error('Ведущий не назначен.');
       const personaContext = tvBuildAnchorVoiceContext(anchor);
+      // A different catchphrase/action picked per article, not the same one every time —
+      // per Костян's explicit ask ("не каждую статью одну и ту же фразочку"). Picked here
+      // (not left to the model) so it's genuinely randomized rather than the model settling
+      // into a favorite. chosenAction becomes a parenthetical stage-direction remark in the
+      // written text — the model is told this explicitly, see server.js's prompt.
+      const p = anchor.persona || {};
+      const catchphrasePool = (p.catchphrases && p.catchphrases.length) ? p.catchphrases : [p.catchphrase];
+      const chosenCatchphrase = tvPickRandom(catchphrasePool);
+      const chosenAction = tvPickRandom(p.signatureActions);
       const res = await fetch('/api/tv/write-article', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: item.title, summary: item.summary, extract: item.extract, rubric: item.rubric, sourceDate: item.sourceDate, personaContext, model: task.model }),
+        body: JSON.stringify({
+          title: item.title, summary: item.summary, extract: item.extract, rubric: item.rubric,
+          sourceDate: item.sourceDate, sourceUrl: item.sourceUrl, source: item.source,
+          personaContext, chosenCatchphrase, chosenAction, model: task.model,
+        }),
       });
       const data = await res.json().catch(()=> null);
       if(res.status===401) throw new Error('Нужно войти в аккаунт — откройте / и авторизуйтесь, затем вернитесь на /tv.');
