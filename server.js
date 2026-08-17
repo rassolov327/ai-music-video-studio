@@ -1174,9 +1174,16 @@ async function tvCallGeminiText(prompt) {
 }
 // docs.kie.ai/market/chat/gpt-5-4: POST https://api.kie.ai/codex/v1/responses, a synchronous
 // chat-completions-style endpoint (not the async createTask+webhook pattern the image/video
-// models use). The docs page showed the REQUEST shape but not the response body — the
-// output_text/output[].content[] paths below are OpenAI's own Responses API convention,
-// not independently confirmed for KIE's proxy specifically.
+// models use). Real response shape now confirmed live against docs.kie.ai's own example
+// (it 404'd/403'd during earlier research, loaded fine this time):
+//   { output: [ {type:'reasoning', ...no content...}, {type:'message', content:[{type:
+//   'output_text', text:'...'}]} ], usage:{...}, status:'completed' }
+// The old code assumed output[0] was the message — wrong: reasoning models put a
+// no-`content` "reasoning" item first, so output[0].content was undefined and the real text
+// (in a later "message" item) was never found — that's the real cause of "KIE.ai (GPT)
+// returned no text". Also dropped the `output_text` top-level fallback: that field is a
+// convenience property OpenAI's own SDKs synthesize client-side, not something present in
+// the raw HTTP response body a proxy like KIE would actually send.
 async function tvCallKieGptText(prompt) {
   const res = await fetch(`${KIE_BASE}/codex/v1/responses`, {
     method: 'POST',
@@ -1185,9 +1192,10 @@ async function tvCallKieGptText(prompt) {
   });
   const data = await res.json().catch(() => null);
   if (!res.ok) throw new Error((data && data.error && data.error.message) || ('KIE.ai (GPT) rejected the request (HTTP ' + res.status + ').'));
-  const text = (data && data.output_text)
-    || (data && data.output && data.output[0] && data.output[0].content && data.output[0].content[0] && data.output[0].content[0].text);
-  if (!text) throw new Error('KIE.ai (GPT) returned no text — response shape may differ from what was assumed.');
+  const messageItem = data && Array.isArray(data.output) && data.output.find((o) => o.type === 'message');
+  const textItem = messageItem && Array.isArray(messageItem.content) && messageItem.content.find((c) => c.type === 'output_text');
+  const text = textItem && textItem.text;
+  if (!text) throw new Error('KIE.ai (GPT) returned no text — response shape: ' + JSON.stringify(data).slice(0, 500));
   return text;
 }
 // The Claude-Code-via-KIE integration guide confirms the base is https://api.kie.ai/claude,
