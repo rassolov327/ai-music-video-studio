@@ -1362,17 +1362,25 @@ app.post('/api/tv/write-block-text', async (req, res) => {
 // paid and the exact same model is already free direct from Google above — the point isn't
 // quality, it's a genuinely separate quota/billing path (KIE credits, not the GEMINI_API_KEY
 // free tier), so it still works as a fallback on a day the free tier's rate limit is
-// exhausted. Real docs.kie.ai fetches for this one all 403'd/404'd — went through two wrong
-// guesses first: `gemini-3.1-flash-tts` (dot) and `gemini-3-1-flash-tts` (dash) both came
-// back "model name ... not supported" from KIE for real. A search then surfaced KIE's own
-// actually-confirmed Gemini TTS lineup: `gemini-2-5-flash-tts` / `gemini-2-5-pro-tts` — no
-// 3.1 tier listed at all, despite kie.ai/gemini-3.1-flash-tts existing as a marketing page.
-// Using gemini-2-5-flash-tts now — still not independently confirmed via real docs, but
-// backed by a real "supported model IDs" mention, one step better than a bare guess. ----
+// exhausted. Two earlier guesses (`gemini-3.1-flash-tts`, `gemini-3-1-flash-tts` — no
+// `google/` prefix) failed for real ("model name ... not supported"), and a follow-up
+// search-based guess (`gemini-2-5-flash-tts`, still no prefix) was never actually confirmed
+// either. KIE support then pointed directly at the real docs pages
+// (docs.kie.ai/market/google/gemini-3-1-flash-tts), which loaded for real this time and
+// showed BOTH the real cause of the earlier failures (missing `google/` prefix — the real
+// id is `google/gemini-3-1-flash-tts`, confirming the 3.1 tier DOES exist after all) and a
+// completely different request shape than assumed: not a simple {text, voice}, but a
+// multi-speaker dialogue shape ({speakers:[{speaker_id,voice_name,...}],
+// dialogue_turns:[{speaker_id,text}]}) — see tvCallKieGeminiVoice below. `voice_name`'s
+// documented enum (Achernar, Achird, Algenib, ... Zephyr, Zubenelgenubi) matches Google's
+// own native Gemini TTS voice names one-for-one, so the same voiceId already stored on each
+// anchor for the free-tier path works here unchanged, no separate field needed.
 const TV_VOICE_MODELS = [
   { id: 'gemini-tts', label: 'Gemini 2.5 Flash TTS (бесплатно)', costUsd: 0, blurb: 'Тот же ключ, что и для текста — уже проверена вживую, реально работает' },
   { id: 'gemini-tts-next', label: 'Gemini 3.1 Flash TTS (бесплатно)', costUsd: 0, blurb: 'Тот же ключ, новее — вживую ещё не проверялась', geminiModelKey: 'next' },
-  { id: 'kie-gemini-tts', label: 'Gemini 2.5 Flash TTS (KIE.ai)', costUsd: 0.03, blurb: 'Платно, через ключ KIE — отдельная квота на случай, если бесплатный Gemini лимит исчерпан; 3.1 через KIE, похоже, не существует, взял подтверждённую 2.5', provider: 'kie-gemini' },
+  { id: 'kie-gemini-tts', label: 'Gemini 3.1 Flash TTS (KIE.ai)', costUsd: 0.03, blurb: 'Платно, через ключ KIE — отдельная квота на случай, если бесплатный Gemini лимит исчерпан; реальная схема запроса подтверждена доками KIE после ответа саппорта', provider: 'kie-gemini' },
+  // 500-ошибка отсюда, которую ловили раньше, по подтверждению саппорта KIE — временный
+  // сбой на их стороне, не проблема формы запроса или прав аккаунта. Код ниже не менялся.
   { id: 'kie-elevenlabs-multi', label: 'ElevenLabs Multilingual v2 (KIE.ai)', costUsd: 0.05, blurb: 'Платно, через тот же ключ KIE — живее интонация, 60+ голосов на выбор, цена оценочная', provider: 'kie-elevenlabs' },
 ];
 app.get('/api/tv/voice-models', (req, res) => {
@@ -1422,13 +1430,19 @@ async function tvCallKieElevenLabsVoice(text, voiceId, speed) {
     'ElevenLabs'
   );
 }
-// Unverified via real docs — see the big comment above TV_VOICE_MODELS for the two wrong
-// 3.1-tier guesses ('gemini-3.1-flash-tts', 'gemini-3-1-flash-tts') that KIE rejected for
-// real as "model name ... not supported". Using gemini-2-5-flash-tts now — a search
-// surfaced it as one of KIE's own stated "supported model IDs" for this category, so it's
-// backed by something more than pattern-matching, but still not a direct docs fetch.
+// Real confirmed shape (docs.kie.ai/market/google/gemini-3-1-flash-tts, see the big comment
+// above TV_VOICE_MODELS) — a multi-speaker dialogue API, not a plain {text, voice} call.
+// One speaker is enough for our single-anchor voiceover use; speaker_id just needs to match
+// between the two arrays, its exact string doesn't matter beyond that.
 async function tvCallKieGeminiVoice(text, voiceId) {
-  return tvCallKieAudioTask('gemini-2-5-flash-tts', { text, voice: voiceId || 'Kore' }, 'Gemini TTS');
+  return tvCallKieAudioTask(
+    'google/gemini-3-1-flash-tts',
+    {
+      speakers: [{ speaker_id: 'Speaker 1', voice_name: voiceId || 'Kore' }],
+      dialogue_turns: [{ speaker_id: 'Speaker 1', text }],
+    },
+    'Gemini TTS'
+  );
 }
 function tvPcmToWav(pcmBuffer, sampleRate, numChannels, bitsPerSample) {
   const byteRate = sampleRate * numChannels * bitsPerSample / 8;
