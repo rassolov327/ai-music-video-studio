@@ -273,6 +273,10 @@ function tvOpenAnchorForm(existing){
           <option value="fast"${existing && existing.voiceSpeed==='fast' ? ' selected' : ''}>Быстро</option>
         </select>
       </div>
+      <div class="cf-field"><label>ElevenLabs Voice ID <span style="color:var(--text-3);font-weight:400;">— необязательно, отдельный ID из Voice Library ElevenLabs</span></label>
+        <input type="text" id="tvAnchorElevenLabsVoiceId" placeholder="например, yl2ZDV1MzN4HbQJbMihG" value="${existing && existing.elevenLabsVoiceId ? existing.elevenLabsVoiceId : ''}">
+        <div class="gen-hint" style="margin-top:4px;">Если заполнено — в TASKS для этого ведущего появится вариант «ElevenLabs v3 (${existing ? existing.name : 'имя ведущего'})».</div>
+      </div>
       <div class="cf-field">
         <button class="cf-btn" type="button" id="tvAnchorVoicePreviewBtn" style="width:100%;">▶ Прослушать тестовый кусочек</button>
         <div class="gen-hint" id="tvAnchorVoicePreviewHint" style="margin-top:6px;"></div>
@@ -364,6 +368,7 @@ function tvOpenAnchorForm(existing){
       description: document.getElementById('tvAnchorDesc').value.trim(),
       voiceId: document.getElementById('tvAnchorVoice').value,
       voiceSpeed: document.getElementById('tvAnchorVoiceSpeed').value,
+      elevenLabsVoiceId: document.getElementById('tvAnchorElevenLabsVoiceId').value.trim(),
     };
     if(!isNewPhoto) payload.photo = photoDataUrl;
     const anchor = tvSaveAnchorLocal(payload, existing || null);
@@ -1270,8 +1275,18 @@ function tvSendToWriting(){
 // ---- TASKS tab — two-phase tiles, same lifecycle as js/tasks.js's own queue: 'draft' (model
 // not chosen/sent yet) -> 'running' (sent, waiting on the provider) -> 'done'/'failed'. Never
 // auto-starts — a draft tile just sits there until Костян picks a model and clicks Generate. ----
-function tvTaskModelOptions(kind){
-  return kind==='article' ? tvTextModelOptions : tvVoiceModelOptions;
+// 'elevenlabs-v3' needs a real per-anchor voice_id (anchor.elevenLabsVoiceId) that most
+// anchors won't have set — showing it generically would let Костян pick a model that's
+// guaranteed to fail. Filtered out entirely when this specific task's anchor has none, and
+// relabelled with the anchor's own name when it does, so it's unambiguous whose voice this
+// actually is (not just "ElevenLabs v3" in the abstract).
+function tvTaskModelOptions(kind, anchor){
+  if(kind==='article') return tvTextModelOptions;
+  return tvVoiceModelOptions
+    .filter(m=> m.id!=='elevenlabs-v3' || (anchor && anchor.elevenLabsVoiceId))
+    .map(m=> (m.id==='elevenlabs-v3' && anchor)
+      ? Object.assign({}, m, { label: 'ElevenLabs v3 (' + anchor.name + ')' })
+      : m);
 }
 function tvFormatCost(costUsd){
   return costUsd ? ('$' + costUsd.toFixed(2)) : 'бесплатно';
@@ -1341,7 +1356,7 @@ function renderTvTasks(){
     // thing: pick/change a model, then send — a failed task shouldn't be a dead end that
     // forces deleting it and re-queuing from scratch just to try a different model.
     if(t.status==='draft' || t.status==='failed'){
-      const options = tvTaskModelOptions(t.kind);
+      const options = tvTaskModelOptions(t.kind, target && target.anchor);
       const modelHtml = options.length
         ? `<select class="tv-redak-select" data-task-model="${t.id}" style="width:100%;">
              <option value="">Выберите модель</option>
@@ -1447,9 +1462,13 @@ async function tvRunTvTask(taskId){
       const text = target.kindTarget==='block' ? target.ref.text : target.ref.articleText;
       if(!text) throw new Error('Текст ещё не написан.');
       const anchor = target.anchor;
+      // ElevenLabs voice_id and Gemini voice name are different id spaces on the same
+      // anchor (elevenLabsVoiceId vs voiceId) — send whichever one actually matches the
+      // model picked for this task.
+      const voiceName = task.model==='elevenlabs-v3' ? (anchor && anchor.elevenLabsVoiceId) : (anchor && anchor.voiceId);
       const res = await fetch('/api/tv/generate-voice', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, voiceName: anchor && anchor.voiceId, voiceSpeed: anchor && anchor.voiceSpeed, model: task.model }),
+        body: JSON.stringify({ text, voiceName, voiceSpeed: anchor && anchor.voiceSpeed, model: task.model }),
       });
       if(res.status===401) throw new Error('Нужно войти в аккаунт — откройте / и авторизуйтесь, затем вернитесь на /tv.');
       if(!res.ok){
@@ -1539,10 +1558,14 @@ function tvRenderMicItemsList(anchorId){
   listEl.innerHTML = items.map(item=>{
     const voiced = !!item.voiceUrl;
     const pending = item.voiceTaskId != null;
+    const textEscaped = (item.articleText||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     return `<div class="tv-mic-item" data-item-id="${item.id}">
       <div class="tv-mic-item-del" data-del-item="${item.id}" title="Удалить текст">&times;</div>
       <div class="tv-mic-item-title">${item.title}</div>
-      <div class="tv-mic-item-text">${item.articleText}</div>
+      <textarea class="tv-mic-item-text" data-text-item="${item.id}">${textEscaped}</textarea>
+      <div class="tv-mic-tags" data-tags-for="${item.id}">
+        ${TV_ELEVENLABS_EMOTION_TAGS.map(t=> `<button type="button" class="tv-mic-tag-btn" data-tag="${t.tag}" data-tag-target="${item.id}" title="${t.label}">[${t.tag}]</button>`).join('')}
+      </div>
       <div class="tv-mic-item-row">
         <span class="tv-mic-speaker ${voiced?'voiced':'unvoiced'}" title="${voiced?'Озвучено':'Не озвучено'}">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.5 8.5a5 5 0 0 1 0 7"></path></svg>
@@ -1559,6 +1582,32 @@ function tvRenderMicItemsList(anchorId){
     btn.onclick = ()=>{
       tvSendToVoicing(Number(btn.dataset.voiceItem));
       tvRenderMicItemsList(anchorId);
+    };
+  });
+  // Autosave on edit, same as every other free-text field in the app — no separate "save
+  // text" button. Editing stays allowed even after voicing (re-voice after a fix is a real
+  // flow, not a special case).
+  listEl.querySelectorAll('[data-text-item]').forEach(textarea=>{
+    textarea.oninput = ()=>{
+      const item = tvState.tvNewsItems.find(n=> n.id===Number(textarea.dataset.textItem));
+      if(item){ item.articleText = textarea.value; tvSaveSoon(); }
+    };
+  });
+  // Emotion tag buttons — insert "[tag] " at the textarea's current cursor position (not
+  // always at the end), then put the cursor right after what was just inserted so typing
+  // continues naturally. ElevenLabs v3 reads these as delivery direction; every other TTS
+  // provider strips them before generating (see /api/tv/generate-voice, server.js).
+  listEl.querySelectorAll('.tv-mic-tag-btn').forEach(btn=>{
+    btn.onclick = ()=>{
+      const textarea = listEl.querySelector(`textarea[data-text-item="${btn.dataset.tagTarget}"]`);
+      if(!textarea) return;
+      const insert = '[' + btn.dataset.tag + '] ';
+      const start = textarea.selectionStart, end = textarea.selectionEnd;
+      textarea.value = textarea.value.slice(0, start) + insert + textarea.value.slice(end);
+      const caret = start + insert.length;
+      textarea.focus();
+      textarea.setSelectionRange(caret, caret);
+      textarea.dispatchEvent(new Event('input', { bubbles:true }));
     };
   });
   listEl.querySelectorAll('[data-del-item]').forEach(btn=>{

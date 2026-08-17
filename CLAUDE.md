@@ -293,24 +293,39 @@ and AI-tell rules below via instruction only:
 
 ## Voicing (Микрофонная tab) — v1 BUILT
 
-`POST /api/tv/generate-voice` (`server.js`) — Gemini's native-audio TTS, same free tier/no
-`requireAuth` reasoning as writing above. Takes approved `articleText` + the anchor's
-`voiceId` field (already existed, doubles as the Gemini voice name — e.g. `Kore`) and
-returns raw WAV bytes directly (Gemini's response is base64 PCM; `tvPcmToWav()` wraps it
-with a real WAV header so `<audio>` can play it, no separate decoder needed). Dispatched
-from a TASKS tile (`kind:'voice'`), same non-auto-start rule.
+`POST /api/tv/generate-voice` (`server.js`) — takes approved `articleText`/block `text` +
+the target model's chosen voice id and returns audio bytes directly. Dispatched from a
+TASKS tile (`kind:'voice'`), same non-auto-start rule. Four providers live in
+`TV_VOICE_MODELS`:
 
-**Two things genuinely unverified — no real `GEMINI_API_KEY` was available while building
-this, so neither route has run against the real API yet:**
-- `GEMINI_TTS_MODEL` (`server.js`) is a best-guess model id (`gemini-2.5-flash-preview-tts`),
-  overridable via env without a code change — Google's TTS-specific model names churn fast,
-  same caveat as `GEMINI_MODEL`'s own comment. If this 404s, that's the first thing to check.
-  Error-handling itself IS verified — a real 503 "not configured" round-trips correctly
-  through the TASKS tile UI when no key is set at all.
-- **Paid voice alternative (ElevenLabs via KIE.ai)** — same story as the paid text model:
-  KIE.ai does list ElevenLabs TTS models, but the real createTask request shape wasn't
-  confirmed, so it's not wired into `TV_VOICE_MODELS`. Confirm the field names for real
-  before adding it, not guessing.
+- **`gemini-tts` / `gemini-tts-next`** — Gemini's native-audio TTS, free tier, uses the
+  anchor's `voiceId` field (a Gemini voice name, e.g. `Kore`). Confirmed working live.
+- **`kie-gemini-tts` / `kie-elevenlabs-multi`** — same two engines proxied through KIE
+  credits instead, as a fallback when the free Gemini quota (20 req/min, shared across every
+  Gemini feature in this app) is exhausted. Real request shapes confirmed against
+  docs.kie.ai after KIE support pointed at them directly (both had wrong model
+  ids/request shapes originally — see git history). The KIE Gemini path is a multi-speaker
+  dialogue API (`speakers`+`dialogue_turns`), not a plain `{text,voice}` call.
+- **`elevenlabs-v3`** — Костян's own **direct** ElevenLabs account (`ELEVENLABS_API_KEY`,
+  separate from KIE), one synchronous call
+  (`tvCallElevenLabsDirectVoice()`, real shape confirmed via docs.elevenlabs.io — no
+  createTask/polling needed, the response IS the audio). Uses `anchor.elevenLabsVoiceId` — a
+  **separate id space** from the Gemini `voiceId` field (a real ElevenLabs `voice_id`, e.g.
+  copied from Voice Library — set via a form field in the anchor editor). This is the reason
+  `tvTaskModelOptions()` (`js/tv-app.js`) builds the TASKS model picker per-task rather than
+  from one static list: an anchor with no `elevenLabsVoiceId` set never sees this option at
+  all (would be guaranteed to fail), and anchors that do have one see it relabelled
+  `"ElevenLabs v3 (<anchor name>)"` so it's unambiguous whose voice will actually be used.
+  `model_id: 'eleven_v3'`, `language_code: 'ru'`, `stability: 0.3` (a single shared default
+  approximating where Костян had his own account's Stability slider for Дмитрий Максимов's
+  "Alex" voice — not yet per-anchor tunable). v3 also supports emotion/delivery tags in the
+  text itself (`[excited]`, `[whispers]`, ...) — **not wired in yet**: Микрофонная doesn't
+  have tag-insertion buttons, and there's no stripping of `[...]` before non-v3 providers
+  (which would read them aloud literally) — both are a planned follow-up, deliberately
+  deferred.
+- `GEMINI_TTS_MODEL` (`server.js`) — Google's TTS-specific model names churn fast, same
+  caveat as `GEMINI_MODEL`'s own comment; overridable via env without a code change if it
+  404s.
 
 ## Studios + virtual editor (planned, staged)
 

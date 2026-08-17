@@ -43,6 +43,13 @@ const PORT = process.env.PORT || 8080;
 
 const KIE_API_KEY = process.env.KIE_API_KEY || '';
 const KIE_BASE = 'https://api.kie.ai';
+// Direct ElevenLabs account (Костян's own, real free/paid tier there) — separate from the
+// KIE-proxied ElevenLabs path above (kie-elevenlabs-multi), which goes through KIE credits
+// instead. Confirmed real request/response shape via docs.elevenlabs.io — synchronous, one
+// POST returns the finished audio bytes directly, no createTask+poll needed like KIE's async
+// pattern (see tvCallElevenLabsDirectVoice below).
+const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY || '';
+const ELEVENLABS_BASE = 'https://api.elevenlabs.io';
 // Free-tier text helper (tags, prompt polish, script breakdown) — separate provider, kept
 // intentionally simple/free rather than routed through KIE, since it's a different kind of
 // job (text, not paid image/video generation).
@@ -1382,6 +1389,12 @@ const TV_VOICE_MODELS = [
   // 500-ошибка отсюда, которую ловили раньше, по подтверждению саппорта KIE — временный
   // сбой на их стороне, не проблема формы запроса или прав аккаунта. Код ниже не менялся.
   { id: 'kie-elevenlabs-multi', label: 'ElevenLabs Multilingual v2 (KIE.ai)', costUsd: 0.05, blurb: 'Платно, через тот же ключ KIE — живее интонация, 60+ голосов на выбор, цена оценочная', provider: 'kie-elevenlabs' },
+  // Прямой ключ ElevenLabs (не через KIE) — самый выразительный голос, поддерживает тэги
+  // эмоций в тексте вроде [excited] (сама вставка тэгов — отдельный, ещё не built шаг).
+  // Требует anchor.elevenLabsVoiceId — эта запись всегда в базовом списке, но клиент
+  // (tvTaskModelOptions, js/tv-app.js) прячет её из выбора для ведущих без настроенного
+  // голоса и подставляет имя ведущего в название, когда голос есть.
+  { id: 'elevenlabs-v3', label: 'ElevenLabs v3', costUsd: 0.1, blurb: 'Прямой ключ ElevenLabs, минуя KIE — самый живой голос; цена оценочная по тарифам ElevenLabs', provider: 'elevenlabs-direct' },
 ];
 app.get('/api/tv/voice-models', (req, res) => {
   res.json({ models: TV_VOICE_MODELS });
@@ -1444,6 +1457,30 @@ async function tvCallKieGeminiVoice(text, voiceId) {
     'Gemini TTS'
   );
 }
+// Real confirmed shape (docs.elevenlabs.io/api-reference/text-to-speech/convert) — a single
+// synchronous POST, the response body IS the finished audio (mp3), no polling. `voiceId`
+// must be a real ElevenLabs voice_id (anchor.elevenLabsVoiceId, a separate id space from the
+// Gemini voice names anchor.voiceId holds — see the anchor form). stability:0.3 approximates
+// where Костян had the "Stability" slider (leaning "Creative") on his own account for Dima
+// Maksimov's "Alex" voice — a single shared default for now, not yet per-anchor tunable.
+async function tvCallElevenLabsDirectVoice(text, voiceId) {
+  const res = await fetch(`${ELEVENLABS_BASE}/v1/text-to-speech/${encodeURIComponent(voiceId)}`, {
+    method: 'POST',
+    headers: { 'xi-api-key': ELEVENLABS_API_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      text,
+      model_id: 'eleven_v3',
+      voice_settings: { stability: 0.3 },
+      language_code: 'ru',
+      output_format: 'mp3_44100_128',
+    }),
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(`ElevenLabs rejected the request (HTTP ${res.status}): ${errText.slice(0, 300)}`);
+  }
+  return Buffer.from(await res.arrayBuffer());
+}
 function tvPcmToWav(pcmBuffer, sampleRate, numChannels, bitsPerSample) {
   const byteRate = sampleRate * numChannels * bitsPerSample / 8;
   const blockAlign = numChannels * bitsPerSample / 8;
@@ -1472,19 +1509,37 @@ app.post('/api/tv/generate-voice', async (req, res) => {
     return res.status(400).json({ error: 'bad_request', message: 'text is required.' });
   }
   const matched = TV_VOICE_MODELS.find(m => m.id === model) || TV_VOICE_MODELS[0];
-  if (matched.provider && !KIE_API_KEY) {
+  if (matched.provider === 'elevenlabs-direct' && !ELEVENLABS_API_KEY) {
+    return res.status(503).json({ error: 'not_configured', message: 'ELEVENLABS_API_KEY is not set on the server yet.' });
+  }
+  if (matched.provider && matched.provider !== 'elevenlabs-direct' && !KIE_API_KEY) {
     return res.status(503).json({ error: 'not_configured', message: 'KIE_API_KEY is not set on the server yet.' });
   }
   if (!matched.provider && !GEMINI_API_KEY) {
     return res.status(503).json({ error: 'not_configured', message: 'GEMINI_API_KEY is not set on the server yet.' });
+  }
+  if (matched.provider === 'elevenlabs-direct' && !voiceName) {
+    return res.status(400).json({ error: 'bad_request', message: 'Этому ведущему не задан ElevenLabs Voice ID — заполните поле в карточке ведущего.' });
   }
   // Parenthetical remarks (e.g. "(Макс достаёт из кармана планку памяти)") are stage
   // directions for filming, baked into articleText by /api/tv/write-article — never meant
   // to be read aloud. Strip them here, right before they'd reach any TTS provider; the
   // stored articleText itself keeps them intact for later (Сетка / a future virtual editor
   // reading them as shot instructions — see CLAUDE.md's "Studios + virtual editor" section).
-  const spokenText = text.replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim() || text;
+  const parenStripped = text.replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim() || text;
+  // [tag] emotion/delivery tags (e.g. "[excited]", inserted via Микрофонная's tag buttons)
+  // are ElevenLabs v3-specific — every other provider would read "[excited]" aloud as
+  // literal text. Only v3 gets to see them; everyone else gets them stripped too.
+  const spokenText = matched.provider === 'elevenlabs-direct'
+    ? parenStripped
+    : (parenStripped.replace(/\[[^\]]*\]/g, ' ').replace(/\s+/g, ' ').trim() || parenStripped);
   try {
+    if (matched.provider === 'elevenlabs-direct') {
+      const buf = await tvCallElevenLabsDirectVoice(spokenText, voiceName);
+      res.set('Content-Type', 'audio/mpeg');
+      res.set('X-TV-Voice-Model', matched.id);
+      return res.send(buf);
+    }
     if (matched.provider === 'kie-elevenlabs' || matched.provider === 'kie-gemini') {
       const speedNum = { slow: 0.85, normal: 1, fast: 1.15 }[voiceSpeed] || 1;
       const audioUrl = matched.provider === 'kie-gemini'

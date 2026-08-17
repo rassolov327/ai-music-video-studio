@@ -53,6 +53,22 @@ const TV_GEMINI_VOICES = [
   { id:'Sadachbia', label:'Живой' }, { id:'Sadaltager', label:'Знающий' }, { id:'Sulafat', label:'Тёплый' },
 ];
 
+// ElevenLabs v3 "audio tags" — inserted directly into text as [tag] to steer delivery.
+// Only the voice/emotional-delivery group from docs.elevenlabs.io's v3 prompting guide —
+// deliberately excludes sound effects ([gunshot], [applause], [explosion]...) and
+// experimental tags ([sings], accents...), which don't fit a tech-news anchor. Buttons in
+// Микрофонная (tvRenderMicItemsList, js/tv-app.js) insert `tag` at the cursor position
+// wrapped in brackets; /api/tv/generate-voice strips them before any non-ElevenLabs-v3
+// provider (which would otherwise read "[excited]" aloud literally).
+const TV_ELEVENLABS_EMOTION_TAGS = [
+  { tag:'excited', label:'Взволнованно' }, { tag:'whispers', label:'Шёпотом' },
+  { tag:'sighs', label:'Вздыхает' }, { tag:'laughs', label:'Смеётся' },
+  { tag:'sarcastic', label:'Саркастично' }, { tag:'curious', label:'С любопытством' },
+  { tag:'crying', label:'Плачет' }, { tag:'exhales', label:'Выдыхает' },
+  { tag:'snorts', label:'Фыркает' }, { tag:'mischievously', label:'Лукаво' },
+  { tag:'laughs harder', label:'Смеётся сильнее' }, { tag:'wheezing', label:'Задыхается от смеха' },
+];
+
 // Studios — one dedicated "corner" per rubric (or the null-rubric general host, who "живёт
 // в своей студии" same as any rubric anchor). Manually uploaded only, never AI-generated —
 // exactly 4 wide/establishing shots. The virtual editor (planned, not yet built) derives
@@ -155,7 +171,13 @@ const tvState = {
   // source of truth, restored from the workspace on load and saved after every change.
   // `rubric: null` means "hosts the whole show" (like Богданов in the reference show, or
   // Пушной in Галилео) rather than one dedicated rubric — a real, named case, not a gap.
-  tvAnchors: [],    // [{ id, name, rubric, description, photo, voiceId, persona:{...TV_PERSONA_TEXT_FIELDS/LIST_FIELDS}, card:{inputSlots,prompt,images:{sheet:{url}}}, approved, _assetFiles }]
+  // voiceId/voiceSpeed drive the free Gemini native TTS path. elevenLabsVoiceId is a
+  // SEPARATE id space (a real ElevenLabs voice_id, e.g. copied from Voice Library) for the
+  // direct ElevenLabs v3 path (tvCallElevenLabsDirectVoice, server.js) — optional; TASKS'
+  // voice-model picker (tvTaskModelOptions, js/tv-app.js) only offers ElevenLabs v3 for
+  // anchors that have this set, labelled with the anchor's own name so it's clear whose
+  // voice will be used.
+  tvAnchors: [],    // [{ id, name, rubric, description, photo, voiceId, voiceSpeed, elevenLabsVoiceId, persona:{...TV_PERSONA_TEXT_FIELDS/LIST_FIELDS}, card:{inputSlots,prompt,images:{sheet:{url}}}, approved, _assetFiles }]
   // Studios — one per rubric (or null-rubric for the general host). Manually uploaded only,
   // no card/generation step; each of the 4 slots IS the final asset, not a reference input.
   tvStudios: [],    // [{ id, name, rubric, angles:{front,left,right,back:url|null}, _assetFiles }]
