@@ -1833,16 +1833,40 @@ function renderTvNewsSources(){
 }
 
 // ---- Собрать новости — real, sourced items only (Wayback Machine + Компьютерра +
-// Wikipedia, see server.js's /api/tv/gather-news, gated by tvNewsSourceSelection above) for
-// the exact target week (tvComputeTargetWeek, matches the calendar shown above it). Still
-// always lands unincluded and 'мало материала' — a real, verifiable STORY isn't the same as
-// having real photo/video material for it yet; that's still a separate step, per
-// CLAUDE.md's rule. ----
+// Wikipedia, see server.js's /api/tv/gather-news/*, gated by tvNewsSourceSelection above)
+// for the exact target week (tvComputeTargetWeek, matches the calendar shown above it).
+// Still always lands unincluded and 'мало материала' — a real, verifiable STORY isn't the
+// same as having real photo/video material for it yet; that's still a separate step, per
+// CLAUDE.md's rule.
+//
+// A single blocking request can't stream progress back mid-flight, so this starts a
+// background job server-side (POST .../start) and polls its status (GET .../status/:jobId)
+// — same start+poll shape already used for KIE tasks elsewhere in this app. Each poll's log
+// array is rendered wholesale into the console panel next to the calendar; "Стоп" cancels
+// the running job (POST .../cancel/:jobId). ----
+let tvGatherJobId = null;
+let tvGatherPollTimer = null;
+function tvRenderGatherConsole(lines){
+  const el = document.getElementById('tvNewsConsoleBody');
+  if(!el || !Array.isArray(lines)) return;
+  el.textContent = lines.join('\n');
+  el.scrollTop = el.scrollHeight;
+}
+function tvStopGatherNews(){
+  if(!tvGatherJobId) return;
+  fetch('/api/tv/gather-news/cancel/' + tvGatherJobId, { method:'POST' }).catch(()=>{});
+  const stopBtn = document.getElementById('tvGatherNewsStopBtn');
+  if(stopBtn) stopBtn.disabled = true;
+}
 async function tvGatherNews(){
   const btn = document.getElementById('tvGatherNewsBtn');
+  const stopBtn = document.getElementById('tvGatherNewsStopBtn');
   const hint = document.getElementById('tvGatherNewsHint');
   if(btn){ btn.disabled = true; btn.textContent = 'Собираю…'; }
-  if(hint){ hint.textContent = 'Ищу реальные источники — это может занять минуту-другую…'; hint.style.color = ''; }
+  if(stopBtn){ stopBtn.style.display = ''; stopBtn.disabled = false; }
+  if(hint){ hint.textContent = 'Запускаю сбор…'; hint.style.color = ''; }
+  tvRenderGatherConsole([]);
+  tvGatherJobId = null; // set to the real server job id once /start responds, below
   try{
     const week = tvComputeTargetWeek();
     // Anything still just proposed (not included) from an earlier target week is stale —
@@ -1853,18 +1877,45 @@ async function tvGatherNews(){
         n.archivedAt = Date.now();
       }
     });
-    const res = await fetch('/api/tv/gather-news', {
+    const startRes = await fetch('/api/tv/gather-news/start', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ weekStart: week.start, weekEnd: week.end, sources: tvState.tvNewsSourceSelection }),
     });
-    const data = await res.json().catch(()=> null);
-    // Always carry the real HTTP status in the message shown on screen — a bare "не
-    // удалось" with no code is undiagnosable; if the server didn't even return JSON
-    // (e.g. an uncaught error slipping past its route's try/catch), say so explicitly
-    // instead of a generic fallback.
-    if(!res.ok || !data || !Array.isArray(data.items)){
-      const detail = data && data.message ? data.message : (res.ok ? 'сервер вернул неожиданный ответ' : 'сервер не вернул текст ошибки');
-      throw new Error('Не удалось собрать новости (HTTP ' + res.status + '): ' + detail);
+    const startData = await startRes.json().catch(()=> null);
+    if(!startRes.ok || !startData || !startData.jobId){
+      const detail = startData && startData.message ? startData.message : (startRes.ok ? 'сервер вернул неожиданный ответ' : 'сервер не вернул текст ошибки');
+      throw new Error('Не удалось запустить сбор (HTTP ' + startRes.status + '): ' + detail);
+    }
+    const jobId = startData.jobId;
+    tvGatherJobId = jobId; // real id now — this is what Стоп's cancel request uses
+
+    const statusData = await new Promise((resolve, reject)=>{
+      const poll = async ()=>{
+        if(tvGatherJobId !== jobId) return; // a newer run superseded this one
+        try{
+          const statusRes = await fetch('/api/tv/gather-news/status/' + jobId);
+          const sd = await statusRes.json().catch(()=> null);
+          if(!statusRes.ok || !sd){
+            reject(new Error('Не удалось получить статус сбора (HTTP ' + statusRes.status + ').'));
+            return;
+          }
+          tvRenderGatherConsole(sd.log);
+          if(sd.status==='running'){ tvGatherPollTimer = setTimeout(poll, 700); return; }
+          resolve(sd);
+        } catch(err){ reject(err); }
+      };
+      poll();
+    });
+    if(tvGatherJobId !== jobId) return; // superseded while the last poll was in flight
+
+    if(statusData.status==='cancelled'){
+      if(hint){ hint.textContent = 'Остановлено пользователем.'; hint.style.color = 'var(--warn)'; }
+      return;
+    }
+    const data = statusData.result;
+    if(statusData.status!=='done' || !data || !Array.isArray(data.items)){
+      const detail = (data && data.sourceErrors && data.sourceErrors.general) || 'сбор завершился без результата';
+      throw new Error('Не удалось собрать новости: ' + detail);
     }
 
     // Dedup against whatever's still active (not archived) — re-running the gather for
@@ -1940,7 +1991,10 @@ async function tvGatherNews(){
   } catch(err){
     if(hint){ hint.textContent = err.message; hint.style.color = 'var(--danger)'; }
   } finally {
+    if(tvGatherPollTimer){ clearTimeout(tvGatherPollTimer); tvGatherPollTimer = null; }
+    tvGatherJobId = null;
     if(btn){ btn.disabled = false; btn.textContent = 'Собрать новости'; }
+    if(stopBtn){ stopBtn.style.display = 'none'; stopBtn.disabled = true; }
   }
 }
 
@@ -2044,6 +2098,8 @@ function wireTvPageTabs(){
   if(folderBtn) folderBtn.onclick = tvHandleFolderButtonClick;
   const gatherNewsBtn = document.getElementById('tvGatherNewsBtn');
   if(gatherNewsBtn) gatherNewsBtn.onclick = tvGatherNews;
+  const gatherNewsStopBtn = document.getElementById('tvGatherNewsStopBtn');
+  if(gatherNewsStopBtn) gatherNewsStopBtn.onclick = tvStopGatherNews;
   const addManualNewsBtn = document.getElementById('tvAddManualNewsBtn');
   if(addManualNewsBtn) addManualNewsBtn.onclick = ()=> tvOpenManualNewsForm();
   const clearProposedNewsBtn = document.getElementById('tvClearProposedNewsBtn');

@@ -596,7 +596,11 @@ function tvStripHtml(html) {
 // Shared "structure this real retrieved text, don't invent" Gemini call — used by both
 // passes below. `withSourceIndex` adds a required sourceIndex field so the caller (not
 // Gemini) maps each item back to its real URL/date — Gemini never gets to invent a source.
-async function tvCallGeminiStructuring(instruction, withSourceIndex) {
+// `job` (optional) gets the real 429 quota error's own "Please retry in Ns" text parsed out
+// and logged as a live countdown, then the call retries automatically — Google's free tier
+// (20 requests/minute, shared across every Gemini feature in this app) means a burst of
+// testing/clicking can genuinely exhaust it; the countdown is real, not a fake animation.
+async function tvCallGeminiStructuring(instruction, withSourceIndex, job) {
   const itemProps = {
     rubric: { type: 'string' }, title: { type: 'string' }, summary: { type: 'string' },
     // A short ENGLISH search phrase for finding a real illustrative photo afterward — kept
@@ -607,27 +611,48 @@ async function tvCallGeminiStructuring(instruction, withSourceIndex) {
   const required = ['rubric', 'title', 'summary', 'imageQuery'];
   if (withSourceIndex) { itemProps.sourceIndex = { type: 'integer' }; required.push('sourceIndex'); }
   const responseSchema = { type: 'object', properties: { items: { type: 'array', items: { type: 'object', properties: itemProps, required } } }, required: ['items'] };
-  const geminiRes = await fetch(`${GEMINI_BASE}/models/${GEMINI_MODEL}:generateContent`, {
-    method: 'POST',
-    headers: { 'x-goog-api-key': GEMINI_API_KEY, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ role: 'user', parts: [{ text: instruction }] }],
-      // temperature:0 — this is an EXTRACTION task (pull out what's literally in the given
-      // text), not creative writing. Without this, Gemini's default sampling temperature
-      // made repeated runs against the identical real source text return different subsets
-      // of items with different wording each time — Костян noticed results "didn't seem
-      // tied to anything consistent" between gathers. Deterministic extraction of the same
-      // real input should give the same real output.
-      generationConfig: { responseMimeType: 'application/json', responseSchema, temperature: 0 },
-    }),
-  });
-  const data = await geminiRes.json().catch(() => null);
-  if (!geminiRes.ok) throw new Error((data && data.error && data.error.message) || ('Gemini rejected the request (HTTP ' + geminiRes.status + ').'));
-  const text = data && data.candidates && data.candidates[0] && data.candidates[0].content
-    && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text;
-  if (!text) throw new Error('Gemini returned an empty response — it may have been blocked by a safety filter.');
-  const parsed = JSON.parse(text);
-  return Array.isArray(parsed.items) ? parsed.items : [];
+
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    tvCheckAbort(job);
+    const geminiRes = await fetch(`${GEMINI_BASE}/models/${GEMINI_MODEL}:generateContent`, {
+      method: 'POST',
+      headers: { 'x-goog-api-key': GEMINI_API_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: instruction }] }],
+        // temperature:0 — this is an EXTRACTION task (pull out what's literally in the given
+        // text), not creative writing. Without this, Gemini's default sampling temperature
+        // made repeated runs against the identical real source text return different subsets
+        // of items with different wording each time — Костян noticed results "didn't seem
+        // tied to anything consistent" between gathers. Deterministic extraction of the same
+        // real input should give the same real output.
+        generationConfig: { responseMimeType: 'application/json', responseSchema, temperature: 0 },
+      }),
+      signal: tvAbortSignal(job),
+    });
+    const data = await geminiRes.json().catch(() => null);
+    if (geminiRes.ok) {
+      const text = data && data.candidates && data.candidates[0] && data.candidates[0].content
+        && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text;
+      if (!text) throw new Error('Gemini returned an empty response — it may have been blocked by a safety filter.');
+      const parsed = JSON.parse(text);
+      return Array.isArray(parsed.items) ? parsed.items : [];
+    }
+    const message = (data && data.error && data.error.message) || ('Gemini rejected the request (HTTP ' + geminiRes.status + ').');
+    const retryMatch = geminiRes.status === 429 && message.match(/retry in ([\d.]+)s/i);
+    if (retryMatch && attempt < maxAttempts) {
+      const waitSec = Math.ceil(parseFloat(retryMatch[1])) + 1; // +1s safety margin over Google's own estimate
+      for (let s = waitSec; s > 0; s--) {
+        tvCheckAbort(job);
+        tvJobLogCountdown(job, s);
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      tvJobLog(job, `Gemini: лимит освободился, повторяю запрос (попытка ${attempt + 1} из ${maxAttempts})...`);
+      continue;
+    }
+    throw new Error(message);
+  }
+  throw new Error('Gemini: не удалось получить ответ после нескольких попыток.');
 }
 
 // Real, well-archived tech-news sites from the era — mixed EN + RU on purpose (Костян's
@@ -653,9 +678,54 @@ const TV_WAYBACK_SKIP_PATH_RE = /\.(css|js|xml|rss|json|png|jpe?g|gif|svg|ico|wo
 // Костян hit). All real per-source fetching now returns a common raw-record shape
 // ({kind, promptLabel, promptText, sourceUrl, sourceDate, sourcePrecision, media, rawTitle})
 // so tvStructureRawRecords() below can combine everything into ONE Gemini call per gather.
-async function tvFetchWaybackRaw(range) {
+//
+// ---- gather-news job infrastructure (console log + Стоп button, js/tv-app.js) ----
+// A single blocking request can't stream progress back mid-flight, so "Собрать новости" now
+// starts an in-memory background job (POST .../start), and the client polls its status/log
+// (GET .../status/:jobId) — same start+poll shape this codebase already uses for KIE
+// createTask+recordInfo. In-memory only (no DB, matches CLAUDE.md's "no Postgres for /TV's
+// own data") — a stale-job sweep on every new job keeps this from growing unbounded.
+let tvGatherJobSeq = 1;
+const tvGatherJobs = new Map();
+function tvCreateGatherJob() {
+  const cutoff = Date.now() - 10 * 60 * 1000;
+  for (const [id, j] of tvGatherJobs) { if (j.createdAt < cutoff) tvGatherJobs.delete(id); }
+  const id = String(tvGatherJobSeq++);
+  const job = { id, status: 'running', log: [], result: null, aborted: false, abortController: new AbortController(), createdAt: Date.now(), _countdownActive: false };
+  tvGatherJobs.set(id, job);
+  return job;
+}
+function tvJobLog(job, text) {
+  if (!job) return;
+  job._countdownActive = false;
+  job.log.push(text);
+}
+// Ticks update the SAME log line in place instead of spamming one line per second — the
+// client just re-renders the current full log array on each poll, so an in-place edit here
+// shows up as a live-updating countdown with no special client-side merge logic needed.
+function tvJobLogCountdown(job, secondsLeft) {
+  if (!job) return;
+  const line = `Gemini: лимит запросов исчерпан, жду ${secondsLeft} сек...`;
+  if (job._countdownActive) job.log[job.log.length - 1] = line;
+  else { job.log.push(line); job._countdownActive = true; }
+}
+class TvJobAborted extends Error {}
+function tvCheckAbort(job) {
+  if (job && job.aborted) throw new TvJobAborted('Остановлено пользователем.');
+}
+// tvCheckAbort alone only catches a stop BETWEEN steps — if a single fetch (Wayback CDX
+// against archive.org especially; confirmed slow/hang-prone in testing) is already in
+// flight, nothing notices "Стоп" was pressed until that fetch itself finishes. Every fetch
+// in the gather pipeline below passes this signal so an abort actually interrupts a stuck
+// network call instead of the whole job silently waiting it out.
+function tvAbortSignal(job) {
+  return job && job.abortController ? job.abortController.signal : undefined;
+}
+
+async function tvFetchWaybackRaw(range, job) {
   const from = range.start.replace(/-/g, '');
   const to = range.end.replace(/-/g, '');
+  tvJobLog(job, `Wayback Machine: проверяю ${TV_WAYBACK_SITES.length} сайтов за ${range.start} — ${range.end}...`);
   // Sites run in parallel (each independently try/caught, one bad site can't block the
   // rest); pages within a site are fetched sequentially to avoid bursting archive.org with
   // too many concurrent requests from one caller at once.
@@ -672,7 +742,7 @@ async function tvFetchWaybackRaw(range) {
       // subdomains) captured in the target week; collapse=urlkey keeps one snapshot per
       // distinct URL instead of one per timestamp.
       const cdxUrl = `https://web.archive.org/cdx/search/cdx?url=${encodeURIComponent(site)}&matchType=domain&from=${from}&to=${to}&output=json&filter=statuscode:200&filter=mimetype:text/html&collapse=urlkey&limit=40`;
-      const cdxRes = await fetch(cdxUrl);
+      const cdxRes = await fetch(cdxUrl, { signal: tvAbortSignal(job) });
       if (!cdxRes.ok) { console.warn('[tv] wayback CDX failed for', site, cdxRes.status); return []; }
       const cdxData = await cdxRes.json().catch(() => null);
       if (!Array.isArray(cdxData) || cdxData.length < 2) return []; // header row only = nothing archived that week
@@ -690,7 +760,7 @@ async function tvFetchWaybackRaw(range) {
         try {
           // the "id_" suffix asks Wayback for the raw original page, without its own
           // toolbar/link-rewriting injected — cleaner text to strip.
-          const pageRes = await fetch(`https://web.archive.org/web/${timestamp}id_/${original}`);
+          const pageRes = await fetch(`https://web.archive.org/web/${timestamp}id_/${original}`, { signal: tvAbortSignal(job) });
           if (!pageRes.ok) continue;
           const html = (await pageRes.text()).slice(0, 200000); // cap before stripping, some archived pages are huge
           const text = tvStripHtml(html).slice(0, 4000);
@@ -708,10 +778,13 @@ async function tvFetchWaybackRaw(range) {
           });
         } catch (err) { console.warn('[tv] wayback page fetch failed for', site, timestamp, err.message); }
       }
+      if (pages.length) tvJobLog(job, `Wayback: ${site} — найдено ${pages.length} стр.`);
       return pages;
     } catch (err) { console.warn('[tv] wayback CDX request failed for', site, err.message); return []; }
   }));
-  return perSite.flat();
+  const pages = perSite.flat();
+  tvJobLog(job, `Wayback Machine: итого ${pages.length} стр. из ${TV_WAYBACK_SITES.length} сайтов.`);
+  return pages;
 }
 
 // Компьютерра (old.computerra.ru) — the exact period Russian IT magazine CLAUDE.md's
@@ -738,31 +811,37 @@ const TV_COMPUTERRA_ITEM_RE = /<h2><a href="([^"]+)">([\s\S]*?)<\/a><\/h2>[\s\S]
 // during testing, then succeeded again seconds later with no code change. One retry after a
 // short pause is cheap insurance against losing a whole day's real content to a transient
 // blip, given each day only gets fetched once per gather anyway.
-async function tvFetchWithRetry(url, attempts = 2) {
+async function tvFetchWithRetry(url, attempts = 2, signal) {
   for (let i = 0; i < attempts; i++) {
-    try { return await fetch(url); }
+    try { return await fetch(url, { signal }); }
     catch (err) {
-      if (i === attempts - 1) throw err;
+      if (err.name === 'AbortError' || i === attempts - 1) throw err;
       await new Promise((r) => setTimeout(r, 1500));
     }
   }
 }
-async function tvFetchComputerraRaw(range) {
+async function tvFetchComputerraRaw(range, job) {
   const start = new Date(range.start + 'T00:00:00Z');
   const end = new Date(range.end + 'T00:00:00Z');
   const days = [];
   for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) days.push(new Date(d));
 
-  const perDay = await Promise.all(days.map(async (d) => {
+  // Sequential, not Promise.all — matches the granular "сбор первого дня..." progress the
+  // console shows, and also happens to be gentler on old.computerra.ru, which occasionally
+  // resets connections outright (ECONNRESET) under a burst of concurrent requests.
+  const rawItems = [];
+  for (const d of days) {
+    tvCheckAbort(job);
     const year = d.getUTCFullYear(), month = d.getUTCMonth() + 1, day = d.getUTCDate();
     const dayUrl = `https://old.computerra.ru/archive/${year}/${month}/${day}/`;
     const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    tvJobLog(job, `Компьютерра: собираю ${dateStr}...`);
     try {
-      const pageRes = await tvFetchWithRetry(dayUrl);
-      if (!pageRes.ok) return []; // some days genuinely have no archive page — not an error
+      const pageRes = await tvFetchWithRetry(dayUrl, 2, tvAbortSignal(job));
+      if (!pageRes.ok) continue; // some days genuinely have no archive page — not an error
       const html = await pageRes.text();
       const blocks = html.split('item-dir-ct item-dir-ct-2').slice(1);
-      const items = [];
+      let dayCount = 0;
       for (const b of blocks) {
         const m = b.match(TV_COMPUTERRA_ITEM_RE);
         if (!m) continue;
@@ -771,18 +850,22 @@ async function tvFetchComputerraRaw(range) {
         const snippet = tvStripHtml(m[3]);
         if (!title || !snippet || snippet.length < 15) continue;
         const url = relUrl.startsWith('http') ? relUrl : `https://old.computerra.ru${relUrl}`;
-        items.push({ url, title, snippet, dateStr });
+        rawItems.push({ url, title, snippet, dateStr });
+        dayCount++;
       }
-      return items;
-    } catch (err) { console.warn('[tv] computerra fetch failed for', dayUrl, err.message); return []; }
-  }));
-  const rawItems = perDay.flat();
+      tvJobLog(job, `Компьютерра: ${dateStr} — найдено ${dayCount} ст.`);
+    } catch (err) {
+      console.warn('[tv] computerra fetch failed for', dayUrl, err.message);
+      tvJobLog(job, `Компьютерра: ${dateStr} — ошибка сети (${err.message}).`);
+    }
+  }
   if (!rawItems.length) return [];
 
   // The same real article occasionally gets listed under more than one day (reprints /
   // theme-issue cross-links) — de-dupe by its real per-article URL before it reaches Gemini.
   const seenUrls = new Set();
   const uniqueItems = rawItems.filter((it) => (seenUrls.has(it.url) ? false : (seenUrls.add(it.url), true)));
+  tvJobLog(job, `Компьютерра: итого ${uniqueItems.length} ст. за неделю.`);
   return uniqueItems.map((it) => ({
     kind: 'computerra',
     promptLabel: `real Компьютерра article dated ${it.dateStr}, real title "${it.title}"`,
@@ -809,17 +892,17 @@ const TV_WIKI_CATEGORY_PATTERNS = {
 };
 const TV_WIKI_UA = { 'User-Agent': 'TAKE-ONE-TV/1.0 (retro tech news research tool; contact via repo)' };
 
-async function tvFetchWikiCategoryMembers(category, limit) {
+async function tvFetchWikiCategoryMembers(category, limit, job) {
   const url = `https://en.wikipedia.org/w/api.php?action=query&list=categorymembers&cmtitle=${encodeURIComponent(category)}&cmlimit=${limit}&format=json`;
-  const res = await fetch(url, { headers: TV_WIKI_UA });
+  const res = await fetch(url, { headers: TV_WIKI_UA, signal: tvAbortSignal(job) });
   if (!res.ok) return [];
   const data = await res.json().catch(() => null);
   const members = data && data.query && data.query.categorymembers;
   return Array.isArray(members) ? members.filter((m) => m.ns === 0).map((m) => m.title) : [];
 }
-async function tvFetchWikiSummary(title) {
+async function tvFetchWikiSummary(title, job) {
   const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
-  const res = await fetch(url, { headers: TV_WIKI_UA });
+  const res = await fetch(url, { headers: TV_WIKI_UA, signal: tvAbortSignal(job) });
   if (!res.ok) return null;
   const data = await res.json().catch(() => null);
   if (!data || !data.extract) return null;
@@ -830,22 +913,27 @@ async function tvFetchWikiSummary(title) {
     thumbnail: data.thumbnail && data.thumbnail.source,
   };
 }
-async function tvFetchWikipediaRaw(range) {
+const TV_RUBRIC_RU_LABELS = { news:'Новости', games:'Игры', soft:'Софт', hardware:'Железо', internet:'Интернет', mobile:'Мобильные' };
+async function tvFetchWikipediaRaw(range, job) {
   const year = Number(range.start.slice(0, 4));
   const summaries = [];
+  tvJobLog(job, `Wikipedia: проверяю категории за ${year} год...`);
   for (const rubric of Object.keys(TV_WIKI_CATEGORY_PATTERNS)) {
+    tvCheckAbort(job);
     try {
       const category = TV_WIKI_CATEGORY_PATTERNS[rubric](year);
       // Was capped at 8 fetched / 4 used per rubric — needlessly thin given Wikipedia
       // categories for a given year commonly hold far more real members than that, and
       // this pass is free (no per-request cost beyond Wikipedia's own generous rate limits).
-      const titles = await tvFetchWikiCategoryMembers(category, 25);
+      const titles = await tvFetchWikiCategoryMembers(category, 25, job);
+      let rubricCount = 0;
       for (const title of titles.slice(0, 12)) {
         try {
-          const summary = await tvFetchWikiSummary(title);
-          if (summary) summaries.push(Object.assign({ rubricHint: rubric }, summary));
+          const summary = await tvFetchWikiSummary(title, job);
+          if (summary) { summaries.push(Object.assign({ rubricHint: rubric }, summary)); rubricCount++; }
         } catch (err) { console.warn('[tv] wikipedia summary failed for', title, err.message); }
       }
+      tvJobLog(job, `Wikipedia: ${TV_RUBRIC_RU_LABELS[rubric] || rubric} — найдено ${rubricCount} ст.`);
     } catch (err) { console.warn('[tv] wikipedia category fetch failed for', rubric, err.message); }
   }
   return summaries.map((s) => ({
@@ -868,7 +956,7 @@ async function tvFetchWikipediaRaw(range) {
 // Компьютерра/Wikipedia records are already real, individually-identified articles that
 // should almost always produce an item) since a single combined prompt can't special-case
 // per source without ballooning back into per-source calls.
-async function tvStructureRawRecords(rawRecords) {
+async function tvStructureRawRecords(rawRecords, job) {
   if (!rawRecords.length) return [];
   const sourceBlock = rawRecords.map((r, i) => `[SOURCE ${i}: ${r.promptLabel}]\n${r.promptText}`).join('\n\n');
   const instruction = [
@@ -881,7 +969,9 @@ async function tvStructureRawRecords(rawRecords) {
     '', sourceBlock,
   ].join('\n');
 
-  const items = await tvCallGeminiStructuring(instruction, true);
+  tvJobLog(job, `Gemini: обрабатываю ${rawRecords.length} записей...`);
+  const items = await tvCallGeminiStructuring(instruction, true, job);
+  tvJobLog(job, `Gemini: получено ${items.length} новостей.`);
   return items.map((it) => {
     const src = rawRecords[it.sourceIndex];
     if (!src) return null;
@@ -900,18 +990,18 @@ async function tvStructureRawRecords(rawRecords) {
 // Wikipedia item whose article had no thumbnail) gets one real Commons search. Video
 // sourcing (YouTube Data API) is a deliberate NOT-YET — needs its own API key/quota setup,
 // deferred until Костян sets that up.
-async function tvSearchCommonsImage(query) {
+async function tvSearchCommonsImage(query, job) {
   if (!query) return null;
   try {
     const searchUrl = `https://commons.wikimedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&srnamespace=6&format=json&srlimit=3`;
-    const searchRes = await fetch(searchUrl, { headers: TV_WIKI_UA });
+    const searchRes = await fetch(searchUrl, { headers: TV_WIKI_UA, signal: tvAbortSignal(job) });
     if (!searchRes.ok) return null;
     const searchData = await searchRes.json().catch(() => null);
     const results = searchData && searchData.query && searchData.query.search;
     if (!Array.isArray(results) || !results.length) return null;
     const title = results[0].title;
     const infoUrl = `https://commons.wikimedia.org/w/api.php?action=query&titles=${encodeURIComponent(title)}&prop=imageinfo&iiprop=url&iiurlwidth=800&format=json`;
-    const infoRes = await fetch(infoUrl, { headers: TV_WIKI_UA });
+    const infoRes = await fetch(infoUrl, { headers: TV_WIKI_UA, signal: tvAbortSignal(job) });
     if (!infoRes.ok) return null;
     const infoData = await infoRes.json().catch(() => null);
     const pages = infoData && infoData.query && infoData.query.pages;
@@ -929,49 +1019,40 @@ async function tvSearchCommonsImage(query) {
 // purely to check real coverage per gather; must stay in sync with TV_RUBRICS client-side.
 const TV_ALL_RUBRIC_KEYS = ['news', 'games', 'soft', 'hardware', 'internet', 'mobile'];
 
-app.post('/api/tv/gather-news', async (req, res) => {
-  if (!GEMINI_API_KEY) {
-    return res.status(503).json({ error: 'not_configured', message: 'GEMINI_API_KEY is not set on the server yet.' });
-  }
-  // Every other route in this file wraps its body in try/catch so a failure always comes
-  // back as {error,message} JSON the client can actually show — this route was missing
-  // that (the only one), so any uncaught throw here (Wayback/Wikipedia network errors that
-  // slip past their own .catch, a Gemini structuring-call exception, etc.) fell through to
-  // Express's default HTML error page. The client's res.json() then failed to parse it,
-  // producing the content-free "Не удалось собрать новости." fallback with no code at all.
+// Full gather run for one background job — same logic the old single blocking route used to
+// run inline, just instrumented with tvJobLog calls at each real milestone and tvCheckAbort
+// calls between phases so "Стоп" (js/tv-app.js) can actually interrupt it. Runs detached
+// (the route below does not await this) — the client learns what happened by polling
+// /api/tv/gather-news/status/:jobId, same start+poll shape already used for KIE tasks.
+async function tvRunGatherJob(job, range, sel) {
   try {
-    const { weekStart, weekEnd, sources } = req.body || {};
-    const range = (weekStart && weekEnd) ? { start: weekStart, end: weekEnd } : tvHistoricalWeekRange();
-    // Which real sources to actually query, per the checkboxes next to "Собрать новости"
-    // (js/tv-app.js). Missing/malformed selection defaults to everything ON — safe fallback
-    // for any caller that doesn't send the field, never a reason to silently return nothing.
-    const sel = sources && typeof sources === 'object'
-      ? sources
-      : { wayback: true, computerra: true, wikipedia: true, monthFallback: true };
-
-    // Every source pass used to swallow its own failure into a bare console.warn (server-
-    // side only — Костян has no way to see server logs) and just return an empty array, so
-    // a real problem (Gemini quota/rate-limit, safety block, malformed JSON) looked
-    // IDENTICAL on screen to "genuinely nothing was found" — no way to tell them apart.
-    // sourceErrors now carries the real message per source through to the client.
-    //
-    // All three sources' raw fetching runs in parallel (each independently try/caught —
-    // one source failing to fetch never blocks the others), but the actual Gemini call is
-    // ONE combined call over everything gathered, not one per source. This is the direct
-    // fix for hitting the free tier's 20 requests/minute quota ("Please retry in 26s") —
-    // up to 3 separate structuring calls per click (4 counting the opt-in month-fallback)
-    // burned through it fast, especially across repeated clicks while testing.
+    tvJobLog(job, `Начинаю сбор новостей за ${range.start} — ${range.end}.`);
+    // sourceErrors carries each source's REAL failure message through to the client —
+    // previously a real problem (Gemini quota/rate-limit, safety block, network error) was
+    // swallowed into a bare console.warn and looked identical on screen to "genuinely
+    // nothing was found here."
     const sourceErrors = {};
-    const [waybackRaw, wikipediaRaw, computerraRaw] = await Promise.all([
-      sel.wayback ? tvFetchWaybackRaw(range).catch((err) => { console.warn('[tv] wayback fetch failed entirely:', err.message); sourceErrors.wayback = err.message; return []; }) : [],
-      sel.wikipedia ? tvFetchWikipediaRaw(range).catch((err) => { console.warn('[tv] wikipedia fetch failed entirely:', err.message); sourceErrors.wikipedia = err.message; return []; }) : [],
-      sel.computerra ? tvFetchComputerraRaw(range).catch((err) => { console.warn('[tv] computerra fetch failed entirely:', err.message); sourceErrors.computerra = err.message; return []; }) : [],
-    ]);
+    const waybackRaw = sel.wayback
+      ? await tvFetchWaybackRaw(range, job).catch((err) => { tvJobLog(job, 'Wayback: ошибка — ' + err.message); sourceErrors.wayback = err.message; return []; })
+      : [];
+    tvCheckAbort(job);
+    const wikipediaRaw = sel.wikipedia
+      ? await tvFetchWikipediaRaw(range, job).catch((err) => { tvJobLog(job, 'Wikipedia: ошибка — ' + err.message); sourceErrors.wikipedia = err.message; return []; })
+      : [];
+    tvCheckAbort(job);
+    const computerraRaw = sel.computerra
+      ? await tvFetchComputerraRaw(range, job).catch((err) => { tvJobLog(job, 'Компьютерра: ошибка — ' + err.message); sourceErrors.computerra = err.message; return []; })
+      : [];
+    tvCheckAbort(job);
+
+    // The actual Gemini call is ONE combined call over everything gathered, not one per
+    // source — the direct fix for hitting the free tier's 20 requests/minute quota, which
+    // up to 3-4 separate structuring calls per click used to burn through fast.
     let items;
     try {
-      items = await tvStructureRawRecords([...waybackRaw, ...wikipediaRaw, ...computerraRaw]);
+      items = await tvStructureRawRecords([...waybackRaw, ...wikipediaRaw, ...computerraRaw], job);
     } catch (err) {
-      console.warn('[tv] combined structuring call failed:', err.message);
+      tvJobLog(job, 'Gemini: ошибка — ' + err.message);
       sourceErrors.gemini = err.message;
       items = [];
     }
@@ -981,18 +1062,16 @@ app.post('/api/tv/gather-news', async (req, res) => {
     // leaving it empty — then, ONLY if the "Расширять до месяца" checkbox is on, widen to a
     // ~30-day window (still real, sourced items, never invented) as a fallback, clearly
     // tagged sourcePrecision:'month'. Off by default: a month-wide item isn't really "the
-    // selected week" any more than Wikipedia's year-precision is, so this stays opt-in the
-    // same way. Rubrics that STILL come back empty after that stay in emptyRubrics — no
-    // further fallback, no recall/invention. This is a second, separate Gemini call, but
-    // only fires when actually needed (empty rubrics AND the checkbox is on) — not on every
-    // gather like the three main sources used to be.
+    // selected week" any more than Wikipedia's year-precision is, so this stays opt-in.
     let emptyRubrics = TV_ALL_RUBRIC_KEYS.filter((r) => !items.some((i) => i.rubric === r));
     let filledFromFallback = [];
     if (emptyRubrics.length && sel.monthFallback) {
+      tvCheckAbort(job);
+      tvJobLog(job, 'Расширяю поиск до месяца для: ' + emptyRubrics.map((r) => TV_RUBRIC_RU_LABELS[r] || r).join(', ') + '.');
       try {
         const monthRange = tvMonthRange(range);
-        const monthRaw = await tvFetchWaybackRaw(monthRange);
-        const fallbackItems = await tvStructureRawRecords(monthRaw);
+        const monthRaw = await tvFetchWaybackRaw(monthRange, job);
+        const fallbackItems = await tvStructureRawRecords(monthRaw, job);
         const stillMissing = new Set(emptyRubrics);
         const picked = fallbackItems.filter((i) => stillMissing.has(i.rubric));
         picked.forEach((i) => { i.sourcePrecision = 'month'; });
@@ -1000,23 +1079,65 @@ app.post('/api/tv/gather-news', async (req, res) => {
         filledFromFallback = [...new Set(picked.map((i) => i.rubric))];
         emptyRubrics = emptyRubrics.filter((r) => !filledFromFallback.includes(r));
       } catch (err) {
-        console.warn('[tv] month-wide fallback pass failed:', err.message);
+        tvJobLog(job, 'Расширение до месяца: ошибка — ' + err.message);
         sourceErrors.monthFallback = err.message;
       }
     }
 
+    tvCheckAbort(job);
+    if (items.length) tvJobLog(job, `Ищу иллюстрации для ${items.length} новостей...`);
     await Promise.all(items.map(async (item) => {
       if (item.media && item.media.length) return; // already has a real thumbnail (Wikipedia)
-      const img = await tvSearchCommonsImage(item.imageQuery || item.title);
+      const img = await tvSearchCommonsImage(item.imageQuery || item.title, job);
       if (img) item.media = [img];
       delete item.imageQuery; // internal-only, not needed by the client
     }));
 
-    res.json({ items, weekStart: range.start, weekEnd: range.end, emptyRubrics, filledFromFallback, sourceErrors });
+    tvJobLog(job, `Готово — добавлено ${items.length} новостей.`);
+    job.result = { items, weekStart: range.start, weekEnd: range.end, emptyRubrics, filledFromFallback, sourceErrors };
+    job.status = 'done';
   } catch (err) {
-    console.error('[server] /api/tv/gather-news failed:', err);
-    res.status(500).json({ error: 'server_error', message: String(err && err.message || err) });
+    if (err instanceof TvJobAborted) {
+      tvJobLog(job, 'Остановлено пользователем.');
+      job.status = 'cancelled';
+      job.result = { items: [], weekStart: range.start, weekEnd: range.end, emptyRubrics: [], filledFromFallback: [], sourceErrors: {} };
+    } else {
+      console.error('[server] gather-news job failed:', err);
+      tvJobLog(job, 'Ошибка: ' + err.message);
+      job.status = 'failed';
+      job.result = { items: [], weekStart: range.start, weekEnd: range.end, emptyRubrics: TV_ALL_RUBRIC_KEYS, filledFromFallback: [], sourceErrors: { general: err.message } };
+    }
   }
+}
+
+app.post('/api/tv/gather-news/start', (req, res) => {
+  if (!GEMINI_API_KEY) {
+    return res.status(503).json({ error: 'not_configured', message: 'GEMINI_API_KEY is not set on the server yet.' });
+  }
+  const { weekStart, weekEnd, sources } = req.body || {};
+  const range = (weekStart && weekEnd) ? { start: weekStart, end: weekEnd } : tvHistoricalWeekRange();
+  // Which real sources to actually query, per the checkboxes next to "Собрать новости"
+  // (js/tv-app.js). Missing/malformed selection defaults to everything ON — safe fallback
+  // for any caller that doesn't send the field, never a reason to silently return nothing.
+  const sel = sources && typeof sources === 'object'
+    ? sources
+    : { wayback: true, computerra: true, wikipedia: true, monthFallback: true };
+  const job = tvCreateGatherJob();
+  tvRunGatherJob(job, range, sel); // fire-and-forget — client polls status below
+  res.json({ jobId: job.id });
+});
+app.get('/api/tv/gather-news/status/:jobId', (req, res) => {
+  const job = tvGatherJobs.get(req.params.jobId);
+  if (!job) return res.status(404).json({ error: 'not_found', message: 'Задача не найдена — возможно, истекла или сервер перезапустился.' });
+  res.json({ status: job.status, log: job.log, result: (job.status === 'done' || job.status === 'failed' || job.status === 'cancelled') ? job.result : null });
+});
+app.post('/api/tv/gather-news/cancel/:jobId', (req, res) => {
+  const job = tvGatherJobs.get(req.params.jobId);
+  if (job && job.status === 'running') {
+    job.aborted = true;
+    job.abortController.abort(); // interrupts whatever fetch is currently in flight, not just future steps
+  }
+  res.json({ ok: true });
 });
 
 // ---- text-writing (Journalist) — turns a sourced news item into the anchor's on-air read,
