@@ -1591,17 +1591,61 @@ function tvRenderMicItemsList(anchorId){
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.5 8.5a5 5 0 0 1 0 7"></path></svg>
         </span>
         ${voiced
-          ? `<audio class="tv-mic-audio" controls src="${item.voiceUrl}"></audio>`
+          ? `<audio class="tv-mic-audio" controls src="${item.voiceUrl}"></audio><div class="tv-mic-voice-del" data-del-voice="${item.id}" title="Удалить озвучку">&times;</div>`
           : pending
             ? `<span class="gen-hint" style="margin:0;">Отправлено в TASKS</span>`
-            : `<button class="cf-btn" data-voice-item="${item.id}">ОЗВУЧИТЬ</button>`}
+            : `<button class="cf-btn" data-voice-item="${item.id}">ОЗВУЧИТЬ</button><button class="cf-btn" data-upload-voice="${item.id}">Загрузить с диска</button>`}
       </div>
+      <input type="file" accept="audio/*" class="tv-mic-voice-file-input" data-file-for="${item.id}" style="display:none;">
     </div>`;
   }).join('');
   listEl.querySelectorAll('[data-voice-item]').forEach(btn=>{
     btn.onclick = ()=>{
       tvSendToVoicing(Number(btn.dataset.voiceItem));
       tvRenderMicItemsList(anchorId);
+    };
+  });
+  // Manual voice upload — a real substitute for generation, not just a fallback: Костян
+  // can record/source his own take and drop it in directly, same "generation isn't the
+  // only path in" idea already used for Character Card sheets and Студии angles.
+  listEl.querySelectorAll('[data-upload-voice]').forEach(btn=>{
+    btn.onclick = ()=>{
+      const input = listEl.querySelector(`input[data-file-for="${btn.dataset.uploadVoice}"]`);
+      if(input) input.click();
+    };
+  });
+  listEl.querySelectorAll('.tv-mic-voice-file-input').forEach(input=>{
+    input.onchange = async ()=>{
+      const file = input.files[0];
+      const item = tvState.tvNewsItems.find(n=> n.id===Number(input.dataset.fileFor));
+      if(!file || !item) return;
+      const persisted = await tvPersistBlobAssetDirect('newsitem:' + item.id + ':voice', file);
+      item.voiceUrl = persisted ? persisted.url : URL.createObjectURL(file);
+      item._assetFiles = item._assetFiles || {};
+      item._assetFiles.voice = !!persisted;
+      item._assetFiles.voiceFile = persisted ? persisted.fileName : undefined;
+      item.voiceTaskId = null;
+      item.voiceDurationSec = await tvGetAudioDuration(item.voiceUrl);
+      tvSaveSoon();
+      tvRenderMicItemsList(anchorId);
+      renderTvGrid();
+    };
+  });
+  // Deleting a voicing clears it back to "not voiced yet" regardless of where it came from
+  // (generated or uploaded) — same fields either way, so one handler covers both, per
+  // Костян's explicit "это касается и сгенерированных".
+  listEl.querySelectorAll('[data-del-voice]').forEach(btn=>{
+    btn.onclick = ()=>{
+      const item = tvState.tvNewsItems.find(n=> n.id===Number(btn.dataset.delVoice));
+      if(!item) return;
+      if(!confirm('Удалить озвучку? Можно будет сгенерировать заново или загрузить другую.')) return;
+      item.voiceUrl = null;
+      item.voiceTaskId = null;
+      item.voiceDurationSec = null;
+      if(item._assetFiles){ item._assetFiles.voice = false; item._assetFiles.voiceFile = undefined; }
+      tvSaveSoon();
+      tvRenderMicItemsList(anchorId);
+      renderTvGrid();
     };
   });
   // Autosave on edit, same as every other free-text field in the app — no separate "save

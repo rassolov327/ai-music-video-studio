@@ -200,6 +200,14 @@ function tvExtFromMime(mime){
   if(mime.indexOf('gif')>=0) return '.gif';
   if(mime.indexOf('wav')>=0) return '.wav';
   if(mime.indexOf('mpeg')>=0 || mime.indexOf('mp3')>=0) return '.mp3';
+  // Extra audio types a locally-uploaded voice file (tvOpenManualVoiceUpload, js/tv-app.js)
+  // could realistically show up as — the free/KIE/ElevenLabs generation paths only ever
+  // produce wav/mp3, so these were never needed before.
+  if(mime.indexOf('mp4')>=0 || mime.indexOf('m4a')>=0) return '.m4a';
+  if(mime.indexOf('ogg')>=0) return '.ogg';
+  if(mime.indexOf('webm')>=0) return '.webm';
+  if(mime.indexOf('aac')>=0) return '.aac';
+  if(mime.indexOf('flac')>=0) return '.flac';
   return '.png';
 }
 async function tvPersistBlobAsset(assetKey, blob, ext){

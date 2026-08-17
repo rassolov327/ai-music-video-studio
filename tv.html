@@ -166,7 +166,13 @@
     content:''; position:absolute; left:50%; top:50%; width:22px; height:1.5px; background:var(--danger);
     transform:translate(-50%,-50%) rotate(-45deg);
   }
-  .tv-mic-audio{ flex:1 1 auto; height:32px; }
+  .tv-mic-audio{ flex:1 1 auto; height:32px; min-width:0; }
+  .tv-mic-voice-del{
+    flex:0 0 auto; width:22px; height:22px; border-radius:6px; display:flex; align-items:center;
+    justify-content:center; cursor:pointer; background:var(--bg-elevated); border:1px solid var(--line);
+    color:var(--text-2); font-size:16px; line-height:1; font-family:var(--font-ui), Arial, sans-serif;
+  }
+  .tv-mic-voice-del:hover{ background:rgba(217,105,95,.18); border-color:var(--danger); color:var(--danger); }
 
   /* ---- TASKS: draft model-picker row (before a task is actually sent) ---- */
   .tv-task-model-row{ display:flex; align-items:center; gap:6px; margin-top:8px; }
