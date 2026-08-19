@@ -71,6 +71,7 @@ function showLoginScreen(){
   loadLipsyncModelList();
   loadPhotoLipsyncModelList();
   loadMotionControlModelList();
+  loadVideoEditModelList();
   wireGeminiChat();
   wireScriptPage();
   wireAiGeneratorModal();

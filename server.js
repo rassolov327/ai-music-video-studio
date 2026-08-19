@@ -714,7 +714,27 @@ app.get('/api/motion-control-models', (req, res) => {
   res.json({ models: MOTION_CONTROL_MODELS.map(m => ({ id: m.id, label: m.label, costUsd: m.costUsd, blurb: m.blurb })) });
 });
 
-const ALL_MODEL_CATALOGS = [MODELS, VIDEO_MODELS, LIPSYNC_MODELS, PHOTO_LIPSYNC_MODELS, MOTION_CONTROL_MODELS];
+// ---- video-to-video editing — edits an already-existing video by prompt (e.g. "replace the
+// background") rather than animating a still image. Confirmed live via docs.kie.ai (real page
+// content, not guessed): model id "kling-3.0-omni/transformation", input { prompt, video_urls:
+// [url], resolution, aspect_ratio, audio }. Runs on the SAME unified jobs/createTask +
+// jobs/recordInfo + /api/webhook/kie machinery every other model here already uses — unlike an
+// earlier attempt with Runway Aleph (lived on its own bespoke endpoint, proved unstable in a
+// real test — "internal error, please try again later" — and was reverted), this needed no new
+// webhook route at all. aspect_ratio is fixed to 'auto' below and not exposed as a choice — per
+// the docs, 'auto' is the ONLY valid value for video-only input (16:9/9:16/1:1 only apply when
+// combining the video with reference images, which this feature never does); resolution
+// (720p/1080p/4k) is the real adjustable output-quality knob instead. costUsd is an unconfirmed
+// estimate (no real bill yet, pricing wasn't shown on the endpoint's own doc page) — correct it
+// against KIE's dashboard once a real edit runs, same as every other unconfirmed figure here.
+const VIDEO_EDIT_MODELS = [
+  { id: 'kling-3.0-omni/transformation', label: 'Kling 3.0 Omni Transformation', costUsd: 0.60, blurb: 'Edits an existing video by prompt — change the background/setting, restyle the scene — while preserving the original character movement.' },
+];
+app.get('/api/video-edit-models', (req, res) => {
+  res.json({ models: VIDEO_EDIT_MODELS.map(m => ({ id: m.id, label: m.label, costUsd: m.costUsd, blurb: m.blurb })) });
+});
+
+const ALL_MODEL_CATALOGS = [MODELS, VIDEO_MODELS, LIPSYNC_MODELS, PHOTO_LIPSYNC_MODELS, MOTION_CONTROL_MODELS, VIDEO_EDIT_MODELS];
 function findModelCostUsd(modelId) {
   for (const catalog of ALL_MODEL_CATALOGS) {
     const found = catalog.find(m => m.id === modelId);
@@ -1165,6 +1185,69 @@ app.post('/api/generate-video/start', requireAuth, async (req, res) => {
     return res.json({ taskId });
   } catch (err) {
     console.error('[server] /api/generate-video/start failed:', err);
+    return res.status(500).json({ error: 'server_error', message: String(err && err.message || err) });
+  }
+});
+
+app.post('/api/video-edit/start', requireAuth, async (req, res) => {
+  if (!KIE_API_KEY) {
+    return res.status(503).json({ error: 'not_configured', message: 'KIE_API_KEY is not set on the server yet.' });
+  }
+  const { videoUrl, prompt, resolution, model, meta } = req.body || {};
+  if (!videoUrl || !prompt) {
+    return res.status(400).json({ error: 'bad_request', message: 'videoUrl and prompt are both required.' });
+  }
+  const matched = VIDEO_EDIT_MODELS.find(m => m.id === model) || VIDEO_EDIT_MODELS[0];
+  if (!(await checkUserCanAfford(req, res, matched.id))) return;
+
+  // Same reasoning as motion-control above: re-host on KIE's own storage rather than handing
+  // KIE a URL pointing back at our own server — their fetch-from-third-party-URL path has a
+  // documented 30s timeout that's proven unreliable for video specifically.
+  let kieVideoUrl;
+  try {
+    const vidId = videoUrl.split('/api/reference-image/')[1];
+    const vidEntry = vidId && referenceImages.get(vidId);
+    if (!vidEntry) throw new Error('Could not find the uploaded video to re-host on KIE.');
+    kieVideoUrl = await uploadToKieFileHost(vidEntry.buffer, vidEntry.mime, 'edit-source.mp4');
+  } catch (err) {
+    console.error('[server] could not re-host video on KIE for video-edit:', err);
+    return res.status(502).json({ error: 'provider_error', message: 'Could not upload the video to KIE: ' + String(err && err.message || err) });
+  }
+
+  // aspect_ratio fixed to 'auto' — the only valid value for video-only input, see comment
+  // above VIDEO_EDIT_MODELS.
+  const input = {
+    prompt, video_urls: [kieVideoUrl], resolution: resolution || '720p', aspect_ratio: 'auto', audio: false,
+  };
+  const callBackUrl = PUBLIC_URL ? PUBLIC_URL + '/api/webhook/kie' : undefined;
+
+  try {
+    const body = { model: matched.id, input };
+    if (callBackUrl) body.callBackUrl = callBackUrl;
+    const createRes = await fetch(`${KIE_BASE}/api/v1/jobs/createTask`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${KIE_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const createData = await createRes.json().catch(() => null);
+    console.log('[server] create video-edit task (' + matched.id + '):', JSON.stringify(createData));
+    const taskId = createData && createData.data && createData.data.taskId;
+    if (!createRes.ok || !taskId) {
+      return res.status(502).json({
+        error: 'provider_error',
+        message: (createData && createData.msg) || ('KIE.ai rejected the request (HTTP ' + createRes.status + ').'),
+      });
+    }
+    tasks.set(taskId, {
+      status: 'pending', imageUrl: null, message: null, model: matched.id, prompt, isVideo: true,
+      meta: meta || {}, createdAt: Date.now(), updatedAt: Date.now(), userId: req.user.id,
+    });
+    if (!callBackUrl) {
+      console.warn('[server] no PUBLIC_URL known — this task will rely entirely on the polling fallback.');
+    }
+    return res.json({ taskId });
+  } catch (err) {
+    console.error('[server] /api/video-edit/start failed:', err);
     return res.status(500).json({ error: 'server_error', message: String(err && err.message || err) });
   }
 });
