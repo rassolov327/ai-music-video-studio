@@ -134,7 +134,6 @@ function draftTitleLines(t){
   if(t.kind==='motion-control') return [t.sceneName || 'Scene', (t.shotName || 'Shot') + ' (motion capture)'];
   if(t.kind==='photo-lipsync') return [t.sceneName || 'Scene', (t.shotName || 'Shot') + ' (lip-sync)'];
   if(t.kind==='lipsync') return [t.sceneName || 'Scene', (t.shotName || 'Shot') + ' (lip-sync)'];
-  if(t.kind==='video-edit') return [t.sceneName || 'Scene', (t.shotName || 'Shot') + ' (video edit)'];
   if(t.kind==='shot') return [t.sceneName || 'Scene', t.shotName || 'Shot'];
   if(t.kind==='archive-derive') return ['New idea', t.assetName || ''];
   const kindLabel = t.kind==='looks' ? 'Look' : t.kind==='locations' ? 'Location' : t.kind==='props' ? 'Prop' : 'Asset';
@@ -210,7 +209,7 @@ function renderTasksGrid(force){
       const t = entry.data;
       const selected = selectedDraftIds.has(t.id);
       const [line1, line2] = draftTitleLines(t);
-      const model = t.kind==='motion-control' ? (motionControlModelOptions.find(m=> m.id===t.model) || motionControlModelOptions[0] || null) : t.kind==='photo-lipsync' ? (photoLipsyncModelOptions.find(m=> m.id===t.model) || photoLipsyncModelOptions[0] || null) : t.kind==='lipsync' ? (lipsyncModelOptions.find(m=> m.id===t.model) || lipsyncModelOptions[0] || null) : t.kind==='video-edit' ? (videoEditModelOptions.find(m=> m.id===t.model) || videoEditModelOptions[0] || null) : modelById(t.model);
+      const model = t.kind==='motion-control' ? (motionControlModelOptions.find(m=> m.id===t.model) || motionControlModelOptions[0] || null) : t.kind==='photo-lipsync' ? (photoLipsyncModelOptions.find(m=> m.id===t.model) || photoLipsyncModelOptions[0] || null) : t.kind==='lipsync' ? (lipsyncModelOptions.find(m=> m.id===t.model) || lipsyncModelOptions[0] || null) : modelById(t.model);
       const hasPhoto = assetHasPhoto(t);
       const willUseRef = hasPhoto && model && model.supportsReferenceImage;
       const refSourceLabel = t.kind==='shot' ? 'the scene\'s assigned character (and look)' : 'the uploaded photo';
@@ -231,7 +230,7 @@ function renderTasksGrid(force){
           <div class="task-tile-body">
             <div class="task-tile-scene">${line1}</div>
             <div class="task-tile-shot">${line2}</div>
-            ${t.kind==='motion-control' ? motionControlModelSelectHtml(t.model) : t.kind==='photo-lipsync' ? photoLipsyncModelSelectHtml(t.model) : t.kind==='lipsync' ? lipsyncModelSelectHtml(t.model) : t.kind==='video-edit' ? videoEditModelSelectHtml(t.model) : modelSelectHtml(t.model || (modelOptions[0] && modelOptions[0].id), 'task-tile-model-select', t.kind==='archive-derive')}
+            ${t.kind==='motion-control' ? motionControlModelSelectHtml(t.model) : t.kind==='photo-lipsync' ? photoLipsyncModelSelectHtml(t.model) : t.kind==='lipsync' ? lipsyncModelSelectHtml(t.model) : modelSelectHtml(t.model || (modelOptions[0] && modelOptions[0].id), 'task-tile-model-select', t.kind==='archive-derive')}
             ${refHint}
             ${noRefModelAvailable ? '<div class="gen-hint" style="margin-top:6px;color:var(--danger);">No connected model supports reference images yet — can\'t generate this.</div>' : ''}
             <button class="cf-btn primary task-tile-send-btn" style="width:100%;margin-top:8px;" ${(noRefModelAvailable||sendingDraftIds.has(t.id))?'disabled':''}>${sendingDraftIds.has(t.id) ? 'Sending…' : 'Generate' + (model && model.costUsd ? ' — ' + formatCost(model.costUsd) : '')}</button>
@@ -546,36 +545,6 @@ async function sendGenerationTask(draft){
     return data.taskId;
   }
 
-  if(draft.kind==='video-edit'){
-    const scene = state.scenes.find(s=> s.id===draft.sceneId);
-    const shot = scene && scene.shots.find(sh=> sh.id===draft.shotId);
-    if(!scene || !shot) throw new Error('This shot no longer exists.');
-    if(!shot.videoUrl) throw new Error('This shot has no video yet to edit.');
-
-    let videoUrl;
-    try{
-      showBgStatus('Preparing video…');
-      const reencoded = await reencodeVideoForEdit(shot.videoUrl, (msg)=> showBgStatus(msg));
-      const blobUrl = URL.createObjectURL(reencoded);
-      videoUrl = await uploadReferencePhoto(blobUrl);
-      URL.revokeObjectURL(blobUrl);
-    } finally {
-      hideBgStatus();
-    }
-    if(!videoUrl) throw new Error('Could not upload the video.');
-
-    const videoEditTaskMeta = { projectId: currentProjectId, kind:'video-edit', sceneId: scene.id, sceneName: scene.name, shotId: shot.id, shotName: shot.name };
-    const res = await fetch('/api/video-edit/start', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ videoUrl, prompt: draft.videoEditPrompt, aspectRatio: draft.aspectRatio || undefined, model: draft.model, meta: videoEditTaskMeta }),
-    });
-    const data = await res.json().catch(()=> null);
-    if(!res.ok || !data || !data.taskId){
-      throw new Error((data && data.message) || ('Request failed (HTTP ' + res.status + ')'));
-    }
-    return data.taskId;
-  }
-
   if(draft.kind==='shot'){
     const scene = state.scenes.find(s=> s.id===draft.sceneId);
     const shot = scene && scene.shots.find(sh=> sh.id===draft.shotId);
@@ -763,17 +732,6 @@ async function applyFinishedTasks(list){
       renderTimelineScenes();
       continue;
     }
-    if(meta.kind==='video-edit'){
-      const scene = state.scenes.find(s=> s.id===meta.sceneId);
-      const shot = scene && scene.shots.find(sh=> sh.id===meta.shotId);
-      if(scene && shot){
-        if(typeof persistShotVideo==='function') await persistShotVideo(shot, t.imageUrl);
-        else shot.videoUrl = t.imageUrl;
-        if(focus.sceneId===scene.id && focus.shotId===shot.id) touchedCurrentView = true;
-      }
-      renderTimelineScenes();
-      continue;
-    }
     if(meta.kind==='photo-lipsync'){
       const scene = state.scenes.find(s=> s.id===meta.sceneId);
       const shot = scene && scene.shots.find(sh=> sh.id===meta.shotId);
@@ -853,8 +811,6 @@ async function archiveGeneration(t){
           ? ((meta.sceneName || 'Scene') + ' / ' + (meta.shotName || 'Shot') + ' (lip-sync)')
           : kind==='motion-control'
             ? ((meta.sceneName || 'Scene') + ' / ' + (meta.shotName || 'Shot') + ' (motion capture)')
-            : kind==='video-edit'
-              ? ((meta.sceneName || 'Scene') + ' / ' + (meta.shotName || 'Shot') + ' (video edit)')
             : kind==='location-angle'
               ? ((meta.locationName || 'Location') + ' — ' + (meta.angleKey || 'angle'))
               : kind==='archive-derive'
@@ -925,8 +881,8 @@ async function archiveCapturedVideo(file, scene, shot){
 
 // A video added straight from disk, not generated or captured — same shape as
 // archiveCapturedVideo above (isVideo:true, so it renders/inserts as a video everywhere,
-// e.g. insertArchiveEntryAtPlayhead's video branch and the new video-edit Inspector slot),
-// just a generic upload label instead of a scene/shot-specific "Captured" one.
+// e.g. insertArchiveEntryAtPlayhead's video branch), just a generic upload label instead
+// of a scene/shot-specific "Captured" one.
 async function archiveUploadedVideo(file){
   state.archive = state.archive || [];
   const entry = {

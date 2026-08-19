@@ -714,24 +714,7 @@ app.get('/api/motion-control-models', (req, res) => {
   res.json({ models: MOTION_CONTROL_MODELS.map(m => ({ id: m.id, label: m.label, costUsd: m.costUsd, blurb: m.blurb })) });
 });
 
-// ---- video-to-video editing (Runway Aleph via KIE.ai) — edits an already-existing video by
-// prompt (e.g. "replace the background") rather than animating a still image. Confirmed live
-// against docs.kie.ai's own Aleph pages: create at POST /api/v1/aleph/generate (fields:
-// videoUrl, prompt, aspectRatio, callBackUrl — camelCase, NOT the {model,input} shape every
-// other model here uses), poll at GET /api/v1/aleph/record-info?taskId=... . Lives entirely
-// outside the unified jobs/createTask+recordInfo API, so it gets its own webhook route below
-// (/api/webhook/kie-aleph) rather than reusing /api/webhook/kie — see normalizeAlephResult().
-// costUsd is an unconfirmed third-party estimate (~50 credits/edit per public reports, not
-// docs.kie.ai itself) — correct it against KIE's dashboard once a real edit runs, same as
-// every other unconfirmed cost figure in this file.
-const VIDEO_EDIT_MODELS = [
-  { id: 'runway/aleph', label: 'Runway Aleph', costUsd: 0.25, blurb: 'In-context video editing — change the background/setting, relight, add or remove things, while keeping the original motion and subject.' },
-];
-app.get('/api/video-edit-models', (req, res) => {
-  res.json({ models: VIDEO_EDIT_MODELS.map(m => ({ id: m.id, label: m.label, costUsd: m.costUsd, blurb: m.blurb })) });
-});
-
-const ALL_MODEL_CATALOGS = [MODELS, VIDEO_MODELS, LIPSYNC_MODELS, PHOTO_LIPSYNC_MODELS, MOTION_CONTROL_MODELS, VIDEO_EDIT_MODELS];
+const ALL_MODEL_CATALOGS = [MODELS, VIDEO_MODELS, LIPSYNC_MODELS, PHOTO_LIPSYNC_MODELS, MOTION_CONTROL_MODELS];
 function findModelCostUsd(modelId) {
   for (const catalog of ALL_MODEL_CATALOGS) {
     const found = catalog.find(m => m.id === modelId);
@@ -1186,65 +1169,6 @@ app.post('/api/generate-video/start', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/video-edit/start', requireAuth, async (req, res) => {
-  if (!KIE_API_KEY) {
-    return res.status(503).json({ error: 'not_configured', message: 'KIE_API_KEY is not set on the server yet.' });
-  }
-  const { videoUrl, prompt, aspectRatio, model, meta } = req.body || {};
-  if (!videoUrl || !prompt) {
-    return res.status(400).json({ error: 'bad_request', message: 'videoUrl and prompt are both required.' });
-  }
-  const matched = VIDEO_EDIT_MODELS.find(m => m.id === model) || VIDEO_EDIT_MODELS[0];
-  if (!(await checkUserCanAfford(req, res, matched.id))) return;
-
-  // Same reasoning as motion-control above: re-host on KIE's own storage rather than handing
-  // KIE a URL pointing back at our own server — their fetch-from-third-party-URL path has a
-  // documented 30s timeout that's proven unreliable for video specifically.
-  let kieVideoUrl;
-  try {
-    const vidId = videoUrl.split('/api/reference-image/')[1];
-    const vidEntry = vidId && referenceImages.get(vidId);
-    if (!vidEntry) throw new Error('Could not find the uploaded video to re-host on KIE.');
-    kieVideoUrl = await uploadToKieFileHost(vidEntry.buffer, vidEntry.mime, 'edit-source.mp4');
-  } catch (err) {
-    console.error('[server] could not re-host video on KIE for video-edit:', err);
-    return res.status(502).json({ error: 'provider_error', message: 'Could not upload the video to KIE: ' + String(err && err.message || err) });
-  }
-
-  const callBackUrl = PUBLIC_URL ? PUBLIC_URL + '/api/webhook/kie-aleph' : undefined;
-  const body = { videoUrl: kieVideoUrl, prompt };
-  if (aspectRatio) body.aspectRatio = aspectRatio;
-  if (callBackUrl) body.callBackUrl = callBackUrl;
-
-  try {
-    const createRes = await fetch(`${KIE_BASE}/api/v1/aleph/generate`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${KIE_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    const createData = await createRes.json().catch(() => null);
-    console.log('[server] create video-edit task (aleph):', JSON.stringify(createData));
-    const taskId = createData && createData.data && createData.data.taskId;
-    if (!createRes.ok || !taskId) {
-      return res.status(502).json({
-        error: 'provider_error',
-        message: (createData && createData.msg) || ('KIE.ai rejected the request (HTTP ' + createRes.status + ').'),
-      });
-    }
-    tasks.set(taskId, {
-      status: 'pending', imageUrl: null, message: null, model: matched.id, prompt, isVideo: true,
-      meta: meta || {}, createdAt: Date.now(), updatedAt: Date.now(), userId: req.user.id,
-    });
-    if (!callBackUrl) {
-      console.warn('[server] no PUBLIC_URL known — this task will rely entirely on the polling fallback.');
-    }
-    return res.json({ taskId });
-  } catch (err) {
-    console.error('[server] /api/video-edit/start failed:', err);
-    return res.status(500).json({ error: 'server_error', message: String(err && err.message || err) });
-  }
-});
-
 // ---- webhook — KIE calls this the moment a task actually finishes ----
 // The exact payload shape isn't confirmed from docs alone (only the request side, i.e.
 // callBackUrl usage, was documented) — log the raw body in full so the first real delivery
@@ -1303,50 +1227,6 @@ async function applyTaskResult(taskId, d) {
     tasks.set(taskId, { ...existing, status: 'pending', updatedAt: Date.now() });
   }
 }
-
-// ---- Aleph's own webhook — different payload shape than the unified API. CONFIRMED live
-// (not guessed) from a real delivery: { code, msg, data: { result_video_url, result_image_url },
-// taskId } — code/msg/taskId sit at the TOP level, not nested under data like the poll
-// (record-info) endpoint's successFlag/errorCode shape. A real failure looked like:
-//   { code: 500, data: { result_image_url: "" }, msg: "internal error, please try again later.", taskId: "..." }
-// An earlier version of this assumed the poll endpoint's successFlag/errorCode fields would
-// also appear on the webhook — they don't, so failures were silently read as "still pending"
-// forever. This normalizes into the same {state/response} shape applyTaskResult() already
-// understands, rather than changing that shared function for one model's quirks.
-function normalizeAlephResult(d) {
-  if (!d) return { state: 'pending' };
-  if (d.code !== undefined) {
-    const code = Number(d.code);
-    if (code === 200) {
-      const url = d.data && (d.data.result_video_url || d.data.resultVideoUrl);
-      return url ? { state: 'success', response: { resultUrls: [url] } } : { state: 'pending' };
-    }
-    return { state: 'fail', errorMessage: d.msg || 'Aleph generation failed.' };
-  }
-  // Poll (record-info) shape, in case a fallback poll route is ever added — kept separate
-  // from the webhook shape above rather than guessed-merged into it.
-  const flag = Number(d.successFlag);
-  if (flag === 1) {
-    const response = d.response || {};
-    const url = response.resultVideoUrl || response.result_video_url;
-    return url ? { state: 'success', response: { resultUrls: [url] } } : { state: 'pending' };
-  }
-  if (d.errorCode || d.errorMessage) {
-    return { state: 'fail', errorMessage: d.errorMessage || 'Aleph generation failed.' };
-  }
-  return { state: 'pending' };
-}
-app.post('/api/webhook/kie-aleph', async (req, res) => {
-  const body = req.body || {};
-  console.log('[server] Aleph webhook received:', JSON.stringify(body));
-  const taskId = body.taskId || (body.data && body.data.taskId);
-  if (!taskId) {
-    console.warn('[server] Aleph webhook payload had no recognizable taskId — ignoring.');
-    return res.status(200).json({ ok: true }); // still 200 so KIE doesn't retry forever
-  }
-  await applyTaskResult(taskId, normalizeAlephResult(body));
-  res.status(200).json({ ok: true });
-});
 
 // ---- status check — reads our own fast in-memory store first (kept fresh by the webhook).
 // Only reaches out to KIE directly as a fallback if we have no record yet, or the record
