@@ -1304,38 +1304,47 @@ async function applyTaskResult(taskId, d) {
   }
 }
 
-// ---- Aleph's own webhook — different payload shape than the unified API. The poll endpoint
-// (record-info) confirmed camelCase resultVideoUrl; the callback page documented snake_case
-// result_video_url — both handled defensively below since only the poll shape was confirmed
-// against a literal doc example, the callback shape is documented but not yet seen live. This
-// normalizes into the same {state/successFlag/response} shape applyTaskResult() already
-// understands, rather than changing that shared function for one model's quirks. successFlag
-// itself is ambiguous per the docs (0 covers both "still running" and "failed") — errorCode/
-// errorMessage presence is the working guess for telling those apart; verify against a real
-// failed generation once one happens. ----
+// ---- Aleph's own webhook — different payload shape than the unified API. CONFIRMED live
+// (not guessed) from a real delivery: { code, msg, data: { result_video_url, result_image_url },
+// taskId } — code/msg/taskId sit at the TOP level, not nested under data like the poll
+// (record-info) endpoint's successFlag/errorCode shape. A real failure looked like:
+//   { code: 500, data: { result_image_url: "" }, msg: "internal error, please try again later.", taskId: "..." }
+// An earlier version of this assumed the poll endpoint's successFlag/errorCode fields would
+// also appear on the webhook — they don't, so failures were silently read as "still pending"
+// forever. This normalizes into the same {state/response} shape applyTaskResult() already
+// understands, rather than changing that shared function for one model's quirks.
 function normalizeAlephResult(d) {
   if (!d) return { state: 'pending' };
+  if (d.code !== undefined) {
+    const code = Number(d.code);
+    if (code === 200) {
+      const url = d.data && (d.data.result_video_url || d.data.resultVideoUrl);
+      return url ? { state: 'success', response: { resultUrls: [url] } } : { state: 'pending' };
+    }
+    return { state: 'fail', errorMessage: d.msg || 'Aleph generation failed.' };
+  }
+  // Poll (record-info) shape, in case a fallback poll route is ever added — kept separate
+  // from the webhook shape above rather than guessed-merged into it.
   const flag = Number(d.successFlag);
   if (flag === 1) {
-    const response = d.response || d.data || {};
-    const url = response.resultVideoUrl || response.result_video_url || d.resultVideoUrl || d.result_video_url;
-    return { state: 'success', successFlag: 1, response: { resultUrls: url ? [url] : [] } };
+    const response = d.response || {};
+    const url = response.resultVideoUrl || response.result_video_url;
+    return url ? { state: 'success', response: { resultUrls: [url] } } : { state: 'pending' };
   }
-  if (d.errorCode || d.errorMessage || d.failMsg) {
-    return { state: 'fail', errorMessage: d.errorMessage || d.failMsg || 'Aleph generation failed.' };
+  if (d.errorCode || d.errorMessage) {
+    return { state: 'fail', errorMessage: d.errorMessage || 'Aleph generation failed.' };
   }
   return { state: 'pending' };
 }
 app.post('/api/webhook/kie-aleph', async (req, res) => {
   const body = req.body || {};
   console.log('[server] Aleph webhook received:', JSON.stringify(body));
-  const d = body.data || body;
-  const taskId = d.taskId || body.taskId;
+  const taskId = body.taskId || (body.data && body.data.taskId);
   if (!taskId) {
     console.warn('[server] Aleph webhook payload had no recognizable taskId — ignoring.');
     return res.status(200).json({ ok: true }); // still 200 so KIE doesn't retry forever
   }
-  await applyTaskResult(taskId, normalizeAlephResult(d));
+  await applyTaskResult(taskId, normalizeAlephResult(body));
   res.status(200).json({ ok: true });
 });
 
