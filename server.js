@@ -1193,7 +1193,7 @@ app.post('/api/video-edit/start', requireAuth, async (req, res) => {
   if (!KIE_API_KEY) {
     return res.status(503).json({ error: 'not_configured', message: 'KIE_API_KEY is not set on the server yet.' });
   }
-  const { videoUrl, prompt, resolution, model, meta } = req.body || {};
+  const { videoUrl, imageUrl, prompt, resolution, aspectRatio, model, meta } = req.body || {};
   if (!videoUrl || !prompt) {
     return res.status(400).json({ error: 'bad_request', message: 'videoUrl and prompt are both required.' });
   }
@@ -1203,22 +1203,34 @@ app.post('/api/video-edit/start', requireAuth, async (req, res) => {
   // Same reasoning as motion-control above: re-host on KIE's own storage rather than handing
   // KIE a URL pointing back at our own server — their fetch-from-third-party-URL path has a
   // documented 30s timeout that's proven unreliable for video specifically.
-  let kieVideoUrl;
+  let kieVideoUrl, kieImageUrl;
   try {
     const vidId = videoUrl.split('/api/reference-image/')[1];
     const vidEntry = vidId && referenceImages.get(vidId);
     if (!vidEntry) throw new Error('Could not find the uploaded video to re-host on KIE.');
     kieVideoUrl = await uploadToKieFileHost(vidEntry.buffer, vidEntry.mime, 'edit-source.mp4');
+    if (imageUrl) {
+      const imgId = imageUrl.split('/api/reference-image/')[1];
+      const imgEntry = imgId && referenceImages.get(imgId);
+      if (!imgEntry) throw new Error('Could not find the uploaded reference image to re-host on KIE.');
+      kieImageUrl = await uploadToKieFileHost(imgEntry.buffer, imgEntry.mime, 'edit-ref.png');
+    }
   } catch (err) {
-    console.error('[server] could not re-host video on KIE for video-edit:', err);
-    return res.status(502).json({ error: 'provider_error', message: 'Could not upload the video to KIE: ' + String(err && err.message || err) });
+    console.error('[server] could not re-host video/image on KIE for video-edit:', err);
+    return res.status(502).json({ error: 'provider_error', message: 'Could not upload to KIE: ' + String(err && err.message || err) });
   }
 
-  // aspect_ratio fixed to 'auto' — the only valid value for video-only input, see comment
-  // above VIDEO_EDIT_MODELS.
-  const input = {
-    prompt, video_urls: [kieVideoUrl], resolution: resolution || '720p', aspect_ratio: 'auto', audio: false,
-  };
+  // Two input shapes per docs.kie.ai: "Video Input Only" (aspect_ratio must be 'auto', no
+  // reference images) vs "Video with Images" (aspect_ratio must be one of 16:9/9:16/1:1,
+  // 'auto' is invalid there) — which one applies depends purely on whether a reference image
+  // was actually attached. image_urls[0] is addressable in the prompt as @image_1 per docs.
+  const input = { prompt, video_urls: [kieVideoUrl], resolution: resolution || '720p', audio: false };
+  if (kieImageUrl) {
+    input.image_urls = [kieImageUrl];
+    input.aspect_ratio = aspectRatio || '16:9';
+  } else {
+    input.aspect_ratio = 'auto';
+  }
   const callBackUrl = PUBLIC_URL ? PUBLIC_URL + '/api/webhook/kie' : undefined;
 
   try {

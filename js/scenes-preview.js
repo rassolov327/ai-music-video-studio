@@ -675,11 +675,20 @@ async function renderVideoEditSlot(scene, shot){
   }
   const model = videoEditModelOptions.find(m=> m.id===shot._videoEditModel) || videoEditModelOptions[0];
   const resolution = shot._videoEditResolution || '720p';
+  const hasRefImage = !!shot._videoEditRefImage;
   freshSlot.innerHTML = `
     <div class="field-group">
       <div class="field-group-title">Edit this video <span style="font-weight:400;color:var(--text-3);">— changes the existing clip, keeps the original motion</span></div>
       <div class="cf-field"><label>Prompt <span style="color:var(--text-3);font-weight:400;">— what should change</span></label>
         <textarea id="shotVideoEditPromptInput" style="min-height:90px;" placeholder="e.g. replace the background with a neon city street at night">${shot._videoEditPrompt||''}</textarea>
+      </div>
+      <div class="cf-field"><label>Background reference image <span style="color:var(--text-3);font-weight:400;">— optional, instead of describing it in the prompt</span></label>
+        <label class="photo-drop" id="shotVideoEditRefDrop">
+          ${hasRefImage ? `<img src="${shot._videoEditRefImage}">` : '<span class="photo-drop-plus">' + plusSvg(20) + '</span><span class="photo-drop-text">Add a photo</span>'}
+          <input type="file" id="shotVideoEditRefInput" accept="image/*" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;">
+        </label>
+        ${hasRefImage ? `<button class="cf-btn" id="shotVideoEditRefClearBtn" style="width:100%;margin-top:6px;">Remove image</button>` : ''}
+        <div class="gen-hint" style="margin-top:6px;">Reference it in the prompt with <code>@image_1</code> — e.g. "replace the background with the scene from @image_1".</div>
       </div>
       <div class="cf-field"><label>Model</label>
         <select id="shotVideoEditModelSelect">
@@ -691,12 +700,40 @@ async function renderVideoEditSlot(scene, shot){
           ${VIDEO_EDIT_RESOLUTIONS.map(r=> `<option value="${r}" ${r===resolution?'selected':''}>${r}</option>`).join('')}
         </select>
       </div>
+      ${hasRefImage ? `<div class="cf-field"><label>Aspect ratio <span style="color:var(--text-3);font-weight:400;">— required when using a reference image</span></label>
+        <select id="shotVideoEditAspectSelect">
+          ${['16:9','9:16','1:1'].map(r=> `<option value="${r}" ${r===(shot._videoEditAspect||'16:9')?'selected':''}>${r}</option>`).join('')}
+        </select>
+      </div>` : ''}
       ${model.blurb ? `<div class="gen-hint" style="margin-top:4px;">${model.blurb}</div>` : ''}
       <button class="cf-btn primary" id="shotVideoEditSendBtn" style="width:100%;margin-top:8px;">Add to Tasks (video edit)${model.costUsd?' — '+formatCost(model.costUsd):''}</button>
     </div>`;
   document.getElementById('shotVideoEditPromptInput').addEventListener('input', (e)=>{ shot._videoEditPrompt = e.target.value; if(typeof saveProjectSoon==='function') saveProjectSoon(); });
+  const refDrop = document.getElementById('shotVideoEditRefDrop');
+  refDrop.onclick = (e)=>{ if(!e.target.closest('input')) document.getElementById('shotVideoEditRefInput').click(); };
+  document.getElementById('shotVideoEditRefInput').onchange = async (e)=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    try{
+      shot._videoEditRefImage = await loadImageAsDataURL(file);
+      if(typeof saveProjectSoon==='function') saveProjectSoon();
+      renderVideoEditSlot(scene, shot);
+    } catch(err){
+      alert('Could not load that image: ' + err.message);
+    }
+  };
+  const refClearBtn = document.getElementById('shotVideoEditRefClearBtn');
+  if(refClearBtn){
+    refClearBtn.onclick = ()=>{
+      shot._videoEditRefImage = null;
+      if(typeof saveProjectSoon==='function') saveProjectSoon();
+      renderVideoEditSlot(scene, shot);
+    };
+  }
   document.getElementById('shotVideoEditModelSelect').addEventListener('change', (e)=>{ shot._videoEditModel = e.target.value; if(typeof saveProjectSoon==='function') saveProjectSoon(); });
   document.getElementById('shotVideoEditResolutionSelect').addEventListener('change', (e)=>{ shot._videoEditResolution = e.target.value; if(typeof saveProjectSoon==='function') saveProjectSoon(); });
+  const aspectSelect = document.getElementById('shotVideoEditAspectSelect');
+  if(aspectSelect) aspectSelect.addEventListener('change', (e)=>{ shot._videoEditAspect = e.target.value; if(typeof saveProjectSoon==='function') saveProjectSoon(); });
   document.getElementById('shotVideoEditSendBtn').onclick = ()=> queueVideoEditGeneration(scene, shot);
 }
 
@@ -710,6 +747,8 @@ function queueVideoEditGeneration(scene, shot){
     id: 'dt' + (draftTaskSeq++), kind: 'video-edit',
     sceneId: scene.id, shotId: shot.id, sceneName: scene.name, shotName: shot.name,
     videoEditPrompt: prompt, resolution: shot._videoEditResolution || '720p',
+    refImage: shot._videoEditRefImage || null,
+    aspectRatio: shot._videoEditRefImage ? (shot._videoEditAspect || '16:9') : null,
     model: shot._videoEditModel || (videoEditModelOptions[0] && videoEditModelOptions[0].id) || null,
     createdAt: Date.now(),
   });

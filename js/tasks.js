@@ -552,22 +552,27 @@ async function sendGenerationTask(draft){
     if(!scene || !shot) throw new Error('This shot no longer exists.');
     if(!shot.videoUrl) throw new Error('This shot has no video yet to edit.');
 
-    let videoUrl;
+    let videoUrl, imageUrl;
     try{
       showBgStatus('Preparing video…');
       const reencoded = await reencodeVideoForEdit(shot.videoUrl, (msg)=> showBgStatus(msg));
       const blobUrl = URL.createObjectURL(reencoded);
       videoUrl = await uploadReferencePhoto(blobUrl);
       URL.revokeObjectURL(blobUrl);
+      if(draft.refImage){
+        showBgStatus('Uploading reference image…');
+        imageUrl = await uploadReferencePhoto(draft.refImage);
+      }
     } finally {
       hideBgStatus();
     }
     if(!videoUrl) throw new Error('Could not upload the video.');
+    if(draft.refImage && !imageUrl) throw new Error('Could not upload the reference image.');
 
     const videoEditTaskMeta = { projectId: currentProjectId, kind:'video-edit', sceneId: scene.id, sceneName: scene.name, shotId: shot.id, shotName: shot.name };
     const res = await fetch('/api/video-edit/start', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ videoUrl, prompt: draft.videoEditPrompt, resolution: draft.resolution || '720p', model: draft.model, meta: videoEditTaskMeta }),
+      body: JSON.stringify({ videoUrl, imageUrl, prompt: draft.videoEditPrompt, resolution: draft.resolution || '720p', aspectRatio: draft.aspectRatio || undefined, model: draft.model, meta: videoEditTaskMeta }),
     });
     const data = await res.json().catch(()=> null);
     if(!res.ok || !data || !data.taskId){
