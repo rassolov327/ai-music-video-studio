@@ -612,6 +612,36 @@ const VIDEO_EDIT_ASPECT_PRESETS = [
   { value:'3:4', label:'3:4' },
   { value:'21:9', label:'21:9' },
 ];
+// A shot's video can come from almost anywhere (MOVIE's own output, a phone-recorded upload
+// via Archive, a screen capture) — same reasoning as lipsync.js's trimVideoToDuration: raw
+// stream-copying an arbitrary source into an .mp4 container can LOOK fine but carry a codec
+// the provider can't actually decode, and the server's own remux step is a stream copy too
+// (see remuxFaststart in server.js), so it can't fix that either. Real re-encode, no trim
+// (video-edit should touch the whole clip's length, not cut it).
+async function reencodeVideoForEdit(videoUrl, onStatus){
+  if(onStatus) onStatus('Loading render engine…');
+  const ffmpeg = await ensureFFmpegLoaded(onStatus);
+  if(onStatus) onStatus('Preparing video for editing…');
+  await ffmpeg.writeFile('vedit_src', await ffmpegFetchFile(videoUrl));
+  try{
+    await ffmpeg.exec([
+      '-i', 'vedit_src',
+      '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', // libx264 needs even width/height
+      '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'fast', '-crf', '23',
+      '-c:a', 'aac', '-b:a', '128k',
+      'vedit_out.mp4',
+    ]);
+    const data = await ffmpeg.readFile('vedit_out.mp4');
+    if(!data || !data.buffer || data.buffer.byteLength < 1000){
+      throw new Error('Could not process the video — the render engine failed partway through.');
+    }
+    return new Blob([data.buffer], { type: 'video/mp4' });
+  } finally {
+    try{ await ffmpeg.deleteFile('vedit_src'); } catch(err){}
+    try{ await ffmpeg.deleteFile('vedit_out.mp4'); } catch(err){}
+  }
+}
+
 let videoEditModelOptions = []; // [{id, label, costUsd, blurb}]
 async function loadVideoEditModelList(){
   try{

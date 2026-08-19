@@ -552,7 +552,16 @@ async function sendGenerationTask(draft){
     if(!scene || !shot) throw new Error('This shot no longer exists.');
     if(!shot.videoUrl) throw new Error('This shot has no video yet to edit.');
 
-    const videoUrl = await uploadReferencePhoto(shot.videoUrl);
+    let videoUrl;
+    try{
+      showBgStatus('Preparing video…');
+      const reencoded = await reencodeVideoForEdit(shot.videoUrl, (msg)=> showBgStatus(msg));
+      const blobUrl = URL.createObjectURL(reencoded);
+      videoUrl = await uploadReferencePhoto(blobUrl);
+      URL.revokeObjectURL(blobUrl);
+    } finally {
+      hideBgStatus();
+    }
     if(!videoUrl) throw new Error('Could not upload the video.');
 
     const videoEditTaskMeta = { projectId: currentProjectId, kind:'video-edit', sceneId: scene.id, sceneName: scene.name, shotId: shot.id, shotName: shot.name };
