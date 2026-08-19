@@ -914,6 +914,26 @@ async function archiveCapturedVideo(file, scene, shot){
   return entry;
 }
 
+// A video added straight from disk, not generated or captured — same shape as
+// archiveCapturedVideo above (isVideo:true, so it renders/inserts as a video everywhere,
+// e.g. insertArchiveEntryAtPlayhead's video branch and the new video-edit Inspector slot),
+// just a generic upload label instead of a scene/shot-specific "Captured" one.
+async function archiveUploadedVideo(file){
+  state.archive = state.archive || [];
+  const entry = {
+    id: 'arc' + (archiveSeq++),
+    kind: 'upload', sourceLabel: 'Uploaded — ' + (file.name || 'video'),
+    model: '', prompt: '',
+    isVideo: true, photo: null, createdAt: Date.now(),
+  };
+  state.archive.push(entry);
+  const blobUrl = URL.createObjectURL(file);
+  if(typeof persistGeneratedAssetImage==='function') await persistGeneratedAssetImage(entry, 'archive', 'photo', blobUrl);
+  else entry.photo = blobUrl;
+  if(typeof saveProjectSoon==='function') saveProjectSoon();
+  return entry;
+}
+
 async function archiveUploadedAudio(file){
   state.archive = state.archive || [];
   const track = await buildMusicTrack(file);

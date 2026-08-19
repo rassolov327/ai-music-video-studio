@@ -52,6 +52,8 @@ function wireArchivePage(){
     try{
       if(file.type && file.type.indexOf('audio/')===0){
         await archiveUploadedAudio(file);
+      } else if(file.type && file.type.indexOf('video/')===0){
+        await archiveUploadedVideo(file);
       } else {
         const dataUrl = await loadImageAsDataURL(file);
         await archiveUploadedImage(dataUrl, file.name);
