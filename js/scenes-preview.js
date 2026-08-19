@@ -591,11 +591,98 @@ function renderShotGenSection(scene, shot){
   if(shot.previewImage){
     section.innerHTML = `
       <div class="shot-preview-thumb"><img src="${shot.previewImage}"></div>
-      <div id="paidGenSlot"></div>`;
+      <div id="paidGenSlot"></div>
+      <div id="videoEditSlot"></div>`;
   } else {
-    section.innerHTML = `<div id="paidGenSlot"></div>`;
+    section.innerHTML = `<div id="paidGenSlot"></div><div id="videoEditSlot"></div>`;
   }
   renderPaidGenSlot(scene, shot);
+  renderVideoEditSlot(scene, shot);
+}
+
+// ---------- video-to-video editing (Runway Aleph) — edits a shot's EXISTING video by prompt
+// (e.g. "replace the background") instead of animating a still image. Only offered once the
+// shot already has a video, from either MOVIE or a video dropped straight in from Archive. ----------
+const VIDEO_EDIT_ASPECT_PRESETS = [
+  { value:'', label:'Default (match source)' },
+  { value:'16:9', label:'16:9' },
+  { value:'9:16', label:'9:16' },
+  { value:'1:1', label:'1:1' },
+  { value:'4:3', label:'4:3' },
+  { value:'3:4', label:'3:4' },
+  { value:'21:9', label:'21:9' },
+];
+let videoEditModelOptions = []; // [{id, label, costUsd, blurb}]
+async function loadVideoEditModelList(){
+  try{
+    const res = await fetch('/api/video-edit-models');
+    const data = await res.json();
+    videoEditModelOptions = (data && data.models) || [];
+  } catch(err){
+    videoEditModelOptions = [];
+  }
+}
+function videoEditModelSelectHtml(selectedId){
+  const fallback = videoEditModelOptions[0] && videoEditModelOptions[0].id;
+  const opts = videoEditModelOptions.map(m=>
+    `<option value="${m.id}" title="${m.blurb || ''}" ${m.id===(selectedId||fallback)?'selected':''}>${m.label}${m.costUsd?' — '+formatCost(m.costUsd):''}</option>`
+  ).join('');
+  return `<select class="task-tile-model-select">${opts || '<option>No video-editing model available</option>'}</select>`;
+}
+
+async function renderVideoEditSlot(scene, shot){
+  const slot = document.getElementById('videoEditSlot');
+  if(!slot) return;
+  if(!shot.videoUrl){ slot.innerHTML = ''; return; }
+  const available = await checkPaidGenerationAvailable();
+  // renderShotGenSection may have re-run (e.g. focus changed) while we were awaiting — same
+  // guard renderPaidGenSlot uses above.
+  const freshSlot = document.getElementById('videoEditSlot');
+  if(!freshSlot) return;
+  if(!available){ freshSlot.innerHTML = ''; return; }
+  if(videoEditModelOptions.length===0){
+    freshSlot.innerHTML = `<div class="gen-hint" style="margin-top:10px;">No video-editing model connected on this deployment yet.</div>`;
+    return;
+  }
+  const model = videoEditModelOptions.find(m=> m.id===shot._videoEditModel) || videoEditModelOptions[0];
+  freshSlot.innerHTML = `
+    <div class="field-group">
+      <div class="field-group-title">Edit this video <span style="font-weight:400;color:var(--text-3);">— describe the change, keeps the original motion</span></div>
+      <textarea id="shotVideoEditPromptInput" style="min-height:70px;" placeholder="e.g. replace the background with a neon city street at night">${shot._videoEditPrompt||''}</textarea>
+      <select id="shotVideoEditModelSelect" style="margin-top:6px;">
+        ${videoEditModelOptions.map(m=> `<option value="${m.id}" ${m.id===model.id?'selected':''}>${m.label}${m.costUsd?' — '+formatCost(m.costUsd):''}</option>`).join('')}
+      </select>
+      <select id="shotVideoEditAspectSelect" style="margin-top:6px;">
+        ${VIDEO_EDIT_ASPECT_PRESETS.map(p=> `<option value="${p.value}" ${p.value===(shot._videoEditAspect||'')?'selected':''}>${p.label}</option>`).join('')}
+      </select>
+      ${model.blurb ? `<div class="gen-hint" style="margin-top:4px;">${model.blurb}</div>` : ''}
+      <button class="cf-btn primary" id="shotVideoEditSendBtn" style="width:100%;margin-top:8px;">Add to Tasks (video edit)${model.costUsd?' — '+formatCost(model.costUsd):''}</button>
+    </div>`;
+  document.getElementById('shotVideoEditPromptInput').addEventListener('input', (e)=>{ shot._videoEditPrompt = e.target.value; if(typeof saveProjectSoon==='function') saveProjectSoon(); });
+  document.getElementById('shotVideoEditModelSelect').addEventListener('change', (e)=>{ shot._videoEditModel = e.target.value; if(typeof saveProjectSoon==='function') saveProjectSoon(); });
+  document.getElementById('shotVideoEditAspectSelect').addEventListener('change', (e)=>{ shot._videoEditAspect = e.target.value; if(typeof saveProjectSoon==='function') saveProjectSoon(); });
+  document.getElementById('shotVideoEditSendBtn').onclick = ()=> queueVideoEditGeneration(scene, shot);
+}
+
+// Adds a video-edit draft to the task queue — same "stack up, then render from TASKS" pattern
+// as queueShotGeneration below, not sent immediately.
+function queueVideoEditGeneration(scene, shot){
+  const prompt = (shot._videoEditPrompt||'').trim();
+  if(!prompt){ alert('Describe what should change in the video first.'); return; }
+  state.taskQueue = state.taskQueue || [];
+  state.taskQueue.push({
+    id: 'dt' + (draftTaskSeq++), kind: 'video-edit',
+    sceneId: scene.id, shotId: shot.id, sceneName: scene.name, shotName: shot.name,
+    videoEditPrompt: prompt, aspectRatio: shot._videoEditAspect || '',
+    model: shot._videoEditModel || (videoEditModelOptions[0] && videoEditModelOptions[0].id) || null,
+    createdAt: Date.now(),
+  });
+  if(typeof saveProjectSoon==='function') saveProjectSoon();
+  if(typeof renderTasksGrid==='function' && typeof refreshTasks==='function') refreshTasks();
+  const slot = document.getElementById('videoEditSlot');
+  if(slot){
+    slot.innerHTML = `<div class="gen-hint" style="color:#5fae7a;">Added to the TASKS queue — open the TASKS tab to pick a model and generate.</div>`;
+  }
 }
 
 async function renderPaidGenSlot(scene, shot){
