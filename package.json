@@ -1,9 +1,8 @@
 {
-  "name": "ai-music-video-studio",
+  "name": "lm4",
   "version": "1.0.0",
   "private": true,
-  "type": "module",
-  "description": "AI Music Video Studio — static app + a small backend proxy that keeps the paid image-generation API key server-side.",
+  "description": "LM4 Cine Meter — standalone static page, served as-is.",
   "scripts": {
     "start": "node server.js"
   },
@@ -11,10 +10,6 @@
     "node": ">=18"
   },
   "dependencies": {
-    "express": "^4.19.2",
-    "ffmpeg-static": "^5.3.0",
-    "pg": "^8.13.1",
-    "bcryptjs": "^2.4.3",
-    "cookie-parser": "^1.4.7"
+    "express": "^4.19.2"
   }
 }

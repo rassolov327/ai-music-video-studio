@@ -2,510 +2,729 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>TAKE:ONE LAB — Prototype</title>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/2.44.0/iconfont/tabler-icons.min.css">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/utif@3.1.0/UTIF.js"></script>
-<link rel="stylesheet" href="styles.css">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>LM4 Cine Meter (прототип)</title>
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#15181c; --panel2:#1c2025; --border:#2a2f36;
+    --text:#e8eaed; --sub:#9aa4af; --accent:#5ec9ff; --accent2:#8fe3a1;
+    --warn:#ffb454; --bad:#ff6b6b;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);
+    font-family:-apple-system,Roboto,"Segoe UI",Helvetica,Arial,sans-serif;}
+  body{padding-bottom:70px;}
+  header{padding:14px 16px 8px;}
+  header h1{font-size:17px;margin:0 0 2px;font-weight:600;}
+  header p{margin:0;font-size:12px;color:var(--sub);}
+  .status{display:inline-block;margin-top:6px;font-size:11px;padding:3px 8px;
+    border-radius:20px;background:var(--panel2);color:var(--sub);border:1px solid var(--border);}
+  .status.live{color:var(--accent2);border-color:#2a4a35;}
+  main{padding:0 16px;}
+  .page{display:none;}
+  .page.active{display:block;}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:14px;
+    padding:14px;margin-bottom:12px;}
+  .card h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--sub);
+    margin:0 0 10px;font-weight:600;}
+  .row{display:flex;gap:10px;margin-bottom:10px;}
+  .row:last-child{margin-bottom:0;}
+  .field{flex:1;display:flex;flex-direction:column;gap:4px;}
+  .field label{font-size:11px;color:var(--sub);}
+  .field select,.field input{background:var(--panel2);border:1px solid var(--border);
+    color:var(--text);border-radius:8px;padding:9px 8px;font-size:15px;width:100%;}
+  .field input:focus,.field select:focus{outline:1px solid var(--accent);}
+  .seg{display:flex;background:var(--panel2);border:1px solid var(--border);border-radius:8px;overflow:hidden;}
+  .seg button{flex:1;background:none;border:0;color:var(--sub);padding:8px;font-size:13px;}
+  .seg button.on{background:var(--accent);color:#04202b;font-weight:600;}
+  .result{display:flex;align-items:baseline;justify-content:space-between;padding:6px 0;
+    border-bottom:1px dashed var(--border);}
+  .result:last-child{border-bottom:0;}
+  .result .k{font-size:13px;color:var(--sub);}
+  .result .v{font-size:19px;font-weight:600;}
+  .result .v.big{font-size:26px;color:var(--accent);}
+  .badge{display:inline-block;font-size:11px;padding:2px 7px;border-radius:6px;margin-left:6px;
+    background:var(--panel2);border:1px solid var(--border);color:var(--sub);}
+  .badge.warn{color:var(--warn);border-color:#4a3a1f;}
+  .badge.bad{color:var(--bad);border-color:#4a2323;}
+  .badge.ok{color:var(--accent2);border-color:#2a4a35;}
+  .note{font-size:11.5px;color:var(--sub);line-height:1.5;margin-top:8px;}
+  nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:var(--panel);
+    border-top:1px solid var(--border);padding:6px 8px calc(6px + env(safe-area-inset-bottom));}
+  nav button{flex:1;background:none;border:0;color:var(--sub);font-size:12px;padding:8px 0;
+    display:flex;flex-direction:column;align-items:center;gap:3px;}
+  nav button .ic{font-size:19px;}
+  nav button.on{color:var(--accent);}
+  .cri-scale{display:flex;height:8px;border-radius:4px;overflow:hidden;margin-top:6px;}
+  .cri-scale div{flex:1;}
+</style>
 </head>
 <body>
-<div id="loadingScreen" class="loading-screen hidden">
-  <div class="loading-box">
-    <div class="loading-title"><i class="ti ti-movie"></i> Loading project…</div>
-    <div class="loading-log" id="loadingLog"></div>
-    <button class="cf-btn primary" id="loadingReconnectBtn" style="display:none;">Reconnect folder</button>
-    <button class="cf-btn primary" id="loadingContinueBtn" style="display:none;">Continue</button>
-  </div>
-</div>
 
-<div id="loginScreen" class="home-screen hidden">
-  <div class="np-box">
-    <div class="np-header">
-      <h2>Sign in</h2>
-    </div>
-    <div class="cf-field">
-      <label>Login</label>
-      <input type="text" id="loginInput" autocomplete="username">
-    </div>
-    <div class="cf-field">
-      <label>Password</label>
-      <input type="password" id="loginPasswordInput" autocomplete="current-password">
-    </div>
-    <div class="gen-hint" id="loginErrorHint" style="color:var(--danger);display:none;"></div>
-    <div class="cf-actions">
-      <button class="cf-btn primary" id="loginSubmitBtn" style="width:100%;">Sign in</button>
-    </div>
-  </div>
-</div>
-<div id="homeScreen" class="home-screen hidden">
-  <div class="home-hero">
-    <div class="home-hero-art"><i class="ti ti-movie"></i></div>
-    <div class="home-logo">TAKE:ONE LAB</div>
-    <div class="home-tagline">Cast it, dress it, shoot it — plan your next music video start to finish.</div>
-  </div>
-  <div class="home-body">
-    <div class="home-body-head">
-      <div class="home-body-title">Projects</div>
-      <div style="display:flex;gap:8px;">
-        <button class="cf-btn" id="homeLogoutBtn"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg> Log Out</button>
-        <button class="cf-btn" id="homeImportBtn"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> <span id="homeImportBtnLabel">Import</span></button>
-        <input type="file" id="homeImportInput" accept=".zip" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;">
-        <button class="cf-btn primary" id="homeNewProjectBtn"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg> New Project</button>
-      </div>
-    </div>
-    <div class="home-project-list" id="homeProjectList"></div>
-  </div>
-</div>
+<header>
+  <h1>LM4 Cine Meter</h1>
+  <p>Автономный экспонометр и анализ света для Opple Light Master 4</p>
+  <span id="connStatus" class="status">Прибор: ручной ввод (BLE ещё не подключён)</span>
+</header>
 
-<div id="newProjectScreen" class="home-screen hidden">
-  <div class="np-box">
-    <div class="np-header">
-      <h2>New Project</h2>
-      <button class="np-close" id="npCloseBtn" title="Cancel"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
-    </div>
+<main>
 
-    <div class="cf-field">
-      <label>Project name</label>
-      <input type="text" id="npName" placeholder="Untitled Project">
-    </div>
+  <!-- ===================== PAGE: CAMERA ===================== -->
+  <section id="page-camera" class="page active">
 
-    <div class="np-field-title">Orientation</div>
-    <div class="np-orientation-row" id="npOrientationRow">
-      <div class="np-orient-tile active" data-orient="horizontal">
-        <div class="np-orient-shape horizontal"></div>
-        <span>Horizontal</span>
-      </div>
-      <div class="np-orient-tile" data-orient="vertical">
-        <div class="np-orient-shape vertical"></div>
-        <span>Vertical</span>
-      </div>
-    </div>
-
-    <div class="np-field-title">Resolution</div>
-    <div class="np-chip-row" id="npResolutionRow"></div>
-
-    <div class="np-field-title">Frame rate</div>
-    <div class="np-chip-row" id="npFpsRow"></div>
-
-    <div class="np-folder-row" id="npFolderRow" style="display:none;">
-      <button class="cf-btn" id="npFolderBtn"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg> Choose a folder on disk (optional)</button>
-      <span class="np-folder-status" id="npFolderStatus">Not saving to disk — will use browser storage</span>
-    </div>
-
-    <div class="cf-actions">
-      <button class="cf-btn" id="npCancelBtn">Cancel</button>
-      <button class="cf-btn primary" id="npCreateBtn">Create Project</button>
-    </div>
-  </div>
-</div>
-
-<div class="task-preview-modal hidden" id="projectSettingsModal">
-  <div class="new-idea-box" style="width:420px;">
-    <div class="new-idea-title">Project Settings</div>
-    <div class="np-field-title">Orientation</div>
-    <div class="np-orientation-row" id="psOrientationRow">
-      <div class="np-orient-tile" data-orient="horizontal">
-        <div class="np-orient-shape horizontal"></div>
-        <span>Horizontal</span>
-      </div>
-      <div class="np-orient-tile" data-orient="vertical">
-        <div class="np-orient-shape vertical"></div>
-        <span>Vertical</span>
-      </div>
-    </div>
-    <div class="np-field-title">Resolution</div>
-    <div class="np-chip-row" id="psResolutionRow"></div>
-    <div class="np-field-title">Frame rate</div>
-    <div class="np-chip-row" id="psFpsRow"></div>
-    <div class="gen-hint" style="margin-top:10px;">Changing this won't resize or resample anything already generated — it applies to new generations and how the timeline displays going forward.</div>
-    <div class="cf-actions" style="margin-top:14px;">
-      <button class="cf-btn" id="psCancelBtn">Cancel</button>
-      <button class="cf-btn primary" id="psSaveBtn">Save</button>
-    </div>
-  </div>
-  <div class="task-preview-close" id="psCloseBtn"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
-</div>
-
-<div class="task-preview-modal hidden" id="aiGeneratorModal">
-  <div class="new-idea-box" style="width:420px;">
-    <div class="new-idea-title">AI Generator</div>
-    <div class="cf-field"><label>Prompt</label><textarea id="aiGenPromptInput" style="min-height:100px;" placeholder="Describe the image..."></textarea></div>
-    <div class="cf-field"><label>Model</label><select id="aiGenModelSelect"></select></div>
-    <div class="gen-hint" id="aiGenHint" style="margin-top:0;"></div>
-    <div class="cf-actions" style="margin-top:14px;">
-      <button class="cf-btn" id="aiGenCancelBtn">Cancel</button>
-      <button class="cf-btn primary" id="aiGenSendBtn">Generate</button>
-    </div>
-  </div>
-  <div class="task-preview-close" id="aiGenCloseBtn"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
-</div>
-
-<div id="checkReportScreen" class="loading-screen hidden">
-  <div class="loading-box check-box">
-    <div class="loading-title"><i class="ti ti-list-check"></i> Check Project</div>
-    <div class="check-summary" id="checkSummary"></div>
-    <div class="loading-log" id="checkLog"></div>
-    <button class="cf-btn primary" id="checkCloseBtn">Close</button>
-  </div>
-</div>
-
-<div id="app">
-
-  <div class="topbar">
-    <div class="brand"><i class="ti ti-movie"></i>TAKE:ONE LAB</div>
-    <div class="menu"><span class="menu-project" id="menuFileBtn">File<div class="menu-dropdown" id="menuFileDropdown"><div data-action="save">Save</div><div data-action="export">Export…</div><div data-action="close">Close project</div><div class="menu-dropdown-sep"></div><div data-action="logout">Log Out</div></div></span><span>Edit</span><span class="menu-project" id="menuProjectBtn">Project<div class="menu-dropdown" id="menuProjectDropdown"><div data-action="new">New Project…</div><div data-action="all">All Projects…</div><div data-action="rename">Rename Project…</div><div data-action="settings">Project Settings…</div></div></span><span class="menu-project" id="menuToolsBtn">Tools<div class="menu-dropdown" id="menuToolsDropdown"><div data-action="check">Check Project…</div><div data-action="ai-generator">AI Generator…</div></div></span><span>Help</span></div>
-    <div class="proj-title">New project — <b>Untitled</b></div>
-    <span class="save-status" id="saveStatus" title="Autosave status"></span>
-    <button class="tbtn" id="connectFolderBtn" style="display:none;" title="Keep this project as real files on your disk"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>Save to disk folder</button>
-    <div class="topbar-actions">
-      <button class="tbtn icon-only" id="goToProjectsBtn" title="Back to project selection"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"></path><path d="M5 10v10a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V10"></path></svg></button>
-    </div>
-  </div>
-
-  <div class="body-row hidden" id="scriptPage">
-    <div class="script-input-col">
-      <div class="script-input-header">
-        <span>Script</span>
-        <span class="gen-hint" id="scriptStatusHint" style="margin:0;"></span>
-      </div>
-      <div id="scriptTextInput" class="script-textarea" contenteditable="true" data-placeholder="Paste your generated script here..."></div>
-      <div class="script-input-actions">
-        <button class="cf-btn" id="scriptClearBtn">Clear</button>
-        <button class="cf-btn primary" id="scriptAnalyzeBtn">Analyze</button>
-        <button class="cf-btn primary" id="scriptExportBtn" disabled>Export to project</button>
-      </div>
-    </div>
-    <div class="col-resizer" id="resizeScriptTree" title="Drag to resize"></div>
-    <div class="assets" id="scriptTree">
-      <div class="gen-hint" style="padding:14px;">Paste a script on the left and click Analyze — the proposed breakdown will show up here.</div>
-    </div>
-    <div class="inspector" id="scriptInspector">
-      <div class="insp-tabs"><div class="insp-tab" style="cursor:default;">Inspector</div></div>
-      <div class="gen-hint" style="padding:14px;">Click a scene, shot, or asset on the left to see and edit its details here.</div>
-    </div>
-  </div>
-
-  <div class="body-row" id="workPage">
-
-    <div class="assets" id="assets"></div>
-    <div class="col-resizer" id="resizeAssets" title="Drag to resize"></div>
-
-    <div class="center">
-      <div class="preview-bar">
-        <div class="pb-left">
-          <button class="tbtn" id="homeBtn" title="Back to main screen"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"></path><path d="M5 10v10a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V10"></path></svg>Home</button>
-          <button class="tbtn storyboard-open-btn" id="storyboardOpenBtn" title="Open Storyboard"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="7" height="7" rx="1"></rect><rect x="14" y="4" width="7" height="7" rx="1"></rect><rect x="3" y="13" width="7" height="7" rx="1"></rect><rect x="14" y="13" width="7" height="7" rx="1"></rect></svg>Storyboard</button>
-          <span id="previewBar">Preview</span>
+    <div class="card">
+      <h2>Освещённость (пока вручную, позже — с прибора)</h2>
+      <div class="row">
+        <div class="field">
+          <label>Люкс (Lux)</label>
+          <input type="number" id="lux" value="500" inputmode="decimal">
+        </div>
+        <div class="field">
+          <label>Калибровочная константа C</label>
+          <input type="number" id="calC" value="250" inputmode="decimal">
         </div>
       </div>
-      <div class="preview" id="preview"></div>
-      <div class="preview-transport">
-        <button class="transport-btn" id="playBtn2" title="Play"><svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><polygon points="5,3 19,12 5,21"></polygon></svg></button>
-        <button class="transport-btn" id="pauseBtn2" title="Pause"><svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><rect x="5" y="3" width="5" height="18"></rect><rect x="14" y="3" width="5" height="18"></rect></svg></button>
-        <button class="transport-btn" id="stopBtn2" title="Stop"><svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><rect x="4" y="4" width="16" height="16"></rect></svg></button>
-        <span class="preview-tc" id="tcCurrent2">0:00:00</span>
-      </div>
+      <div class="note">C — константа ISO 2720 для падающего света (incident). Стандартно 240–400, по умолчанию 250. Если экспозиция стабильно уходит в одну сторону относительно вашего опыта — подстройте это число, это и есть та самая «допустимая погрешность».</div>
+    </div>
 
-      <div class="row-resizer" id="resizeTimeline" title="Drag to resize"></div>
-      <div class="timeline-area" id="timelineArea">
-        <div class="timeline-mode-row">
-          <div class="timeline-mode-tabs">
-            <div class="mode-tab active" id="modeAssemblyBtn" data-mode="assembly">Assembly</div>
-            <div class="mode-tab" id="modeEditBtn" data-mode="edit">Edit</div>
-          </div>
-          <div class="timeline-zoom-control" id="timelineZoomControl">
-            <button class="tz-btn" id="tzZoomOutBtn" title="Zoom out (-)">−</button>
-            <input type="range" id="tzZoomSlider" min="10" max="150" step="1" value="40" title="Timeline zoom">
-            <button class="tz-btn" id="tzZoomInBtn" title="Zoom in (+)">+</button>
-            <button class="tz-btn magnet-btn" id="magnetToggleBtn" title="Magnet — snap to shot edges, other blocks, and the playhead">
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15V6a2 2 0 0 1 2-2h1v9"></path><path d="M18 15V6a2 2 0 0 0-2-2h-1v9"></path><path d="M6 15a3 3 0 0 0 6 0"></path><path d="M12 15a3 3 0 0 0 6 0"></path></svg>
-            </button>
+    <div class="card">
+      <h2>Камера</h2>
+      <div class="row">
+        <div class="field">
+          <label>ISO</label>
+          <input type="number" id="iso" value="800" inputmode="decimal">
+        </div>
+        <div class="field">
+          <label>Режим выдержки</label>
+          <div class="seg">
+            <button id="segShutter" class="on" onclick="setShutterMode('shutter')">1/x сек</button>
+            <button id="segAngle" onclick="setShutterMode('angle')">Угол+fps</button>
           </div>
         </div>
-        <div class="timeline-scenes" id="timelineScenes"></div>
-        <div class="timecode-row">
-          <span id="tcCurrent">0:00</span>
-          <span id="tcTotal">0:00</span>
+      </div>
+
+      <div class="row" id="shutterRow">
+        <div class="field">
+          <label>Выдержка, знаменатель (1/x)</label>
+          <input type="number" id="shutterDenom" value="50" inputmode="decimal">
+        </div>
+      </div>
+      <div class="row hidden" id="angleRow" style="display:none">
+        <div class="field">
+          <label>Угол затвора, °</label>
+          <input type="number" id="shutterAngle" value="180" inputmode="decimal">
+        </div>
+        <div class="field">
+          <label>fps</label>
+          <input type="number" id="fps" value="25" inputmode="decimal">
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label>Желаемая диафрагма T/F (для расчёта ND), опционально</label>
+          <input type="number" id="desiredStop" placeholder="напр. 2.8" inputmode="decimal">
         </div>
       </div>
     </div>
 
-    <div class="col-resizer" id="resizeInspector" title="Drag to resize"></div>
-    <div class="inspector">
-      <div class="insp-tabs">
-        <div class="insp-tab active">Inspector</div>
-      </div>
-      <div id="inspBody">
-        <div class="insp-empty">No shot selected.<br>Create a scene and a shot to see its parameters here.</div>
-      </div>
-      <div class="mixer-panel" id="mixerPanel">
-        <div class="mixer-empty">No audio track<br>on the timeline</div>
-      </div>
+    <div class="card">
+      <h2>Результат</h2>
+      <div class="result"><span class="k">EV (при заданном ISO)</span><span class="v" id="outEV">—</span></div>
+      <div class="result"><span class="k">Рекомендуемая диафрагма при этой выдержке</span><span class="v big" id="outAperture">—</span></div>
+      <div class="result"><span class="k">Нужный ND (если задана желаемая диафрагма)</span><span class="v" id="outND">—</span></div>
+      <div class="result"><span class="k">Ближайший стандартный фильтр</span><span class="v" id="outNDName">—</span></div>
+      <div class="note" id="ndNote"></div>
     </div>
 
-  </div>
+  </section>
 
-  <div class="tasks-page hidden" id="tasksPage">
-    <div class="tasks-header">
-      <div class="tasks-title">Generation Tasks</div>
-      <div class="tasks-actions">
-        <div class="tasks-sort-row">
-          <label for="tasksSortSelect">Sort:</label>
-          <select id="tasksSortSelect">
-            <option value="status">By status</option>
-            <option value="newest">Newest first</option>
-          </select>
-        </div>
-        <button class="cf-btn primary" id="tasksGenerateSelectedBtn" disabled>Generate</button>
-      </div>
-    </div>
-    <div class="tasks-grid" id="tasksGrid">
-      <div class="tasks-empty">No generation tasks yet. Use "Add to Tasks (real AI)" on a shot to queue one — pick a model here and hit Generate whenever you're ready.</div>
-    </div>
-  </div>
+  <!-- ===================== PAGE: LIGHT ===================== -->
+  <section id="page-light" class="page">
 
-  <div class="tasks-page hidden" id="archivePage">
-    <div class="tasks-header">
-      <div class="tasks-title">Archive</div>
-      <div class="tasks-actions">
-        <button class="cf-btn primary" id="archiveUploadBtn">Add from disk</button>
-        <input type="file" id="archiveUploadInput" accept="image/*,audio/*,video/*,.heic,.heif,.tiff,.tif,.bmp,.svg,.avif,.webp" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;">
+    <div class="card">
+      <h2>Измерение прибора (пока вручную)</h2>
+      <div class="row">
+        <div class="field">
+          <label>CCT, K</label>
+          <input type="number" id="cct" value="5600" inputmode="decimal">
+        </div>
+        <div class="field">
+          <label>Duv (+ зелень / − пурпур)</label>
+          <input type="number" id="duv" value="0.0000" step="0.0005" inputmode="decimal">
+        </div>
       </div>
-    </div>
-    <div class="tasks-grid" id="archiveGrid">
-      <div class="tasks-empty">Nothing generated yet. Successful generations land here permanently, for reuse later.</div>
-    </div>
-  </div>
-
-  <div class="tasks-page hidden" id="moviePage">
-    <div class="tasks-header">
-      <div class="tasks-title">Animatic</div>
-      <div class="tasks-actions">
-        <button class="cf-btn primary" id="movieGenerateSelectedBtn" disabled>Animate</button>
-      </div>
-    </div>
-    <div class="tasks-grid" id="movieGrid">
-      <div class="tasks-empty">No shots with a generated picture yet — generate a shot's preview first, then it'll show up here to animate.</div>
-    </div>
-  </div>
-
-  <div class="tasks-page hidden" id="renderPage">
-    <div class="tasks-header">
-      <div class="tasks-title">Movie</div>
-    </div>
-    <div class="render-layout">
-      <div class="render-preview-tile" id="renderPreviewTile" title="Click to open the Storyboard">
-        <canvas id="renderPreviewCanvas"></canvas>
-        <div class="render-preview-empty" id="renderPreviewEmpty">No shots yet</div>
-        <div class="render-preview-label">Storyboard — click to open</div>
-      </div>
-      <div class="render-params">
-        <div class="cf-field">
-          <label>Format</label>
-          <select id="renderFormatSelect">
-            <option value="mp4">MP4</option>
-          </select>
+      <div class="row">
+        <div class="field">
+          <label>CRI Ra</label>
+          <input type="number" id="cri" value="95" inputmode="decimal">
         </div>
-        <div class="cf-field">
-          <label>Resolution</label>
-          <select id="renderResolutionSelect">
-            <option value="project">Same as project</option>
-            <option value="3840x2160">4K (3840×2160)</option>
-            <option value="1920x1080">1080p (1920×1080)</option>
-            <option value="1280x720">720p (1280×720)</option>
-          </select>
-          <div class="gen-hint" id="renderResolutionHint" style="margin-top:4px;"></div>
-        </div>
-        <div class="cf-field">
-          <label>Quality</label>
-          <div class="render-quality-row" id="renderQualityRow">
-            <button class="render-quality-btn" data-quality="low">Low</button>
-            <button class="render-quality-btn active" data-quality="medium">Medium</button>
-            <button class="render-quality-btn" data-quality="better">Better</button>
-          </div>
-          <div class="gen-hint" id="renderQualityHint" style="margin-top:4px;"></div>
-        </div>
-        <div class="cf-field">
-          <label>File name</label>
-          <input type="text" id="renderFileNameInput">
-        </div>
-        <div class="cf-field">
-          <label>Destination folder <span style="color:var(--text-3);font-weight:400;">— required</span></label>
-          <button class="cf-btn" id="renderFolderBtn" style="width:100%;">Choose folder…</button>
-          <div class="gen-hint" id="renderFolderHint" style="margin-top:4px;"></div>
-        </div>
-        <div class="render-btn-row">
-          <button class="cf-btn primary render-big-btn" id="renderStartBtn">RENDERING</button>
-          <button class="cf-btn render-stop-btn hidden" id="renderStopBtn" title="Cancel this render">Stop</button>
-        </div>
-        <div class="render-timers hidden" id="renderTimers">
-          <div class="render-timer">
-            <span class="render-timer-label">Elapsed</span>
-            <span class="render-timer-value" id="renderElapsedTimer">00:00:00</span>
-          </div>
-          <div class="render-timer">
-            <span class="render-timer-label">Estimated total</span>
-            <span class="render-timer-value" id="renderEstimateTimer">--:--:--</span>
-          </div>
-        </div>
-        <div class="render-progress-wrap hidden" id="renderProgressWrap">
-          <div class="render-progress-bar"><div class="render-progress-fill" id="renderProgressFill"></div></div>
-        </div>
-        <div class="gen-hint" id="renderStatusHint" style="margin-top:8px;"></div>
-      </div>
-    </div>
-  </div>
-
-  <div class="task-preview-modal hidden" id="motionPromptModal">
-    <div class="new-idea-box" style="width:440px;">
-      <div class="new-idea-title">Motion prompt</div>
-      <div class="gen-hint" style="margin-top:0;">What actually moves in this shot — written for the video model, separately from the picture's own description.</div>
-      <div class="cf-field" style="margin-top:10px;"><textarea id="motionPromptTextarea" style="min-height:110px;"></textarea></div>
-      <div class="cf-actions" style="margin-top:10px;justify-content:space-between;">
-        <button class="cf-btn" id="motionPromptRegenBtn">↻ Regenerate</button>
-        <div style="display:flex;gap:8px;">
-          <button class="cf-btn" id="motionPromptCancelBtn">Cancel</button>
-          <button class="cf-btn primary" id="motionPromptSaveBtn">Save</button>
+        <div class="field">
+          <label>R9 (насыщенный красный)</label>
+          <input type="number" id="r9" value="90" inputmode="decimal">
         </div>
       </div>
     </div>
-    <div class="task-preview-close" id="motionPromptCloseBtn"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
-  </div>
 
-  <div class="storyboard-modal hidden" id="storyboardModal">
-    <div class="tasks-header">
-      <div class="tasks-title">Storyboard</div>
-      <div class="storyboard-header-extra">
-        <div class="storyboard-zoom-control">
-          <button class="tz-btn" id="sbZoomOutBtn" title="Zoom out (-)">−</button>
-          <input type="range" id="sbZoomSlider" min="2" max="8" step="1" value="4" title="Storyboard zoom">
-          <button class="tz-btn" id="sbZoomInBtn" title="Zoom in (+)">+</button>
+    <div class="card">
+      <h2>Рекомендация по фильтрации зелени</h2>
+      <div class="result"><span class="k">Направление сдвига</span><span class="v" id="outGreenDir">—</span></div>
+      <div class="result"><span class="k">Фильтр (Rosco Cinegel, ближайший)</span><span class="v big" id="outGreenFilter">—</span></div>
+      <div class="note" id="greenNote"></div>
+    </div>
+
+    <div class="card">
+      <h2>Качество цветопередачи</h2>
+      <div class="result"><span class="k">CRI Ra</span><span class="v" id="outCriBadge">—</span></div>
+      <div class="result"><span class="k">R9 (красный)</span><span class="v" id="outR9Badge">—</span></div>
+      <div class="note" id="criNote"></div>
+    </div>
+
+  </section>
+
+  <!-- ===================== PAGE: CALIBRATION ===================== -->
+  <section id="page-calib" class="page">
+
+    <div class="card" id="secureWarning" style="display:none;border-color:#4a3a1f;">
+      <h2>Нужен https</h2>
+      <div class="note">Web Bluetooth работает только в защищённом контексте (https или localhost). Файл, открытый напрямую с телефона (file://), для реального BLE-подключения не подойдёт — браузер его заблокирует. Разместите файл на любом https-хостинге (например, GitHub Pages) и откройте оттуда. Ниже всё равно можно смотреть интерфейс и логику.</div>
+    </div>
+
+    <div class="card">
+      <h2>Подключение к LM4</h2>
+      <div class="row">
+        <div class="field">
+          <button id="btnConnect" onclick="connectLM4()" style="background:var(--accent);color:#04202b;border:0;border-radius:8px;padding:12px;font-size:15px;font-weight:600;">Подключиться</button>
         </div>
-        <button class="cf-btn primary" id="storyboardExportBtn">Export as image</button>
-        <div class="storyboard-modal-close" id="storyboardModalClose"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
+        <div class="field">
+          <button id="btnMeasure" onclick="doMeasure()" disabled style="background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:15px;">Замер</button>
+        </div>
+      </div>
+      <div class="note" id="bleStatus">Не подключено.</div>
+    </div>
+
+    <div class="card" id="rawCard" style="display:none;">
+      <h2>Сырые данные с прибора</h2>
+      <div class="note" id="rawChannels">—</div>
+      <div class="note" id="rawKSensor" style="margin-top:6px;">—</div>
+    </div>
+
+    <div class="card">
+      <h2>Показания официального приложения (эталон)</h2>
+      <div class="row">
+        <div class="field"><label>Lux</label><input type="number" id="refLux" inputmode="decimal"></div>
+        <div class="field"><label>CCT, K</label><input type="number" id="refCct" inputmode="decimal"></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>x</label><input type="number" id="refX" step="0.0001" inputmode="decimal"></div>
+        <div class="field"><label>y</label><input type="number" id="refY" step="0.0001" inputmode="decimal"></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>CRI Ra</label><input type="number" id="refCri" inputmode="decimal"></div>
+        <div class="field"><label>R9</label><input type="number" id="refR9" inputmode="decimal"></div>
+      </div>
+      <div class="row">
+        <div class="field">
+          <button id="btnSavePoint" onclick="saveCalibPoint()" disabled style="background:var(--accent2);color:#04250f;border:0;border-radius:8px;padding:12px;font-size:15px;font-weight:600;width:100%;">Сохранить точку калибровки</button>
+        </div>
       </div>
     </div>
-    <div class="storyboard-scroll" id="storyboardScroll">
-      <div class="storyboard-grid" id="storyboardGrid"></div>
+
+    <div class="card">
+      <h2>Сохранённые точки (<span id="pointCount">0</span>)</h2>
+      <div id="pointsList" class="note">Пока пусто.</div>
+      <div class="row" style="margin-top:10px;">
+        <div class="field">
+          <button onclick="exportPoints()" style="background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px;width:100%;">Экспортировать JSON</button>
+        </div>
+        <div class="field">
+          <button onclick="clearPoints()" style="background:var(--panel2);color:var(--bad);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px;width:100%;">Очистить всё</button>
+        </div>
+      </div>
+      <textarea id="exportArea" style="display:none;width:100%;margin-top:10px;height:120px;background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px;font-size:11px;"></textarea>
     </div>
-  </div>
 
-  <div class="page-tabs">
-    <div class="page-tab" data-page="script">SCRIPT</div>
-    <div class="page-tab active" data-page="work">WORK</div>
-    <div class="page-tab" data-page="tasks">TASKS<span class="page-tab-badge" id="tasksBadge" style="display:none;">0</span></div>
-    <div class="page-tab" data-page="archive">ARCHIVE</div>
-    <div class="page-tab" data-page="movie">ANIMATIC</div>
-    <div class="page-tab" data-page="render">MOVIE</div>
-  </div>
-</div>
+  </section>
 
-<div class="task-preview-modal hidden" id="taskPreviewModal">
-  <img class="task-preview-img" id="taskPreviewImg" src="">
-  <video class="task-preview-img hidden" id="taskPreviewVideo" controls autoplay loop></video>
-  <div class="task-preview-close" id="taskPreviewClose"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
-</div>
+</main>
 
-<div class="task-preview-modal hidden" id="archivePreviewModal">
-  <img class="task-preview-img" id="archivePreviewImg" src="">
-  <video class="task-preview-img hidden" id="archivePreviewVideo" controls autoplay loop></video>
-  <button class="cf-btn primary archive-new-idea-btn" id="archiveNewIdeaBtn">New idea from this</button>
-  <div class="task-preview-close" id="archivePreviewClose"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
-</div>
+<nav>
+  <button id="navCamera" class="on" onclick="showPage('camera')">
+    <span class="ic">🎥</span><span>Камера</span>
+  </button>
+  <button id="navLight" onclick="showPage('light')">
+    <span class="ic">💡</span><span>Свет</span>
+  </button>
+  <button id="navCalib" onclick="showPage('calib')">
+    <span class="ic">🔗</span><span>Калибровка</span>
+  </button>
+</nav>
 
-<div class="task-preview-modal hidden" id="newIdeaModal">
-  <div class="new-idea-box">
-    <div class="new-idea-title">New idea from this generation</div>
-    <img class="new-idea-ref-img" id="newIdeaRefImg" src="">
-    <div class="cf-field">
-      <label>What should be different?</label>
-      <textarea id="newIdeaPromptInput" style="min-height:80px;" placeholder="e.g. same character, close-up shot, same lighting"></textarea>
-      <button class="cf-btn ai-assist-btn" id="newIdeaAssistBtn" style="width:100%;margin-top:6px;display:none;">✨ Improve with AI</button>
-    </div>
-    <div class="cf-field">
-      <label>Model</label>
-      <select id="newIdeaModelSelect"></select>
-      <div class="gen-hint" id="newIdeaModelHint" style="margin-top:4px;"></div>
-    </div>
-    <div class="cf-actions">
-      <button class="cf-btn" id="newIdeaCancelBtn">Cancel</button>
-      <button class="cf-btn primary" id="newIdeaSendBtn">Send to generation</button>
-    </div>
-  </div>
-  <div class="task-preview-close" id="newIdeaClose"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
-</div>
+<script>
+/* ---------------------------------------------------------
+   LM4 Cine Meter — v0.1 (offline, manual-entry prototype)
+   BLE-модуль будет добавлен отдельно, после разбора
+   протокола Light Master 4. Вся логика ниже не зависит
+   от источника данных (ручной ввод / прибор) — как только
+   появится BLE-парсер, он просто будет писать значения
+   в те же поля.
+---------------------------------------------------------- */
 
-<div class="task-preview-modal hidden" id="cardImageModal">
-  <img class="task-preview-img" id="cardImageModalImg" src="">
-  <div class="new-idea-box card-image-box">
-    <input type="text" id="cardImageExtraPrompt" placeholder="Add an instruction and regenerate this one image (e.g. 'more serious expression')">
-    <button class="cf-btn primary" id="cardImageRegenBtn" style="width:100%;margin-top:8px;">Regenerate</button>
-  </div>
-  <div class="task-preview-close" id="cardImageModalClose"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
-</div>
+// ---------- navigation ----------
+function showPage(name){
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.getElementById('page-'+name).classList.add('active');
+  document.getElementById('navCamera').classList.toggle('on', name==='camera');
+  document.getElementById('navLight').classList.toggle('on', name==='light');
+  document.getElementById('navCalib').classList.toggle('on', name==='calib');
+}
 
-<div class="bg-status-indicator hidden" id="bgStatusIndicator">
-  <span class="bg-status-spinner"></span>
-  <span id="bgStatusText">Working…</span>
-</div>
-<div class="credits-indicator" id="creditsIndicator" title="KIE.ai credits — click to refresh">
-  <span class="credits-dot" id="creditsDot"></span>
-  <span class="credits-value" id="creditsValue">—</span>
-  <span class="credits-spinner hidden" id="creditsSpinner"></span>
-</div>
-<div class="credits-indicator hidden" id="personalBalanceIndicator" title="Your personal balance (KIE credits minus what's owed to users) — click to refresh" style="bottom:44px;">
-  <span class="credits-dot" id="personalBalanceDot"></span>
-  <span class="credits-value" id="personalBalanceValue">—</span>
-</div>
+let shutterMode = 'shutter';
+function setShutterMode(mode){
+  shutterMode = mode;
+  document.getElementById('segShutter').classList.toggle('on', mode==='shutter');
+  document.getElementById('segAngle').classList.toggle('on', mode==='angle');
+  document.getElementById('shutterRow').style.display = mode==='shutter' ? '' : 'none';
+  document.getElementById('angleRow').style.display = mode==='angle' ? '' : 'none';
+  calcCamera();
+}
 
-<div class="gemini-assist-btn" id="geminiAssistBtn" title="Ask Gemini">
-  <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M12 2l1.8 6.2L20 10l-6.2 1.8L12 18l-1.8-6.2L4 10l6.2-1.8z"></path></svg>
-</div>
+// ---------- exposure math (ISO 2720 incident-light meter equation) ----------
+// Ev(100) = log2( Lux * ISO / C )
+// N (f-number) at shutter time t (sec):  N = sqrt( t * 2^Ev )
+function calcCamera(){
+  const lux = parseFloat(document.getElementById('lux').value) || 0;
+  const iso = parseFloat(document.getElementById('iso').value) || 100;
+  const C = parseFloat(document.getElementById('calC').value) || 250;
 
-<div class="gemini-chat-modal hidden" id="geminiChatModal">
-  <div class="gemini-chat-header">
-    <span>Gemini</span>
-    <div class="gemini-chat-close" id="geminiChatClose"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></div>
-  </div>
-  <div class="gemini-chat-messages" id="geminiChatMessages">
-    <div class="gemini-chat-empty">Ask anything — e.g. tips for writing this shot's prompt.</div>
-  </div>
-  <div class="gemini-chat-input-row">
-    <textarea id="geminiChatInput" placeholder="Message Gemini…" rows="1"></textarea>
-    <button class="cf-btn primary" id="geminiChatSendBtn">Send</button>
-  </div>
-</div>
+  let t; // seconds
+  if(shutterMode === 'shutter'){
+    const denom = parseFloat(document.getElementById('shutterDenom').value) || 50;
+    t = 1/denom;
+  } else {
+    const angle = parseFloat(document.getElementById('shutterAngle').value) || 180;
+    const fps = parseFloat(document.getElementById('fps').value) || 24;
+    t = (angle/360) / fps;
+  }
 
+  if(lux <= 0){
+    document.getElementById('outEV').textContent = '—';
+    document.getElementById('outAperture').textContent = '—';
+    document.getElementById('outND').textContent = '—';
+    document.getElementById('outNDName').textContent = '—';
+    return;
+  }
 
-<script src="js/state.js"></script>
-<script src="js/timeline.js"></script>
-<script src="js/transport.js"></script>
-<script src="js/scenes-preview.js"></script>
-<script src="js/assets-panel.js"></script>
-<script src="js/helpers.js"></script>
-<script src="js/characters.js"></script>
-<script src="js/object-card.js"></script>
-<script src="js/locations.js"></script>
-<script src="js/props.js"></script>
-<script src="js/music.js"></script>
-<script src="js/looks.js"></script>
-<script src="js/audio-track.js"></script>
-<script src="js/persistence.js"></script>
-<script src="js/panels.js"></script>
-<script src="js/projects.js"></script>
-<script src="js/check.js"></script>
-<script src="js/tasks.js"></script>
-<script src="js/archive.js"></script>
-<script src="js/credits.js"></script>
-<script src="js/tags.js"></script>
-<script src="js/movie.js"></script>
-<script src="js/gemini-chat.js"></script>
-<script src="js/script-tab.js"></script>
-<script src="js/storyboard.js"></script>
-<script src="js/render.js"></script>
-<script src="js/lipsync.js"></script>
-<script src="js/project-export.js"></script>
-<script src="js/app.js"></script>
+  const Ev = Math.log2(lux * iso / C);
+  const N = Math.sqrt(t * Math.pow(2, Ev));
+
+  document.getElementById('outEV').textContent = Ev.toFixed(2);
+  document.getElementById('outAperture').textContent = 'T/F ' + formatStop(N);
+
+  // ND recommendation
+  const desired = parseFloat(document.getElementById('desiredStop').value);
+  const ndNote = document.getElementById('ndNote');
+  if(desired && desired > 0){
+    // stops to cut = 2*log2(N_needed_at_desired / N_natural)... easier via EV difference
+    const evAtDesired = 2*Math.log2(desired) - Math.log2(t); // EV implied by desired aperture & same shutter
+    const stopsToCut = evAtDesired - Ev;
+    if(stopsToCut <= 0.05){
+      document.getElementById('outND').textContent = 'не нужен';
+      document.getElementById('outNDName').textContent = '—';
+      ndNote.textContent = 'Света и так не хватает или ровно достаточно на желаемой диафрагме — ND не требуется (возможно, наоборот, не хватает света).';
+    } else {
+      const density = stopsToCut * 0.3; // 0.3 density ≈ 1 stop
+      const nd = nearestND(stopsToCut);
+      document.getElementById('outND').textContent = stopsToCut.toFixed(2) + ' ступ. (D≈' + density.toFixed(2) + ')';
+      document.getElementById('outNDName').textContent = nd.name;
+      ndNote.textContent = 'Округлено до ближайшего стандартного шага плотности. Точная нейтральность (без сдвига по зелени/CCT) зависит от конкретного стекла/желатина — дешёвые ND нередко подсвечивают зеленью, стоит перепроверить по прибору после установки.';
+    }
+  } else {
+    document.getElementById('outND').textContent = '—';
+    document.getElementById('outNDName').textContent = '—';
+    ndNote.textContent = 'Укажите желаемую диафрагму, чтобы получить рекомендацию по ND.';
+  }
+}
+
+function formatStop(n){
+  // snap to nearest common cine/photo stop label for readability, but show raw too
+  return n.toFixed(2);
+}
+
+const ND_TABLE = [
+  {stops:1, density:0.3, name:'ND2 (0.3)'},
+  {stops:2, density:0.6, name:'ND4 (0.6)'},
+  {stops:3, density:0.9, name:'ND8 (0.9)'},
+  {stops:4, density:1.2, name:'ND16 (1.2)'},
+  {stops:5, density:1.5, name:'ND32 (1.5)'},
+  {stops:6, density:1.8, name:'ND64 (1.8)'},
+  {stops:7, density:2.1, name:'ND128 (2.1)'},
+  {stops:8, density:2.4, name:'ND256 (2.4)'},
+  {stops:9, density:2.7, name:'ND512 (2.7)'},
+  {stops:10,density:3.0, name:'ND1000 (3.0)'},
+];
+function nearestND(stops){
+  let best = ND_TABLE[0];
+  for(const row of ND_TABLE){
+    if(Math.abs(row.stops - stops) < Math.abs(best.stops - stops)) best = row;
+  }
+  // if exceeds table, suggest stacking
+  if(stops > ND_TABLE[ND_TABLE.length-1].stops){
+    return {name: best.name + ' + доп. фильтр (сумма стёкол/стек)'};
+  }
+  return best;
+}
+
+// ---------- green/magenta filtration ----------
+// Rosco Cinegel minus/plus green scale (real product line, confirmed from Rosco "Filter Facts"):
+//   Full = CC30, 3/4 = CC22.5, 1/2 = CC15, 1/4 = CC0.75(7.5), 1/8 = CC0.35(3.5)
+// Duv-per-CC conversion is an APPROXIMATION (CC density and CIE Duv are not the same unit) —
+// default constant below should be treated as a rough starting point and recalibrated once
+// you can compare a known filter against the meter's own Duv reading.
+const DUV_PER_CC_UNIT = 0.0009; // rough estimate: 1 CC point (0.01 density) ≈ 0.0009 Duv — NEEDS FIELD CALIBRATION
+
+const GREEN_FILTERS = [
+  {cc:30,   label:'Full Minus/Plus Green (CC30)'},
+  {cc:22.5, label:'3/4 Minus/Plus Green (CC22.5)'},
+  {cc:15,   label:'1/2 Minus/Plus Green (CC15)'},
+  {cc:7.5,  label:'1/4 Minus/Plus Green (CC07.5)'},
+  {cc:3.5,  label:'1/8 Minus/Plus Green (CC03.5)'},
+];
+
+function calcLight(){
+  const duv = parseFloat(document.getElementById('duv').value) || 0;
+  const cri = parseFloat(document.getElementById('cri').value);
+  const r9 = parseFloat(document.getElementById('r9').value);
+
+  // direction: positive Duv = source is above the Planckian locus = excess GREEN -> needs MINUS GREEN filter
+  // negative Duv = excess MAGENTA -> needs PLUS GREEN filter
+  const absDuv = Math.abs(duv);
+  const ccNeeded = absDuv / DUV_PER_CC_UNIT;
+
+  const dirEl = document.getElementById('outGreenDir');
+  const filterEl = document.getElementById('outGreenFilter');
+  const note = document.getElementById('greenNote');
+
+  if(absDuv < 0.0006){
+    dirEl.textContent = 'нейтрально';
+    filterEl.textContent = 'фильтр не нужен';
+    note.textContent = 'Отклонение от чёрного тела меньше заметного порога (~0.0006 Duv) — коррекция на глаз, скорее всего, не потребуется.';
+  } else {
+    dirEl.textContent = duv > 0 ? 'избыток зелени → Minus Green' : 'избыток пурпура → Plus Green';
+    let best = GREEN_FILTERS[GREEN_FILTERS.length-1];
+    for(const f of GREEN_FILTERS){
+      if(Math.abs(f.cc - ccNeeded) < Math.abs(best.cc - ccNeeded)) best = f;
+    }
+    filterEl.textContent = best.label;
+    note.textContent = 'Оценка приблизительная (см. константу DUV_PER_CC_UNIT в коде) — переведена из Duv в шкалу CC Rosco Cinegel. На стыке двух номиналов ставьте более сильный и проверяйте по прибору повторно, слабее докрутить нельзя, а переснять — можно.';
+  }
+
+  const criEl = document.getElementById('outCriBadge');
+  const r9El = document.getElementById('outR9Badge');
+  const criNote = document.getElementById('criNote');
+
+  if(!isNaN(cri)){
+    criEl.innerHTML = cri + badgeFor(cri, [95,85]);
+  } else { criEl.textContent = '—'; }
+  if(!isNaN(r9)){
+    r9El.innerHTML = r9 + badgeFor(r9, [80,50]);
+  } else { r9El.textContent = '—'; }
+
+  let notes = [];
+  if(!isNaN(r9) && r9 < 50) notes.push('низкий R9 — кожа и насыщенные красные (губы, ткани) будут выглядеть тускло/грязно, особенно заметно на крупных планах.');
+  else if(!isNaN(r9) && r9 < 80) notes.push('R9 средний — в целом приемлемо, но при цветокоррекции красных возможен шум/артефакты.');
+  if(!isNaN(cri) && cri < 85) notes.push('CRI Ra ниже 85 — источник условно непригоден как основной свет на лицо, годится как фон/эффект.');
+  criNote.textContent = notes.join(' ') || 'Источник в пределах нормы для основного света.';
+}
+
+function badgeFor(val, thresholds){
+  if(val >= thresholds[0]) return ' <span class="badge ok">хорошо</span>';
+  if(val >= thresholds[1]) return ' <span class="badge warn">средне</span>';
+  return ' <span class="badge bad">плохо</span>';
+}
+
+// ---------- wire up ----------
+['lux','calC','iso','shutterDenom','shutterAngle','fps','desiredStop'].forEach(id=>{
+  document.getElementById(id).addEventListener('input', calcCamera);
+});
+['cct','duv','cri','r9'].forEach(id=>{
+  document.getElementById(id).addEventListener('input', calcLight);
+});
+
+calcCamera();
+calcLight();
+
+/* ---------------------------------------------------------
+   BLE — протокол Opple Light Master 4, разобран вручную
+   (сниффинг через BLE Scanner, сверка с реверснутым LM3:
+   github.com/OlliV/open-light-master).
+
+   Транспорт полностью совпадает с LM3: один GATT-сервис
+   "Nordic UART"-типа, одна характеристика на приём команд
+   И на notify-ответы, кастомное кадрирование с фрагментацией.
+   Отличия LM4 от LM3 внутри пакетов: 10 каналов AS7341
+   (F1-F8 + Clear + NIR) вместо 6, little-endian вместо
+   big-endian, 11 калибровочных float вместо 7.
+
+   ВАЖНО: сырые каналы -> точные Lux/CCT/Duv/CRI/R9 пока
+   НЕ считаются здесь. На 4 калибровочных точках грубая
+   3-полосная модель не обобщилась на новый источник (см.
+   переписку) — нужно 15-30+ точек по всему диапазону CCT.
+   Эта страница — инструмент для быстрого сбора именно таких
+   точек одним тапом, вместо ручного BLE Scanner.
+---------------------------------------------------------- */
+
+const BLE_SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+const BLE_CHAR_UUID    = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
+
+const PROTO_REQ_MEAS     = 2560;
+const PROTO_RES_MEAS     = 2561;
+const PROTO_REQ_READ_CAL = 2564;
+const PROTO_RES_READ_CAL = 2565;
+
+const PROTO_MSG_SINGLE = 0x00;
+const PROTO_MSG_FFRAG  = 0x80;
+const PROTO_MSG_MFRAG  = 0xa0;
+const PROTO_MSG_LFRAG  = 0xc0;
+
+let bleDevice = null, bleServer = null, bleChar = null;
+let seqno = 0;
+let rxBuffer = null, rxLen = 0;
+let pendingResolve = null; // resolves with reassembled data for the in-flight command
+let kSensor = null; // 11 calibration floats read from device
+let lastRaw = null; // last parsed measurement {channels,power,C0}
+
+function checkSecureContext(){
+  const ok = window.isSecureContext;
+  document.getElementById('secureWarning').style.display = ok ? 'none' : 'block';
+  return ok;
+}
+
+function buildCommandFrame(opCode, extra){
+  seqno = (seqno + 1) & 0xff;
+  const n = extra || [];
+  const h = [0, 0x13, 0, 0, seqno, 0, n.length, 0, 0, (0xff00 & opCode) >> 8, 0xff & opCode, ...n];
+  // our commands are always short (<17 bytes) -> single fragment, but handle the general case anyway
+  const nFragments = h.length < 17 ? 1 : Math.ceil((h.length - 17) / 19 + 1);
+  const frames = [];
+  for(let c = 0; c < nFragments; c++){
+    let head, l;
+    if(c === 0){
+      const u = h.length + nFragments + 2;
+      head = [nFragments > 1 ? PROTO_MSG_FFRAG : PROTO_MSG_SINGLE, (0xff00 & u) >> 8, 0xff & u];
+      l = nFragments > 1 ? h.slice(0, 17) : h.slice(0);
+    } else if(c !== nFragments - 1){
+      head = [PROTO_MSG_MFRAG | c];
+      l = h.slice(17 + 19 * (c - 1), 17 + 19 * c);
+    } else {
+      head = [PROTO_MSG_LFRAG | c];
+      l = h.slice(17 + 19 * (c - 1));
+    }
+    frames.push(new Uint8Array([...head, ...l]));
+  }
+  return frames;
+}
+
+function onNotify(event){
+  const value = event.target.value; // DataView
+  const buf = new Uint8Array(value.buffer);
+  const msgType = value.getUint8(0) & 0xe0;
+  let payload;
+  switch(msgType){
+    case PROTO_MSG_SINGLE:
+      finishMessage(buf.subarray(3));
+      break;
+    case PROTO_MSG_FFRAG:
+      const totalLen = (value.getUint8(1) << 8) | value.getUint8(2);
+      payload = buf.subarray(3);
+      rxBuffer = new Uint8Array(totalLen);
+      rxBuffer.set(payload, 0);
+      rxLen = payload.length;
+      break;
+    case PROTO_MSG_MFRAG:
+      payload = buf.subarray(1);
+      rxBuffer.set(payload, rxLen);
+      rxLen += payload.length;
+      break;
+    case PROTO_MSG_LFRAG:
+      payload = buf.subarray(1);
+      rxBuffer.set(payload, rxLen);
+      rxLen += payload.length;
+      finishMessage(rxBuffer.subarray(0, rxLen));
+      break;
+  }
+}
+
+function finishMessage(data){
+  if(pendingResolve){
+    const resolve = pendingResolve;
+    pendingResolve = null;
+    resolve(data);
+  }
+}
+
+async function sendCommand(opCode, extra){
+  const frames = buildCommandFrame(opCode, extra);
+  const promise = new Promise((resolve, reject) => {
+    pendingResolve = resolve;
+    setTimeout(() => { if(pendingResolve === resolve){ pendingResolve = null; reject(new Error('timeout')); } }, 4000);
+  });
+  for(const frame of frames){
+    await bleChar.writeValueWithoutResponse ? bleChar.writeValueWithoutResponse(frame) : bleChar.writeValue(frame);
+  }
+  return promise;
+}
+
+function readCode(data){
+  return ((255 & data[9]) << 8) + data[10];
+}
+
+function parseCalibration(data){
+  // data[11] = reserved byte, data[12..12+44) = 11x float32 LE, then power u16 LE
+  const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const floats = [];
+  for(let i = 0; i < 11; i++){
+    floats.push(dv.getFloat32(12 + 4*i, true));
+  }
+  return floats;
+}
+
+function parseMeasurement(data){
+  const payload = data.subarray(11); // 23 bytes: 10x u16 LE channels + power u16 LE + C0 u8
+  const dv = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+  const channels = [];
+  for(let i = 0; i < 10; i++){
+    channels.push(dv.getUint16(i*2, true));
+  }
+  const power = dv.getUint16(20, true);
+  const C0 = payload[22];
+  return { channels, power, C0 };
+}
+
+async function connectLM4(){
+  if(!checkSecureContext()){
+    alert('Нужен https (или localhost) — см. подсказку выше. По file:// Web Bluetooth не работает.');
+    return;
+  }
+  if(!navigator.bluetooth){
+    alert('Этот браузер не поддерживает Web Bluetooth. Откройте страницу в Chrome для Android.');
+    return;
+  }
+  try{
+    document.getElementById('bleStatus').textContent = 'Выбираем устройство...';
+    // Прибор не светит наш кастомный сервис в рекламном BLE-пакете (виден только
+    // после подключения), поэтому фильтровать по services нельзя — ищем по имени,
+    // как видно из логов BLE Scanner устройство называется "LMaster_xxxx".
+    bleDevice = await navigator.bluetooth.requestDevice({
+      filters: [{ namePrefix: 'LMaster' }],
+      optionalServices: [BLE_SERVICE_UUID]
+    });
+    bleDevice.addEventListener('gattserverdisconnected', () => {
+      document.getElementById('bleStatus').textContent = 'Отключено.';
+      document.getElementById('btnMeasure').disabled = true;
+      document.getElementById('btnConnect').textContent = 'Подключиться';
+    });
+    document.getElementById('bleStatus').textContent = 'Соединяемся...';
+    bleServer = await bleDevice.gatt.connect();
+    const service = await bleServer.getPrimaryService(BLE_SERVICE_UUID);
+    bleChar = await service.getCharacteristic(BLE_CHAR_UUID);
+    await bleChar.startNotifications();
+    bleChar.addEventListener('characteristicvaluechanged', onNotify);
+
+    document.getElementById('bleStatus').textContent = 'Подключено: ' + (bleDevice.name || 'LM4') + '. Читаем калибровку...';
+    const calData = await sendCommand(PROTO_REQ_READ_CAL);
+    if(readCode(calData) === PROTO_RES_READ_CAL){
+      kSensor = parseCalibration(calData);
+      document.getElementById('rawKSensor').textContent = 'Калибровочные коэффициенты: ' + kSensor.map(v=>v.toFixed(3)).join(', ');
+    }
+
+    document.getElementById('bleStatus').textContent = 'Готово. Можно делать замеры.';
+    document.getElementById('btnMeasure').disabled = false;
+    document.getElementById('btnConnect').textContent = 'Переподключить';
+    document.getElementById('rawCard').style.display = 'block';
+  } catch(err){
+    console.error(err);
+    document.getElementById('bleStatus').textContent = 'Ошибка: ' + err.message;
+  }
+}
+
+async function doMeasure(){
+  try{
+    document.getElementById('bleStatus').textContent = 'Измеряем...';
+    const data = await sendCommand(PROTO_REQ_MEAS);
+    if(readCode(data) !== PROTO_RES_MEAS){
+      document.getElementById('bleStatus').textContent = 'Неожиданный код ответа.';
+      return;
+    }
+    lastRaw = parseMeasurement(data);
+    const corrected = kSensor ? lastRaw.channels.map((c,i)=>c*kSensor[i]) : lastRaw.channels;
+    document.getElementById('rawChannels').innerHTML =
+      'F1..F8, Clear, NIR (сырые): ' + lastRaw.channels.join(', ') + '<br>' +
+      'После калибровки: ' + corrected.map(v=>v.toFixed(1)).join(', ') + '<br>' +
+      'power: ' + lastRaw.power + '  C0: ' + lastRaw.C0;
+    document.getElementById('btnSavePoint').disabled = false;
+    document.getElementById('bleStatus').textContent = 'Замер готов — заполните эталонные поля ниже и сохраните точку.';
+  } catch(err){
+    console.error(err);
+    document.getElementById('bleStatus').textContent = 'Ошибка замера: ' + err.message;
+  }
+}
+
+// ---------- calibration point storage ----------
+const CALIB_KEY = 'lm4_calib_points';
+function loadPoints(){
+  try{ return JSON.parse(localStorage.getItem(CALIB_KEY) || '[]'); } catch(e){ return []; }
+}
+function storePoints(pts){
+  localStorage.setItem(CALIB_KEY, JSON.stringify(pts));
+}
+function renderPoints(){
+  const pts = loadPoints();
+  document.getElementById('pointCount').textContent = pts.length;
+  const list = document.getElementById('pointsList');
+  if(!pts.length){ list.textContent = 'Пока пусто.'; return; }
+  list.innerHTML = pts.map((p,i)=>
+    `#${i+1}: Lux ${p.ref.lux}, CCT ${p.ref.cct}K, CRI ${p.ref.cri ?? '—'}, R9 ${p.ref.r9 ?? '—'}`
+  ).join('<br>');
+}
+function saveCalibPoint(){
+  if(!lastRaw){ alert('Сначала сделайте замер.'); return; }
+  const ref = {
+    lux: parseFloat(document.getElementById('refLux').value),
+    cct: parseFloat(document.getElementById('refCct').value),
+    x: parseFloat(document.getElementById('refX').value),
+    y: parseFloat(document.getElementById('refY').value),
+    cri: parseFloat(document.getElementById('refCri').value),
+    r9: parseFloat(document.getElementById('refR9').value),
+  };
+  if(isNaN(ref.lux) || isNaN(ref.cct)){
+    alert('Заполните хотя бы Lux и CCT из официального приложения.');
+    return;
+  }
+  const pts = loadPoints();
+  pts.push({ raw: lastRaw, kSensor, ref, ts: new Date().toISOString() });
+  storePoints(pts);
+  renderPoints();
+  ['refLux','refCct','refX','refY','refCri','refR9'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('btnSavePoint').disabled = true;
+  document.getElementById('bleStatus').textContent = 'Точка сохранена. Можно делать следующий замер.';
+}
+function exportPoints(){
+  const pts = loadPoints();
+  const area = document.getElementById('exportArea');
+  area.style.display = 'block';
+  area.value = JSON.stringify(pts, null, 2);
+  area.select();
+  try{ document.execCommand('copy'); document.getElementById('bleStatus').textContent = 'JSON скопирован в буфер (и показан ниже).'; } catch(e){}
+}
+function clearPoints(){
+  if(!confirm('Удалить все сохранённые калибровочные точки?')) return;
+  storePoints([]);
+  renderPoints();
+}
+
+checkSecureContext();
+renderPoints();
+</script>
 </body>
 </html>
