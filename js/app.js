@@ -75,6 +75,8 @@ function showLoginScreen(){
   wireGeminiChat();
   wireScriptPage();
   wireAiGeneratorModal();
+  wireObjectRemoverModal();
+  loadObjectRemoverModelList();
   wireMotionPromptModal();
   wireTimelineZoomControl();
   wireStoryboardPage();

@@ -734,7 +734,29 @@ app.get('/api/video-edit-models', (req, res) => {
   res.json({ models: VIDEO_EDIT_MODELS.map(m => ({ id: m.id, label: m.label, costUsd: m.costUsd, blurb: m.blurb })) });
 });
 
-const ALL_MODEL_CATALOGS = [MODELS, VIDEO_MODELS, LIPSYNC_MODELS, PHOTO_LIPSYNC_MODELS, MOTION_CONTROL_MODELS, VIDEO_EDIT_MODELS];
+// ---- Object Remover (Tools menu) — edits an uploaded video by prompt (remove/replace
+// something in frame) via Gemini Omni Video. Confirmed live against docs.kie.ai's own
+// interactive page for this exact model (not guessed): runs on the SAME unified
+// jobs/createTask API every other model here uses (model id "gemini-omni-video"), input
+// { prompt, video_list: [{url,start,ends}], resolution, duration }. video_list quirks,
+// all confirmed from the same page: max 1 video, ≤100MB, ≤30s total, and the trim window
+// (ends-start) can't exceed 10s — enforced client-side when the draft is queued (see
+// showObjectRemoverModal in tasks.js). `duration` is a required field even though the docs
+// say it "will not take effect" once video input is present — sent as a harmless fixed
+// value rather than omitted, to avoid tripping schema validation on a missing required key.
+// costUsd confirmed from kie.ai's own pricing tooltip on the model's playground page: video
+// input costs 168 credits ($0.84) at 720p/1080p, 252 credits ($1.26) at 4k — the single
+// catalog entry below uses the 720p/1080p figure since ЗАП wants exactly one model choice
+// regardless of resolution; an actual 4k generation will bill for real more than this
+// displayed estimate, same "≈" caveat every other cost figure here already carries.
+const OBJECT_REMOVER_MODELS = [
+  { id: 'gemini-omni-video', label: 'Gemini Omni Video', costUsd: 0.84, blurb: 'Removes or replaces something in an existing video by prompt, keeping the rest of the shot unchanged.' },
+];
+app.get('/api/object-remover-models', (req, res) => {
+  res.json({ models: OBJECT_REMOVER_MODELS.map(m => ({ id: m.id, label: m.label, costUsd: m.costUsd, blurb: m.blurb })) });
+});
+
+const ALL_MODEL_CATALOGS = [MODELS, VIDEO_MODELS, LIPSYNC_MODELS, PHOTO_LIPSYNC_MODELS, MOTION_CONTROL_MODELS, VIDEO_EDIT_MODELS, OBJECT_REMOVER_MODELS];
 function findModelCostUsd(modelId) {
   for (const catalog of ALL_MODEL_CATALOGS) {
     const found = catalog.find(m => m.id === modelId);
@@ -1260,6 +1282,70 @@ app.post('/api/video-edit/start', requireAuth, async (req, res) => {
     return res.json({ taskId });
   } catch (err) {
     console.error('[server] /api/video-edit/start failed:', err);
+    return res.status(500).json({ error: 'server_error', message: String(err && err.message || err) });
+  }
+});
+
+app.post('/api/object-remover/start', requireAuth, async (req, res) => {
+  if (!KIE_API_KEY) {
+    return res.status(503).json({ error: 'not_configured', message: 'KIE_API_KEY is not set on the server yet.' });
+  }
+  const { videoUrl, prompt, start, ends, resolution, model, meta } = req.body || {};
+  if (!videoUrl || !prompt) {
+    return res.status(400).json({ error: 'bad_request', message: 'videoUrl and prompt are both required.' });
+  }
+  const matched = OBJECT_REMOVER_MODELS.find(m => m.id === model) || OBJECT_REMOVER_MODELS[0];
+  if (!(await checkUserCanAfford(req, res, matched.id))) return;
+
+  // Same reasoning as motion-control/video-edit above: re-host on KIE's own storage rather
+  // than handing KIE a URL pointing back at our own server — their fetch-from-third-party-URL
+  // path has a documented 30s timeout that's proven unreliable for video specifically.
+  let kieVideoUrl;
+  try {
+    const vidId = videoUrl.split('/api/reference-image/')[1];
+    const vidEntry = vidId && referenceImages.get(vidId);
+    if (!vidEntry) throw new Error('Could not find the uploaded video to re-host on KIE.');
+    kieVideoUrl = await uploadToKieFileHost(vidEntry.buffer, vidEntry.mime, 'object-remover-source.mp4');
+  } catch (err) {
+    console.error('[server] could not re-host video on KIE for object-remover:', err);
+    return res.status(502).json({ error: 'provider_error', message: 'Could not upload the video to KIE: ' + String(err && err.message || err) });
+  }
+
+  const input = {
+    prompt,
+    video_list: [{ url: kieVideoUrl, start: start || 0, ends: ends || 10 }],
+    resolution: resolution || '720p',
+    duration: '8', // required field, but explicitly ignored by the model once video input is present
+  };
+  const callBackUrl = PUBLIC_URL ? PUBLIC_URL + '/api/webhook/kie' : undefined;
+
+  try {
+    const body = { model: matched.id, input };
+    if (callBackUrl) body.callBackUrl = callBackUrl;
+    const createRes = await fetch(`${KIE_BASE}/api/v1/jobs/createTask`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${KIE_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const createData = await createRes.json().catch(() => null);
+    console.log('[server] create object-remover task (' + matched.id + '):', JSON.stringify(createData));
+    const taskId = createData && createData.data && createData.data.taskId;
+    if (!createRes.ok || !taskId) {
+      return res.status(502).json({
+        error: 'provider_error',
+        message: (createData && createData.msg) || ('KIE.ai rejected the request (HTTP ' + createRes.status + ').'),
+      });
+    }
+    tasks.set(taskId, {
+      status: 'pending', imageUrl: null, message: null, model: matched.id, prompt, isVideo: true,
+      meta: meta || {}, createdAt: Date.now(), updatedAt: Date.now(), userId: req.user.id,
+    });
+    if (!callBackUrl) {
+      console.warn('[server] no PUBLIC_URL known — this task will rely entirely on the polling fallback.');
+    }
+    return res.json({ taskId });
+  } catch (err) {
+    console.error('[server] /api/object-remover/start failed:', err);
     return res.status(500).json({ error: 'server_error', message: String(err && err.message || err) });
   }
 });

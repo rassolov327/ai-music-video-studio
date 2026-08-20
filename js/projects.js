@@ -340,6 +340,7 @@ function wireToolsMenu(){
   wireMenuDropdown('menuToolsBtn', 'menuToolsDropdown', async (action)=>{
     if(action==='check') showCheckReport();
     else if(action==='ai-generator') showAiGeneratorModal();
+    else if(action==='object-remover') showObjectRemoverModal();
   });
 }
 

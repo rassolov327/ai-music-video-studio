@@ -137,6 +137,7 @@ function draftTitleLines(t){
   if(t.kind==='video-edit') return [t.sceneName || 'Scene', (t.shotName || 'Shot') + ' (video edit)'];
   if(t.kind==='shot') return [t.sceneName || 'Scene', t.shotName || 'Shot'];
   if(t.kind==='archive-derive') return ['New idea', t.assetName || ''];
+  if(t.kind==='object-remover') return ['Object Remover', (t.promptOverride||'').slice(0,40)];
   const kindLabel = t.kind==='looks' ? 'Look' : t.kind==='locations' ? 'Location' : t.kind==='props' ? 'Prop' : 'Asset';
   return [kindLabel, t.assetName || ''];
 }
@@ -210,7 +211,7 @@ function renderTasksGrid(force){
       const t = entry.data;
       const selected = selectedDraftIds.has(t.id);
       const [line1, line2] = draftTitleLines(t);
-      const model = t.kind==='motion-control' ? (motionControlModelOptions.find(m=> m.id===t.model) || motionControlModelOptions[0] || null) : t.kind==='photo-lipsync' ? (photoLipsyncModelOptions.find(m=> m.id===t.model) || photoLipsyncModelOptions[0] || null) : t.kind==='lipsync' ? (lipsyncModelOptions.find(m=> m.id===t.model) || lipsyncModelOptions[0] || null) : t.kind==='video-edit' ? (videoEditModelOptions.find(m=> m.id===t.model) || videoEditModelOptions[0] || null) : modelById(t.model);
+      const model = t.kind==='motion-control' ? (motionControlModelOptions.find(m=> m.id===t.model) || motionControlModelOptions[0] || null) : t.kind==='photo-lipsync' ? (photoLipsyncModelOptions.find(m=> m.id===t.model) || photoLipsyncModelOptions[0] || null) : t.kind==='lipsync' ? (lipsyncModelOptions.find(m=> m.id===t.model) || lipsyncModelOptions[0] || null) : t.kind==='video-edit' ? (videoEditModelOptions.find(m=> m.id===t.model) || videoEditModelOptions[0] || null) : t.kind==='object-remover' ? (objectRemoverModelOptions.find(m=> m.id===t.model) || objectRemoverModelOptions[0] || null) : modelById(t.model);
       const hasPhoto = assetHasPhoto(t);
       const willUseRef = hasPhoto && model && model.supportsReferenceImage;
       const refSourceLabel = t.kind==='shot' ? 'the scene\'s assigned character (and look)' : 'the uploaded photo';
@@ -231,7 +232,7 @@ function renderTasksGrid(force){
           <div class="task-tile-body">
             <div class="task-tile-scene">${line1}</div>
             <div class="task-tile-shot">${line2}</div>
-            ${t.kind==='motion-control' ? motionControlModelSelectHtml(t.model) : t.kind==='photo-lipsync' ? photoLipsyncModelSelectHtml(t.model) : t.kind==='lipsync' ? lipsyncModelSelectHtml(t.model) : t.kind==='video-edit' ? videoEditModelSelectHtml(t.model) : modelSelectHtml(t.model || (modelOptions[0] && modelOptions[0].id), 'task-tile-model-select', t.kind==='archive-derive')}
+            ${t.kind==='motion-control' ? motionControlModelSelectHtml(t.model) : t.kind==='photo-lipsync' ? photoLipsyncModelSelectHtml(t.model) : t.kind==='lipsync' ? lipsyncModelSelectHtml(t.model) : t.kind==='video-edit' ? videoEditModelSelectHtml(t.model) : t.kind==='object-remover' ? objectRemoverModelSelectHtml(t.model) : modelSelectHtml(t.model || (modelOptions[0] && modelOptions[0].id), 'task-tile-model-select', t.kind==='archive-derive')}
             ${refHint}
             ${noRefModelAvailable ? '<div class="gen-hint" style="margin-top:6px;color:var(--danger);">No connected model supports reference images yet — can\'t generate this.</div>' : ''}
             <button class="cf-btn primary task-tile-send-btn" style="width:100%;margin-top:8px;" ${(noRefModelAvailable||sendingDraftIds.has(t.id))?'disabled':''}>${sendingDraftIds.has(t.id) ? 'Sending…' : 'Generate' + (model && model.costUsd ? ' — ' + formatCost(model.costUsd) : '')}</button>
@@ -581,6 +582,23 @@ async function sendGenerationTask(draft){
     return data.taskId;
   }
 
+  if(draft.kind==='object-remover'){
+    const entry = (state.archive||[]).find(a=> a.id===draft.archiveEntryId);
+    if(!entry || !entry.photo) throw new Error('The uploaded video is no longer available.');
+    const videoUrl = await uploadReferencePhoto(entry.photo);
+    if(!videoUrl) throw new Error('Could not upload the video.');
+    const objectRemoverTaskMeta = { projectId: currentProjectId, kind:'object-remover', assetName: draft.assetName };
+    const res = await fetch('/api/object-remover/start', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ videoUrl, prompt: draft.promptOverride, start: draft.start||0, ends: draft.ends, resolution: draft.resolution||'720p', model: draft.model, meta: objectRemoverTaskMeta }),
+    });
+    const data = await res.json().catch(()=> null);
+    if(!res.ok || !data || !data.taskId){
+      throw new Error((data && data.message) || ('Request failed (HTTP ' + res.status + ')'));
+    }
+    return data.taskId;
+  }
+
   if(draft.kind==='shot'){
     const scene = state.scenes.find(s=> s.id===draft.sceneId);
     const shot = scene && scene.shots.find(sh=> sh.id===draft.shotId);
@@ -705,6 +723,9 @@ async function applyFinishedTasks(list){
     const meta = t.meta || {};
     if(meta.kind==='archive-derive'){
       continue; // no live target — lands in the Archive only, applied to a shot manually via the down-arrow
+    }
+    if(meta.kind==='object-remover'){
+      continue; // no live target — lands in the Archive only, same as archive-derive above
     }
     if(meta.kind==='character-card'){
       const bandCat = state.categories.find(c=> c.key==='band');
@@ -864,6 +885,8 @@ async function archiveGeneration(t){
               ? ((meta.locationName || 'Location') + ' — ' + (meta.angleKey || 'angle'))
               : kind==='archive-derive'
         ? 'New idea from archive'
+        : kind==='object-remover'
+          ? ('Object Remover / ' + (t.prompt||'').slice(0,40))
         : kind==='character-card'
           ? ('Character card / ' + (meta.characterName || '') + ' — ' + (meta.outputKey || ''))
           : kind==='locations-card'
@@ -1009,6 +1032,111 @@ async function sendAiGeneratorRequest(){
     alert('Could not start generation: ' + err.message);
   } finally {
     btn.disabled = false; btn.textContent = 'Generate';
+  }
+}
+
+// ---------- Object Remover (Tools menu) — edits an uploaded video by prompt (remove/replace
+// something in frame), via Gemini Omni Video. Same "modal collects everything, Send queues a
+// TASKS draft" shape as motion-control's own flow, not an immediate send like AI Generator
+// above — the ЗАП asked for a real draft/model-select tile in TASKS, not a one-shot fire. ----------
+const OBJECT_REMOVER_PROMPT_TEMPLATE = `This is a single continuous shot from a fixed, unmoving camera — one uninterrupted take, no cuts, no edits, no change of camera angle at any point. Do not treat this as multiple shots or add any kind of cut, transition, or edit — the output must be the exact same single continuous shot from start to finish, identical framing and camera position throughout, exactly like the original.
+
+The only change allowed: [ОПИШИ ЗДЕСЬ, ЧТО ИМЕННО ПОМЕНЯТЬ]
+
+Everything else must remain frame-for-frame identical to the original: the same people/objects in the same positions and poses, the same room, the same camera framing, the same shot length, the same continuous motion — nothing recut, nothing re-angled, nothing added or removed except what's explicitly described above.`;
+
+let objectRemoverModelOptions = []; // [{id, label, costUsd, blurb}] — always exactly one entry (gemini-omni-video)
+async function loadObjectRemoverModelList(){
+  try{
+    const res = await fetch('/api/object-remover-models');
+    const data = await res.json();
+    objectRemoverModelOptions = (data && data.models) || [];
+  } catch(err){
+    objectRemoverModelOptions = [];
+  }
+}
+// Same TASKS-tile flavor as motionControlModelSelectHtml/videoEditModelSelectHtml — only one
+// option ever, kept as a real dropdown purely for visual consistency with every other tile.
+function objectRemoverModelSelectHtml(selectedId){
+  const fallback = objectRemoverModelOptions[0] && objectRemoverModelOptions[0].id;
+  const opts = objectRemoverModelOptions.map(m=>
+    `<option value="${m.id}" title="${m.blurb || ''}" ${m.id===(selectedId||fallback)?'selected':''}>${m.label}${m.costUsd?' — '+formatCost(m.costUsd):''}</option>`
+  ).join('');
+  return `<select class="task-tile-model-select">${opts || '<option>No model available</option>'}</select>`;
+}
+
+// Reads a local video file's duration without fully decoding it — just enough metadata to
+// compute a valid video_list trim window (KIE caps ends-start at 10s, see server.js).
+function getVideoDuration(file){
+  return new Promise((resolve, reject)=>{
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+    const url = URL.createObjectURL(file);
+    video.src = url;
+    video.onloadedmetadata = ()=>{ URL.revokeObjectURL(url); resolve(video.duration || 0); };
+    video.onerror = ()=>{ URL.revokeObjectURL(url); reject(new Error('Could not read that video file.')); };
+  });
+}
+
+let objectRemoverPickedFile = null;
+function showObjectRemoverModal(){
+  objectRemoverPickedFile = null;
+  document.getElementById('objRemoverPromptInput').value = OBJECT_REMOVER_PROMPT_TEMPLATE;
+  document.getElementById('objRemoverFileHint').textContent = '';
+  document.getElementById('objRemoverResolutionSelect').value = '720p';
+  document.getElementById('objRemoverHint').textContent = (objectRemoverModelOptions && objectRemoverModelOptions.length) ? '' : 'No connected model available yet.';
+  document.getElementById('objectRemoverModal').classList.remove('hidden');
+}
+function wireObjectRemoverModal(){
+  const modal = document.getElementById('objectRemoverModal');
+  const close = ()=> modal.classList.add('hidden');
+  document.getElementById('objRemoverCloseBtn').onclick = close;
+  document.getElementById('objRemoverCancelBtn').onclick = close;
+  modal.addEventListener('click', (e)=>{ if(e.target===modal) close(); });
+  document.getElementById('objRemoverFileBtn').onclick = ()=> document.getElementById('objRemoverFileInput').click();
+  document.getElementById('objRemoverFileInput').onchange = async (e)=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    const hint = document.getElementById('objRemoverFileHint');
+    try{
+      const duration = await getVideoDuration(file);
+      objectRemoverPickedFile = file;
+      hint.textContent = 'Selected: ' + file.name + ' (' + duration.toFixed(1) + 's)' + (duration>10 ? ' — only the first 10s will be used.' : '');
+    } catch(err){
+      objectRemoverPickedFile = null;
+      hint.textContent = 'Could not read that file: ' + err.message;
+    }
+  };
+  document.getElementById('objRemoverSendBtn').onclick = sendObjectRemoverToTasks;
+}
+async function sendObjectRemoverToTasks(){
+  const prompt = document.getElementById('objRemoverPromptInput').value.trim();
+  if(!prompt){ alert('Write a prompt first.'); return; }
+  if(!objectRemoverPickedFile){ alert('Choose a video file first.'); return; }
+  const resolution = document.getElementById('objRemoverResolutionSelect').value || '720p';
+  const btn = document.getElementById('objRemoverSendBtn');
+  btn.disabled = true; btn.textContent = 'Adding…';
+  try{
+    const duration = await getVideoDuration(objectRemoverPickedFile);
+    const entry = await archiveUploadedVideo(objectRemoverPickedFile);
+    state.taskQueue = state.taskQueue || [];
+    state.taskQueue.push({
+      id: 'dt' + (draftTaskSeq++), kind: 'object-remover',
+      archiveEntryId: entry.id, assetName: 'Object Remover',
+      promptOverride: prompt, resolution,
+      start: 0, ends: Math.max(0.1, Math.min(duration, 10)),
+      model: (objectRemoverModelOptions[0] && objectRemoverModelOptions[0].id) || null,
+      createdAt: Date.now(),
+    });
+    if(typeof saveProjectSoon==='function') saveProjectSoon();
+    document.getElementById('objectRemoverModal').classList.add('hidden');
+    objectRemoverPickedFile = null;
+    if(typeof renderArchiveGrid==='function') renderArchiveGrid();
+    if(typeof refreshTasks==='function') await refreshTasks();
+  } catch(err){
+    alert('Could not queue that generation: ' + err.message);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Send to generation';
   }
 }
 
