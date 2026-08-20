@@ -590,7 +590,7 @@ async function sendGenerationTask(draft){
     const objectRemoverTaskMeta = { projectId: currentProjectId, kind:'object-remover', assetName: draft.assetName };
     const res = await fetch('/api/object-remover/start', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ videoUrl, prompt: draft.promptOverride, start: draft.start||0, ends: draft.ends, resolution: draft.resolution||'720p', model: draft.model, meta: objectRemoverTaskMeta }),
+      body: JSON.stringify({ videoUrl, prompt: draft.promptOverride, start: draft.start||0, ends: draft.ends, resolution: draft.resolution||'720p', aspectRatio: draft.aspectRatio||'16:9', model: draft.model, meta: objectRemoverTaskMeta }),
     });
     const data = await res.json().catch(()=> null);
     if(!res.ok || !data || !data.taskId){
@@ -1065,15 +1065,24 @@ function objectRemoverModelSelectHtml(selectedId){
   return `<select class="task-tile-model-select">${opts || '<option>No model available</option>'}</select>`;
 }
 
-// Reads a local video file's duration without fully decoding it — just enough metadata to
-// compute a valid video_list trim window (KIE caps ends-start at 10s, see server.js).
-function getVideoDuration(file){
+// Reads a local video file's duration + dimensions without fully decoding it — just enough
+// metadata to compute a valid video_list trim window (KIE caps ends-start at 10s) and pick a
+// valid aspect_ratio. A real live test showed KIE rejects the request outright ("Aspect ratio
+// only supports [16:9, 9:16]") when aspect_ratio is left unset and the source isn't exactly
+// one of those two — despite the docs marking the field optional. Picking 9:16 vs 16:9 by
+// comparing the source video's own width/height is the closest honest match; it does NOT
+// letterbox/crop to force an exact ratio, so an unusual source (e.g. 4:3) still risks the
+// same error — no workaround for that confirmed yet.
+function getVideoMeta(file){
   return new Promise((resolve, reject)=>{
     const video = document.createElement('video');
     video.preload = 'metadata';
     const url = URL.createObjectURL(file);
     video.src = url;
-    video.onloadedmetadata = ()=>{ URL.revokeObjectURL(url); resolve(video.duration || 0); };
+    video.onloadedmetadata = ()=>{
+      URL.revokeObjectURL(url);
+      resolve({ duration: video.duration || 0, width: video.videoWidth || 0, height: video.videoHeight || 0 });
+    };
     video.onerror = ()=>{ URL.revokeObjectURL(url); reject(new Error('Could not read that video file.')); };
   });
 }
@@ -1099,9 +1108,9 @@ function wireObjectRemoverModal(){
     if(!file) return;
     const hint = document.getElementById('objRemoverFileHint');
     try{
-      const duration = await getVideoDuration(file);
+      const meta = await getVideoMeta(file);
       objectRemoverPickedFile = file;
-      hint.textContent = 'Selected: ' + file.name + ' (' + duration.toFixed(1) + 's)' + (duration>10 ? ' — only the first 10s will be used.' : '');
+      hint.textContent = 'Selected: ' + file.name + ' (' + meta.duration.toFixed(1) + 's, ' + meta.width + '×' + meta.height + ')' + (meta.duration>10 ? ' — only the first 10s will be used.' : '');
     } catch(err){
       objectRemoverPickedFile = null;
       hint.textContent = 'Could not read that file: ' + err.message;
@@ -1117,14 +1126,15 @@ async function sendObjectRemoverToTasks(){
   const btn = document.getElementById('objRemoverSendBtn');
   btn.disabled = true; btn.textContent = 'Adding…';
   try{
-    const duration = await getVideoDuration(objectRemoverPickedFile);
+    const meta = await getVideoMeta(objectRemoverPickedFile);
     const entry = await archiveUploadedVideo(objectRemoverPickedFile);
     state.taskQueue = state.taskQueue || [];
     state.taskQueue.push({
       id: 'dt' + (draftTaskSeq++), kind: 'object-remover',
       archiveEntryId: entry.id, assetName: 'Object Remover',
       promptOverride: prompt, resolution,
-      start: 0, ends: Math.max(0.1, Math.min(duration, 10)),
+      start: 0, ends: Math.max(0.1, Math.min(meta.duration, 10)),
+      aspectRatio: meta.height > meta.width ? '9:16' : '16:9',
       model: (objectRemoverModelOptions[0] && objectRemoverModelOptions[0].id) || null,
       createdAt: Date.now(),
     });

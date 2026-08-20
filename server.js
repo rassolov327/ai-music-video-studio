@@ -1290,7 +1290,7 @@ app.post('/api/object-remover/start', requireAuth, async (req, res) => {
   if (!KIE_API_KEY) {
     return res.status(503).json({ error: 'not_configured', message: 'KIE_API_KEY is not set on the server yet.' });
   }
-  const { videoUrl, prompt, start, ends, resolution, model, meta } = req.body || {};
+  const { videoUrl, prompt, start, ends, resolution, aspectRatio, model, meta } = req.body || {};
   if (!videoUrl || !prompt) {
     return res.status(400).json({ error: 'bad_request', message: 'videoUrl and prompt are both required.' });
   }
@@ -1315,6 +1315,10 @@ app.post('/api/object-remover/start', requireAuth, async (req, res) => {
     prompt,
     video_list: [{ url: kieVideoUrl, start: start || 0, ends: ends || 10 }],
     resolution: resolution || '720p',
+    // Confirmed live: KIE rejects the request outright ("Aspect ratio only supports
+    // [16:9, 9:16]") if this is left unset and the source isn't exactly one of those two,
+    // despite docs.kie.ai marking it optional — always send a real value, never omit.
+    aspect_ratio: (aspectRatio === '9:16' || aspectRatio === '16:9') ? aspectRatio : '16:9',
     duration: '8', // required field, but explicitly ignored by the model once video input is present
   };
   const callBackUrl = PUBLIC_URL ? PUBLIC_URL + '/api/webhook/kie' : undefined;
