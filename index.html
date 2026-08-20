@@ -220,6 +220,9 @@
         <div class="field"><label>y</label><input type="number" id="refY" step="0.0001" inputmode="decimal"></div>
       </div>
       <div class="row">
+        <div class="field"><label>Duv</label><input type="number" id="refDuv" step="0.0001" inputmode="decimal"></div>
+      </div>
+      <div class="row">
         <div class="field"><label>CRI Ra</label><input type="number" id="refCri" inputmode="decimal"></div>
         <div class="field"><label>R9</label><input type="number" id="refR9" inputmode="decimal"></div>
       </div>
@@ -684,7 +687,7 @@ function renderPoints(){
   const list = document.getElementById('pointsList');
   if(!pts.length){ list.textContent = 'Пока пусто.'; return; }
   list.innerHTML = pts.map((p,i)=>
-    `#${i+1}: Lux ${p.ref.lux}, CCT ${p.ref.cct}K, CRI ${p.ref.cri ?? '—'}, R9 ${p.ref.r9 ?? '—'}`
+    `#${i+1}: Lux ${p.ref.lux}, CCT ${p.ref.cct}K, Duv ${p.ref.duv ?? '—'}, CRI ${p.ref.cri ?? '—'}, R9 ${p.ref.r9 ?? '—'}`
   ).join('<br>');
 }
 function saveCalibPoint(){
@@ -694,6 +697,7 @@ function saveCalibPoint(){
     cct: parseFloat(document.getElementById('refCct').value),
     x: parseFloat(document.getElementById('refX').value),
     y: parseFloat(document.getElementById('refY').value),
+    duv: parseFloat(document.getElementById('refDuv').value),
     cri: parseFloat(document.getElementById('refCri').value),
     r9: parseFloat(document.getElementById('refR9').value),
   };
@@ -705,7 +709,7 @@ function saveCalibPoint(){
   pts.push({ raw: lastRaw, kSensor, ref, ts: new Date().toISOString() });
   storePoints(pts);
   renderPoints();
-  ['refLux','refCct','refX','refY','refCri','refR9'].forEach(id=>document.getElementById(id).value='');
+  ['refLux','refCct','refX','refY','refDuv','refCri','refR9'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('btnSavePoint').disabled = true;
   document.getElementById('bleStatus').textContent = 'Точка сохранена. Можно делать следующий замер.';
 }
