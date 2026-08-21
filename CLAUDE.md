@@ -389,7 +389,11 @@ C onward:
   TV_FORMAT_TEMPLATE-style ruleset) — concrete worked fragments ("this text, this duration →
   this real shot breakdown from a real episode"), stored so Stage D can retrieve/attach the
   most relevant ones into its own prompt for reasoning-by-analogy, the way a real director
-  works from experience rather than a formula.
+  works from experience rather than a formula. Alongside this show-specific bank, there's
+  also `docs/editing-theory-notes.md` — general editing/directing theory researched from
+  public sources (Murch's rule of six, shot-size grammar, piece-to-camera structure,
+  cutaway vs. jump cut, headroom/lead-room framing), meant as system-level context for
+  Stage D's prompt, separate from and complementary to the show-specific example bank.
 - **D. Per-block storyboard reasoning — NOT YET BUILT.** Runs per Сетка block, independently
   of its neighbors (Костян's explicit choice — same "one task per block" shape as article-
   writing/voicing today, not a whole-episode-at-once call). Given: the block's VO text +
