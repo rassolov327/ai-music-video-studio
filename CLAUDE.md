@@ -372,31 +372,69 @@ instruction — do not batch-implement the remaining stages without checking in 
   ~line 1172 onward) — auto-fills when exactly one studio matches the rubric, otherwise a
   manual `<select>` picker; feeds the same green/yellow readiness indicator as
   `assignedAnchorId`.
-- **C. Editing-technique research — NOT YET BUILT.** A separate one-off Gemini
-  video-understanding script, same idea as `scripts/analyze-show-format.js` (see "Show
-  format analysis" below) but analyzing cut rhythm, shot-size choices, and camera movement
-  in the same reference episodes, instead of segment timing. Output: a draft ruleset the
-  virtual editor (step D) follows mechanically, not something re-decided by AI every week.
-- **D. Virtual editor logic — NOT YET BUILT.** Given a block's VO duration, its assigned
-  studio's 4 wide shots, and the ruleset from step C, generate a sequence of "shots" — which
-  of the 4 angles, what crop/shot-size, what camera movement. Camera movement is Ken Burns
-  only (pan/push/pull on a still image) — explicitly nothing more elaborate. Output is data
-  only at this stage (no image processing yet) — one shot list per Сетка block.
-- **E. Timeline + Inspector — NOT YET BUILT, home moved to Монтаж.** Drag-to-reorder for
-  rubric blocks AND for stories within a rubric's own group is already BUILT, in Сетка
-  itself (see "Tab structure" above) — broader than originally staged here, per Костян's
-  later explicit ask. What's still not built: a real timeline reusing TAKE:ONE's own
-  scene/shot editor (`js/timeline.js`, `js/scenes-preview.js`) — a VO track, a music track,
-  and a shots track populated from step D's output, with an Inspector panel (same shape as
-  `renderInspectorPanel()` in `scenes-preview.js` — `SHOT_SIZES`, `CAMERA_MOVES`, and a
-  location-angle-style picker over the block's 4 studio shots). Костян explicitly dropped
-  the earlier idea of opening this by clicking a Сетка block — it now belongs in the new
-  **Монтаж** tab (built as an empty placeholder, see "Tab structure") once this stage
-  actually gets built.
-- **F. Render integration — NOT YET BUILT.** Applying the chosen crop + Ken Burns movement
-  to the studio's static photos happens only at final render (`render.js`, ffmpeg) — until
-  then every studio photo is untouched, and framing/movement is only ever stored as data on
-  the block's shots.
+**Redesigned 2026-08-20** — the "монтажёр" (virtual editor) is explicitly a director too,
+not just a cutter: it decides shot count, shot size, order, AND camera movement per block
+itself. The user never sets these by hand — same "automate everything, user only reviews"
+principle as the rest of Сетка (see "Editing / Сетка — fully automated" below). Revised
+C onward:
+
+- **C. Editing-technique training corpus — NOT YET BUILT, blocked on Костян's material.**
+  A one-off Gemini video-understanding script (same idea as `scripts/analyze-show-format.js`,
+  see "Show format analysis" below) over a curated set of episodes from SEVERAL DIFFERENT
+  real shows (not just the 3 same-show reference episodes already analyzed for timing) —
+  specifically chosen to teach cutting/shot-selection judgment, not segment timing. Costян
+  supplies the episode links/files once, ad hoc (no in-app library UI for this, per his
+  explicit choice) — analysis is a one-time run, not a growing pipeline for now. **Output is
+  a few-shot example bank, not a rigid rule list** (also his explicit choice, over a
+  TV_FORMAT_TEMPLATE-style ruleset) — concrete worked fragments ("this text, this duration →
+  this real shot breakdown from a real episode"), stored so Stage D can retrieve/attach the
+  most relevant ones into its own prompt for reasoning-by-analogy, the way a real director
+  works from experience rather than a formula.
+- **D. Per-block storyboard reasoning — NOT YET BUILT.** Runs per Сетка block, independently
+  of its neighbors (Костян's explicit choice — same "one task per block" shape as article-
+  writing/voicing today, not a whole-episode-at-once call). Given: the block's VO text +
+  real duration, its assigned studio's 4 angles (`front`/`left`/`right`/`back`,
+  `TV_STUDIO_ANGLE_KEYS`), and relevant examples from Stage C's bank — the model reasons like
+  a director (Костян's own example: 30s block → wide shot of the anchor entering, then
+  medium, then a hands/detail insert if the text calls for one, ending on a close-up for the
+  punchline) and outputs a shot list: how many shots, which of the 4 angles each uses, shot
+  size, camera movement (Ken Burns only — pan/push/pull on a still image, nothing more
+  elaborate), and which exact slice of the VO text plays under each shot. Data only at this
+  stage — no image/video processing yet.
+- **Real VO timing is a prerequisite for D, unconfirmed.** Cutting VO "at phrase boundaries"
+  (Костян's explicit choice, over estimating duration from word/char count) needs real
+  per-phrase timestamps from whichever TTS provider generated the block's voice
+  (`elevenlabs-direct` confirmed working by real use, per Костян 2026-08-20 — see "Next
+  planned step") — **not yet confirmed that ElevenLabs' or Gemini's TTS response actually
+  returns word/phrase-level timing data**. Check docs.elevenlabs.io for the real response
+  shape before building the cutting logic; if timestamps aren't available, this needs a
+  fallback (e.g. forced alignment) rather than silently degrading to the word-count estimate
+  Костян explicitly said not to rely on.
+- **E. Монтаж tab timeline — NOT YET BUILT.** Read-only-by-default view (not a manual
+  Inspector with editable shot-size/camera-move dropdowns — those decisions belong to the
+  director AI now, per the redesign above) of the whole episode: every block's shots in
+  order, each labeled with its shot size/angle and carrying the exact VO slice that plays
+  under it. This is the "empty but already edited" storyboard Костян described — populated
+  from Stage D's output across all blocks, still no images yet.
+- **F. Storyboard preview generation — NOT YET BUILT.** Sent through TASKS like everything
+  else. Per shot, **two selectable paths, both real, user picks per task in TASKS** (Костян's
+  explicit choice): (a) free instant crop/zoom of the studio's already-uploaded angle photo
+  (canvas, no provider call — consistent with Stage A's decision that framing is the virtual
+  editor's job, not a separate AI-generation pass), or (b) paid AI reframe/regeneration for a
+  cleaner composition at that shot size. Result: every shot in the Stage E timeline becomes a
+  real static image, so Костян can review the full episode as a photo storyboard with VO text
+  alongside each frame.
+- **G. Staff-chat revision — NOT YET BUILT.** Костян reviews the photo storyboard and
+  requests changes in natural language through the chat with the "monter" role of the
+  planned Staff chat (see "Editing / Сетка — fully automated" → Staff chat below) — e.g.
+  "measure changed" instructions applied back onto Stage D/E's shot list, then re-run through
+  Stage F for just the affected shots. Depends on Staff chat's function-calling
+  infrastructure existing first.
+- **H. Final video render — NOT YET BUILT.** Once Костян is happy with the storyboard, a
+  second TASKS pass turns every approved shot into real video — Ken Burns movement applied
+  per shot (`render.js`, ffmpeg) — for the whole episode at once. Until this stage runs,
+  every studio photo stays untouched; framing/movement is only ever stored as data on the
+  block's shots before this point.
 
 ## Editing / Сетка — fully automated
 
@@ -557,13 +595,11 @@ resolved-but-listed clutter; see git history for their original text if needed.
   priority. Claude/GPT-via-KIE text models remain unwired and are not currently wanted.
 
 **Open:**
-- Journalist live test — `/api/tv/write-article` (Gemini) has NOT been confirmed against a
-  real live run yet. Voicing itself IS effectively confirmed (ElevenLabs-direct working per
-  above), so the one real unknown left here is specifically article-writing text quality/
-  success, not voice.
-- **Studios Stage C is next** — Stage B (studio assignment) confirmed built in code
-  (`assignedStudioId`, `js/tv-app.js`). Stage C = a one-off Gemini video-understanding
-  script analyzing cut rhythm/shot-size/camera movement in the reference episodes (same
-  pattern as `scripts/analyze-show-format.js`), producing a draft ruleset for Stage D (the
-  virtual editor) to follow mechanically. See "Studios + virtual editor" above for the full
-  A–F breakdown. Confirm scope with Костян before starting each stage — do not batch them.
+- Journalist live test — closed, Костян confirmed 2026-08-20 he's tried
+  `/api/tv/write-article` for real and it works.
+- **Studios Stage C — blocked on Костян's material.** Full redesign of C onward agreed
+  2026-08-20 (see "Studios + virtual editor" above for the complete A–H breakdown — grew
+  from the original 6 stages once the "монтажёр is also a director" scope landed). Stage C
+  needs episode links/files from several different real shows, chosen specifically to teach
+  cutting/shot-selection judgment — waiting on Костян to send them before the analysis
+  script can run. Confirm scope with Костян before starting each stage — do not batch them.
