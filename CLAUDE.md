@@ -368,9 +368,10 @@ instruction — do not batch-implement the remaining stages without checking in 
   belong to the virtual editor (step D), not to separate AI-generated shots per crop size.
   Multiple studio cards CAN share a rubric — the assignment step (B) is where a specific one
   gets picked, defaulting to the match if there's only one.
-- **B. Studio assignment — NOT YET BUILT.** Wherever a news item's script gets assigned to
-  an anchor (planned for the Студия tab, see above, or wherever the tabled "Выход ведущего"
-  work resumes), also assign which studio that anchor performs from.
+- **B. Studio assignment — BUILT.** `assignedStudioId` on the news item (`js/tv-app.js`,
+  ~line 1172 onward) — auto-fills when exactly one studio matches the rubric, otherwise a
+  manual `<select>` picker; feeds the same green/yellow readiness indicator as
+  `assignedAnchorId`.
 - **C. Editing-technique research — NOT YET BUILT.** A separate one-off Gemini
   video-understanding script, same idea as `scripts/analyze-show-format.js` (see "Show
   format analysis" below) but analyzing cut rhythm, shot-size choices, and camera movement
@@ -540,30 +541,29 @@ POST /api/tv/staff-chat   — natural-language edit commands for Сетка (fun
 
 ## Next planned step
 
-1. All 3 reference episodes analyzed (`scripts/show-format-draft.json`), draft template
-   written and wired into Сетка (see "Show format analysis" step 3). Костян still needs to
-   watch the same 3 episodes and correct the template where his notes disagree with the
-   AI-only draft — treat `TV_FORMAT_TEMPLATE` as provisional until that happens.
-2. News sourcing is wired (Wayback + Wikipedia, see above) but **needs a real live test**
-   — specifically whether the Wayback pass returns anything at all (unverified — see the
-   caveat under "News sourcing"). Try "Собрать новости" for real and report what comes
-   back before trusting it.
-3. Journalist v1 + Voicing v1 are built (Редакция → TASKS → Микрофонная → TASKS pipeline,
-   see "Journalist"/"Voicing" above) but **need a real live test with a real
-   `GEMINI_API_KEY`** — neither `/api/tv/write-article` nor `/api/tv/generate-voice` has run
-   against the actual Gemini API yet (no key was available while building this). Everything
-   up to that boundary IS verified live: assignment defaults, TASKS draft tiles with correct
-   model/cost display, the 503-not-configured error round-tripping cleanly into the TASKS
-   tile instead of crashing, and the whole Микрофонная panel (crossed-out/solid speaker
-   icon, audio playback) using a simulated result. Try a real write→voice round trip and
-   correct `GEMINI_TTS_MODEL` if it 404s (see "Voicing" above for the fallback-via-env path).
-4. Studios Stage B is done (see "Studios + virtual editor" above) — next is Stage C
-   (editing-technique research script), D (virtual editor logic), E (Сетка
-   timeline+Inspector), F (render). Confirm scope with Костян before starting each stage —
-   do not batch them.
-5. Paid model alternatives were deliberately left unwired — Claude/GPT (text) and ElevenLabs
-   (voice), both via KIE.ai — because their real createTask request shapes weren't confirmed
-   against actual docs while building this (WebFetch to docs.kie.ai 404'd/403'd during
-   research). Confirm the real field names before adding either to `TV_TEXT_MODELS`/
-   `TV_VOICE_MODELS` — guessing would repeat the exact mistake `LIPSYNC_MODELS`'s own comment
-   in `server.js` already warns about.
+Reviewed 2026-08-20 with Костян — closed items removed below rather than kept as
+resolved-but-listed clutter; see git history for their original text if needed.
+
+- Format template review (Костян watching the 3 reference episodes, correcting
+  `TV_FORMAT_TEMPLATE`) — closed, he's watched them; his notes will come later as a
+  separate pass, not blocking further work.
+- News-sourcing live test (Wayback + Wikipedia) — closed.
+- Paid model alternatives via KIE (Claude/GPT text, ElevenLabs via KIE) — cancelled, not
+  wanted. ElevenLabs is already solved a different way: `elevenlabs-direct` in
+  `TV_VOICE_MODELS` (`server.js`) uses Костян's own paid ElevenLabs account directly
+  (`ELEVENLABS_API_KEY`, `tvCallElevenLabsDirectVoice`), confirmed working by real use in
+  Микрофонная — no KIE proxy involved or needed for voice. The KIE-proxied
+  `kie-elevenlabs-multi` entry can stay in the list (cheaper fallback), just isn't the
+  priority. Claude/GPT-via-KIE text models remain unwired and are not currently wanted.
+
+**Open:**
+- Journalist live test — `/api/tv/write-article` (Gemini) has NOT been confirmed against a
+  real live run yet. Voicing itself IS effectively confirmed (ElevenLabs-direct working per
+  above), so the one real unknown left here is specifically article-writing text quality/
+  success, not voice.
+- **Studios Stage C is next** — Stage B (studio assignment) confirmed built in code
+  (`assignedStudioId`, `js/tv-app.js`). Stage C = a one-off Gemini video-understanding
+  script analyzing cut rhythm/shot-size/camera movement in the reference episodes (same
+  pattern as `scripts/analyze-show-format.js`), producing a draft ruleset for Stage D (the
+  virtual editor) to follow mechanically. See "Studios + virtual editor" above for the full
+  A–F breakdown. Confirm scope with Костян before starting each stage — do not batch them.
