@@ -1249,6 +1249,110 @@ async function tvFetchComputerraFullArticle(sourceUrl) {
   return text.length > 100 ? text.slice(0, 6000) : null;
 }
 
+// ---- TEMPORARY, one-off: runs scripts/analyze-editing-technique.js's exact logic
+// server-side instead of locally — Костян's local run failed with Gemini's "User location
+// is not supported for the API use" (Russia is blocked from the raw Generative Language
+// API by IP; Railway's US/EU IP isn't, which is exactly why the deployed server's OWN
+// Gemini calls already work fine while his local machine's don't). Hit this URL once via
+// browser/curl to get scripts/editing-technique-bank.json's content back directly in the
+// response, then DELETE this route — it doesn't belong in the shipped app long-term. ----
+app.get('/api/tv/dev-run-editing-analysis', async (req, res) => {
+  if (!GEMINI_API_KEY) {
+    return res.status(503).json({ error: 'not_configured', message: 'GEMINI_API_KEY is not set on the server yet.' });
+  }
+  const EPISODE_URLS = [
+    'https://www.youtube.com/watch?v=OLHT4ZrJRjE',
+    'https://www.youtube.com/watch?v=wfZuvZiU4Qk',
+    'https://www.youtube.com/watch?v=HP3Qs4sbrBU',
+  ];
+  const buildPrompt = (videoUrl) => `You are analyzing archival TV footage to build a training example bank of real
+editing/directing decisions, for use by an automated video editor that will later cut similar
+talking-head segments on its own. This is the video at ${videoUrl}.
+
+Find distinct moments where a host/presenter/narrator is speaking on camera for a continuous
+stretch — a "talking segment" (this is the exact situation the automated editor will face
+later: one continuous piece of narration that needs to be cut into a sequence of real shots).
+Spread your selection across the WHOLE episode, not just the first few minutes — find up to
+15 such segments total.
+
+For EACH talking segment found, report:
+- An approximate transcription of what is said during it (doesn't need to be word-perfect,
+  best effort from the audio).
+- The segment's total duration in seconds.
+- The REAL sequence of shots actually used to cover it — for each shot: its shot size (one
+  of: Extreme Wide Shot, Wide Shot, Medium Wide Shot, Medium Shot, Medium Close-Up, Close-Up,
+  Extreme Close-Up, Detail Shot), what it shows (e.g. "host on camera", "host's hands on an
+  object", "a screen/monitor", "an inserted product shot"), any camera movement (Static, Push
+  In, Pull Out, Steadicam, Crane — or "none" if genuinely static), and that individual shot's
+  own approximate duration in seconds.
+
+Only include segments with real host/narrator speech and an actual cutting decision to learn
+from — skip pure jingles, music-only stretches, or b-roll with no narration over it. Be
+precise about timestamps and durations — read them from the video's actual timeline, don't
+estimate blindly.
+
+Reply with ONLY the JSON described by the response schema, nothing else.`;
+  const responseSchema = {
+    type: 'object',
+    properties: {
+      segments: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            startSec: { type: 'number' },
+            durationSec: { type: 'number' },
+            narrationText: { type: 'string' },
+            shots: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  shotSize: { type: 'string' },
+                  subject: { type: 'string' },
+                  cameraMove: { type: 'string' },
+                  durationSec: { type: 'number' },
+                },
+                required: ['shotSize', 'subject', 'durationSec'],
+              },
+            },
+          },
+          required: ['startSec', 'durationSec', 'narrationText', 'shots'],
+        },
+      },
+    },
+    required: ['segments'],
+  };
+  const episodes = [];
+  const errors = [];
+  for (const videoUrl of EPISODE_URLS) {
+    try {
+      const gRes = await fetch(`${GEMINI_BASE}/models/${GEMINI_MODEL}:generateContent`, {
+        method: 'POST',
+        headers: { 'x-goog-api-key': GEMINI_API_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: buildPrompt(videoUrl) }, { fileData: { fileUri: videoUrl } }] }],
+          generationConfig: { responseMimeType: 'application/json', responseSchema },
+        }),
+      });
+      const data = await gRes.json().catch(() => null);
+      if (!gRes.ok) throw new Error('Gemini request failed: ' + JSON.stringify(data));
+      const candidate = data && data.candidates && data.candidates[0];
+      const text = candidate && candidate.content && candidate.content.parts && candidate.content.parts[0] && candidate.content.parts[0].text;
+      if (!text) throw new Error('Gemini returned no usable text (finishReason: ' + (candidate && candidate.finishReason) + ').');
+      const parsed = JSON.parse(text);
+      episodes.push({ videoUrl, segments: parsed.segments || [] });
+    } catch (err) {
+      errors.push({ videoUrl, error: String(err && err.message || err) });
+    }
+  }
+  const bank = [];
+  for (const episode of episodes) {
+    for (const seg of episode.segments) bank.push({ sourceVideoUrl: episode.videoUrl, ...seg });
+  }
+  res.json({ bank, errors });
+});
+
 app.post('/api/tv/write-article', async (req, res) => {
   const { title, summary, extract, rubric, sourceDate, sourceUrl, source, personaContext, chosenCatchphrase, chosenAction, model } = req.body || {};
   if (!title || !personaContext) {
