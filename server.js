@@ -632,16 +632,22 @@ app.post('/api/script-breakdown/extract-text', requireAuth, async (req, res) => 
   }
 });
 
-// ---- lightweight user directory (for the share-picker — no tokens/passwords, just who to
-// pick) — any logged-in user, not just admins, since sharing is a peer-to-peer thing. ----
+// ---- lightweight user directory search (for the share-picker — typeahead, not a browsable
+// list) — any logged-in user, not just admins, since sharing is a peer-to-peer thing. Query
+// is required and results are capped; there is deliberately no way to fetch the whole roster
+// through this route — someone can only find a user they already know the name/login of. ----
 app.get('/api/users', requireAuth, async (req, res) => {
   if (!pool) return res.status(503).json({ error: 'not_configured', message: 'The database is not available.' });
+  const q = String(req.query.q || '').trim();
+  if (!q) return res.json({ users: [] });
   try {
     // Admins are excluded from the picker — they already see every document regardless of
     // sharing, so adding them as a share target would never do anything.
     const result = await pool.query(
-      'SELECT id, name, login FROM users WHERE id != $1 AND is_admin = false ORDER BY name',
-      [req.user.id]
+      `SELECT id, name, login FROM users
+       WHERE id != $1 AND is_admin = false AND (name ILIKE $2 OR login ILIKE $2)
+       ORDER BY name LIMIT 8`,
+      [req.user.id, '%' + q + '%']
     );
     res.json({ users: result.rows });
   } catch (err) {

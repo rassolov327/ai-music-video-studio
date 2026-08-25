@@ -51,8 +51,10 @@ async function sbDeleteDoc(id) {
 }
 
 // ---------- sharing ----------
-async function sbFetchShareableUsers() {
-  const res = await fetch('/api/users');
+// Typeahead, not a browsable roster — the server only answers a non-empty query, and caps
+// results, so there's no way to pull the full user list through this.
+async function sbSearchShareableUsers(query) {
+  const res = await fetch('/api/users?q=' + encodeURIComponent(query));
   if (!res.ok) return [];
   const data = await res.json().catch(() => null);
   return (data && data.users) || [];
@@ -253,29 +255,49 @@ async function renderSbHomeList() {
 
 // ---------- share modal ----------
 let sbShareDocId = null;
+let sbShareCurrentIds = new Set(); // ids already shared with — filtered out of suggestions
+let sbShareSearchTimer = null;
 function wireSbShareModal() {
   const modal = document.getElementById('sbShareModal');
   document.getElementById('sbShareModalCloseBtn').onclick = closeSbShareModal;
   modal.onclick = (e) => { if (e.target === modal) closeSbShareModal(); };
-  document.getElementById('sbShareAddBtn').onclick = async () => {
-    const sel = document.getElementById('sbShareUserSelect');
-    const userId = Number(sel.value);
-    if (!userId) return;
-    const errHint = document.getElementById('sbShareErrorHint');
-    errHint.style.display = 'none';
-    try {
-      await sbAddShare(sbShareDocId, userId);
-      await renderSbShareList();
-    } catch (err) {
-      errHint.textContent = err.message;
-      errHint.style.display = '';
-    }
-  };
+  const input = document.getElementById('sbShareUserInput');
+  input.addEventListener('input', () => {
+    clearTimeout(sbShareSearchTimer);
+    const q = input.value.trim();
+    if (!q) { document.getElementById('sbShareSuggestions').innerHTML = ''; return; }
+    sbShareSearchTimer = setTimeout(() => sbRunShareSearch(q), 200);
+  });
+}
+async function sbRunShareSearch(query) {
+  const results = (await sbSearchShareableUsers(query)).filter(u => !sbShareCurrentIds.has(u.id));
+  const box = document.getElementById('sbShareSuggestions');
+  box.innerHTML = results.length
+    ? results.map(u => `<div class="sb-share-suggestion" data-user-id="${u.id}"><b>${sbEscapeHtml(u.name)}</b> (${sbEscapeHtml(u.login)})</div>`).join('')
+    : `<div class="sb-share-empty">Никого не нашлось.</div>`;
+  box.querySelectorAll('[data-user-id]').forEach(el => {
+    el.onclick = () => sbPickShareUser(Number(el.dataset.userId));
+  });
+}
+async function sbPickShareUser(userId) {
+  const errHint = document.getElementById('sbShareErrorHint');
+  errHint.style.display = 'none';
+  try {
+    await sbAddShare(sbShareDocId, userId);
+    document.getElementById('sbShareUserInput').value = '';
+    document.getElementById('sbShareSuggestions').innerHTML = '';
+    await renderSbShareList();
+  } catch (err) {
+    errHint.textContent = err.message;
+    errHint.style.display = '';
+  }
 }
 async function openSbShareModal(docId, title) {
   sbShareDocId = docId;
   document.querySelector('#sbShareModal h2').textContent = 'Поделиться: ' + title;
   document.getElementById('sbShareErrorHint').style.display = 'none';
+  document.getElementById('sbShareUserInput').value = '';
+  document.getElementById('sbShareSuggestions').innerHTML = '';
   document.getElementById('sbShareModal').classList.remove('hidden');
   await renderSbShareList();
 }
@@ -284,7 +306,8 @@ function closeSbShareModal() {
   sbShareDocId = null;
 }
 async function renderSbShareList() {
-  const [shares, allUsers] = await Promise.all([sbFetchShares(sbShareDocId), sbFetchShareableUsers()]);
+  const shares = await sbFetchShares(sbShareDocId);
+  sbShareCurrentIds = new Set(shares.map(u => u.id));
   const listEl = document.getElementById('sbShareList');
   listEl.innerHTML = shares.length
     ? shares.map(u => `
@@ -299,12 +322,6 @@ async function renderSbShareList() {
       await renderSbShareList();
     };
   });
-  const sharedIds = new Set(shares.map(u => String(u.id)));
-  const selectable = allUsers.filter(u => !sharedIds.has(String(u.id)));
-  const sel = document.getElementById('sbShareUserSelect');
-  sel.innerHTML = selectable.length
-    ? selectable.map(u => `<option value="${u.id}">${sbEscapeHtml(u.name)} (${sbEscapeHtml(u.login)})</option>`).join('')
-    : `<option value="">Больше некому — все уже добавлены</option>`;
 }
 
 // ---------- document management ----------
