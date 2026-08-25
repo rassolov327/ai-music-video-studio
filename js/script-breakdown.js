@@ -115,6 +115,7 @@ async function initSbApp() {
   document.getElementById('sbExportPdfBtn').onclick = exportSbSummaryToPdf;
   document.getElementById('sbSheetBackdrop').onclick = closeAllSbSheets;
   wireSbAnalyzeModal();
+  document.getElementById('sbAnalyzeBtnMobile').onclick = () => { closeAllSbSheets(); openSbAnalyzeModal(); };
   wireSbSettingsSheet();
   wireSbSearch();
   sbLoadTheme();

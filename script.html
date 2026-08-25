@@ -91,9 +91,22 @@
     #sbBreakdownView[data-mobile-pane="tree"] .script-input-col{display:none;}
     #sbBreakdownView[data-mobile-pane="text"] #sbTree{display:none;}
     #sbBreakdownView .script-input-col, #sbBreakdownView #sbTree{width:auto;flex:1 1 auto;min-width:0;min-height:0;}
-    .script-input-actions{position:sticky;bottom:0;background:var(--bg-app);padding-top:8px;margin:0 -10px -10px;padding-left:10px;padding-right:10px;padding-bottom:10px;}
     .sb-model-row{flex-direction:column;align-items:stretch;gap:6px;}
     .sb-cost-hint{text-align:left;}
+
+    /* Topbar: the project title must never be free to grow past its share of the row — on a
+       narrow phone a long script title plus the scene count was pushing the home button clean
+       off the viewport (body has overflow:hidden, so it wasn't scrollable to either — just
+       invisible). Truncate the title instead, and pin the right-hand controls so they always
+       have room. */
+    .topbar{gap:8px;}
+    .proj-title{margin-left:0;flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .sb-app-scene-count{flex:0 0 auto;white-space:nowrap;}
+    .sb-topbar-right{flex:0 0 auto;}
+    /* The save-status span's shared min-width:70px (from styles.css, sized for the desktop
+       topbar) was alone eating a third of a 375px-wide topbar, squeezing the title down to
+       almost nothing — it only ever holds a short word here, doesn't need that much room. */
+    #sbSaveStatus{min-width:0;margin:0;font-size:10px;}
 
     #sbInspector{
       position:fixed;left:0;right:0;bottom:0;top:auto;height:72vh;z-index:960;width:auto;
@@ -118,9 +131,9 @@
        (label + scene count) is gone — scene count moved to the topbar, upload button moved
        into the settings sheet. */
     .sb-model-row{display:none;}
-    #sbClearBtn{display:none;}
     .script-input-header{display:none;}
     .sb-upload-row{display:none;}
+    .script-input-actions{display:none;}
     .sb-app-scene-count{display:inline;}
 
     .sb-gear-btn{
@@ -274,6 +287,7 @@
 
     <div class="np-field-title">Сценарий</div>
     <button class="cf-btn" id="sbUploadBtnMobile" style="width:100%;">Загрузить сценарий…</button>
+    <button class="cf-btn primary" id="sbAnalyzeBtnMobile" style="width:100%;margin-top:8px;">Analyze</button>
 
     <div class="np-field-title">Тема</div>
     <div class="sb-theme-row">
