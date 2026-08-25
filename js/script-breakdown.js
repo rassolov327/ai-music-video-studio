@@ -1,19 +1,29 @@
 // ---------- Script Breakdown (standalone /script tool) ----------
 // Entirely separate from the main take:one app — no state.js, no persistence.js, no shared
 // globals. The only things it shares with take:one are the login/session system (same
-// /api/me, /api/login, /api/logout cookies) and the styles.css theme. Everything else
-// (the script text, the breakdown, the summary) lives in its own IndexedDB database.
+// /api/me, /api/login, /api/logout, /api/my-balance) and the styles.css theme. Everything
+// else (the script text, the breakdown, the summary) lives in its own IndexedDB database,
+// per browser — see the note on server-side storage in the project chat for what it would
+// take to make a script follow a user across devices instead.
 
 const SB_DB_NAME = 'script_breakdown_db';
 const SB_STORE = 'documents';
 
 let sbDb = null;
 let sbModels = [];
-let sbDocsList = [];       // [{id,title,updatedAt}] — sorted newest first
+let sbDocsList = [];       // [{id,title,updatedAt,...}] — sorted newest first
 let sbCurrentDoc = null;   // { id, title, createdAt, updatedAt, rawText, model, scenes }
 let sbSelectedItem = null; // {type:'character'|'location'|'prop'|'weapon'|'vehicle'|'timeOfDay', name} or {type:'scene', sceneIdx}
 let sbSaveTimer = null;
 let sbAnalyzeCooldownUntil = 0;
+let sbCollapsedCats = new Set(); // category keys collapsed in THIS session — resets on reload
+
+function sbPencilSvg(size) {
+  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4Z"></path></svg>`;
+}
+function sbTrashSvg(size) {
+  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg>`;
+}
 
 // ---------- tiny IndexedDB wrapper ----------
 function sbOpenDb() {
@@ -72,22 +82,25 @@ function sbEscapeHtml(s) {
   return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-// ---------- auth gate (same pattern as panel_r2d2.html) ----------
+// ---------- auth gate ----------
 (async function () {
   function showLogin() {
     document.getElementById('sbLoginScreen').classList.remove('hidden');
+    document.getElementById('sbHomeScreen').classList.add('hidden');
     document.getElementById('app').classList.add('hidden');
   }
-  function showApp() {
+  async function enterHome() {
     document.getElementById('sbLoginScreen').classList.add('hidden');
-    document.getElementById('app').classList.remove('hidden');
+    document.getElementById('app').classList.add('hidden');
+    document.getElementById('sbHomeScreen').classList.remove('hidden');
+    if (!window.__sbInited) { window.__sbInited = true; await initSbApp(); }
+    else await showSbHome();
   }
   async function tryEnter() {
     let res;
     try { res = await fetch('/api/me'); } catch (err) { showLogin(); return; }
     if (!res.ok) { showLogin(); return; }
-    showApp();
-    if (!window.__sbInited) { window.__sbInited = true; await initSbApp(); }
+    await enterHome();
   }
   document.getElementById('sbLoginSubmitBtn').onclick = async () => {
     const errHint = document.getElementById('sbLoginErrorHint');
@@ -115,10 +128,11 @@ function sbEscapeHtml(s) {
   document.getElementById('sbPasswordInput').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') document.getElementById('sbLoginSubmitBtn').click();
   });
-  document.getElementById('sbLogoutBtn').onclick = async () => {
+  async function sbLogout() {
     try { await fetch('/api/logout', { method: 'POST' }); } catch (err) {}
     location.reload();
-  };
+  }
+  document.getElementById('sbHomeLogoutBtn').onclick = sbLogout;
   tryEnter();
 })();
 
@@ -127,15 +141,17 @@ async function initSbApp() {
   wireSbTabs();
   wireSbUpload();
   wireSbTextInput();
-  wireSbDocButtons();
+  wireSbTreeCollapse();
   document.getElementById('sbAnalyzeBtn').onclick = runSbAnalysis;
   document.getElementById('sbClearBtn').onclick = clearSbScript;
   document.getElementById('sbModelSelect').onchange = updateSbCostHint;
+  document.getElementById('sbBackHomeBtn').onclick = showSbHome;
+  document.getElementById('sbHomeNewBtn').onclick = () => { newSbDoc(); openSbTool(); };
+  document.getElementById('sbExportPdfBtn').onclick = exportSbSummaryToPdf;
 
   await loadSbModels();
-  await refreshSbDocsList();
-  if (sbDocsList.length) await openSbDoc(sbDocsList[0].id);
-  else newSbDoc();
+  wireCreditsIndicator();
+  await showSbHome();
 }
 
 async function loadSbModels() {
@@ -148,6 +164,72 @@ async function loadSbModels() {
   }
   const sel = document.getElementById('sbModelSelect');
   sel.innerHTML = sbModels.map(m => `<option value="${m.id}">${sbEscapeHtml(m.label)}</option>`).join('');
+}
+
+// ---------- home screen (per-user script list — take:one's project picker, same idea) ----------
+async function showSbHome() {
+  document.getElementById('app').classList.add('hidden');
+  document.getElementById('sbHomeScreen').classList.remove('hidden');
+  await renderSbHomeList();
+}
+function openSbTool() {
+  document.getElementById('sbHomeScreen').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+}
+async function renderSbHomeList() {
+  const list = document.getElementById('sbHomeList');
+  const docs = await sbLoadAllDocs();
+  docs.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  sbDocsList = docs;
+  if (!docs.length) {
+    list.innerHTML = `<div class="home-empty">Пока нет ни одного сценария — создайте первый.</div>`;
+    return;
+  }
+  list.innerHTML = docs.map(d => {
+    const scenesCount = d.scenes ? d.scenes.length : 0;
+    const dateStr = d.updatedAt ? new Date(d.updatedAt).toLocaleDateString() : '';
+    return `
+      <div class="proj-card" data-id="${d.id}">
+        <div class="proj-card-thumb"><i class="ti ti-file-text" style="font-size:22px;color:var(--text-2);"></i></div>
+        <div class="proj-card-body">
+          <div class="proj-card-name">${sbEscapeHtml(d.title || 'Untitled')}</div>
+          <div class="proj-card-meta">${scenesCount ? scenesCount + ' сцен(а)' : 'ещё не разобран'}</div>
+          <div class="proj-card-date">${dateStr ? 'Изменён ' + dateStr : ''}</div>
+        </div>
+        <div class="proj-card-actions">
+          <span class="proj-card-btn" data-action="rename" title="Rename">${sbPencilSvg(13)}</span>
+          <span class="proj-card-btn" data-action="delete" title="Delete">${sbTrashSvg(13)}</span>
+        </div>
+      </div>`;
+  }).join('');
+
+  list.querySelectorAll('.proj-card').forEach(card => {
+    const id = card.dataset.id;
+    card.onclick = (e) => {
+      if (e.target.closest('.proj-card-btn')) return;
+      openSbDoc(id).then(openSbTool);
+    };
+    card.querySelector('[data-action="rename"]').onclick = async (e) => {
+      e.stopPropagation();
+      const current = card.querySelector('.proj-card-name').textContent;
+      const title = prompt('Название сценария:', current);
+      if (title === null) return;
+      const doc = await sbGetDoc(id);
+      if (!doc) return;
+      doc.title = title.trim() || 'Untitled script';
+      doc.updatedAt = Date.now();
+      await sbSaveDoc(doc);
+      renderSbHomeList();
+    };
+    card.querySelector('[data-action="delete"]').onclick = async (e) => {
+      e.stopPropagation();
+      const current = card.querySelector('.proj-card-name').textContent;
+      if (!confirm(`Удалить сценарий "${current}" безвозвратно?`)) return;
+      await sbDeleteDoc(id);
+      if (sbCurrentDoc && sbCurrentDoc.id === id) sbCurrentDoc = null;
+      renderSbHomeList();
+    };
+  });
 }
 
 // ---------- document management ----------
@@ -169,6 +251,7 @@ async function openSbDoc(id) {
   if (!doc) { newSbDoc(); return; }
   sbCurrentDoc = doc;
   sbSelectedItem = null;
+  sbCollapsedCats = new Set();
   renderSbAll();
 }
 function sbSaveSoon() {
@@ -182,7 +265,6 @@ async function sbSaveDocNow() {
   try {
     await sbSaveDoc(sbCurrentDoc);
     setSbSaveStatus('Saved');
-    await refreshSbDocsList();
   } catch (err) {
     setSbSaveStatus('Error');
   }
@@ -190,35 +272,6 @@ async function sbSaveDocNow() {
 function setSbSaveStatus(text) {
   const el = document.getElementById('sbSaveStatus');
   if (el) el.textContent = text;
-}
-async function refreshSbDocsList() {
-  const docs = await sbLoadAllDocs();
-  docs.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-  sbDocsList = docs;
-  const sel = document.getElementById('sbDocsSelect');
-  sel.innerHTML = docs.map(d => `<option value="${d.id}" ${sbCurrentDoc && d.id === sbCurrentDoc.id ? 'selected' : ''}>${sbEscapeHtml(d.title || 'Untitled')}</option>`).join('');
-}
-function wireSbDocButtons() {
-  document.getElementById('sbDocsSelect').onchange = (e) => openSbDoc(e.target.value);
-  document.getElementById('sbNewDocBtn').onclick = () => {
-    if (sbCurrentDoc && ((sbCurrentDoc.rawText || '').trim() || sbCurrentDoc.scenes) && !confirm('Начать новый сценарий? Текущий уже сохранён и останется в списке слева.')) return;
-    newSbDoc();
-  };
-  document.getElementById('sbRenameDocBtn').onclick = () => {
-    if (!sbCurrentDoc) return;
-    const title = prompt('Название сценария:', sbCurrentDoc.title || '');
-    if (title === null) return;
-    sbCurrentDoc.title = title.trim() || 'Untitled script';
-    sbSaveDocNow();
-  };
-  document.getElementById('sbDeleteDocBtn').onclick = async () => {
-    if (!sbCurrentDoc) return;
-    if (!confirm('Удалить этот сценарий безвозвратно?')) return;
-    await sbDeleteDoc(sbCurrentDoc.id);
-    await refreshSbDocsList();
-    if (sbDocsList.length) await openSbDoc(sbDocsList[0].id);
-    else newSbDoc();
-  };
 }
 
 // ---------- script text input ----------
@@ -271,6 +324,7 @@ function wireSbUpload() {
       sbCurrentDoc.rawText = data.text;
       if (!sbCurrentDoc.title || sbCurrentDoc.title === 'Untitled script') {
         sbCurrentDoc.title = file.name.replace(/\.[^.]+$/, '');
+        document.getElementById('sbAppTitle').textContent = sbCurrentDoc.title;
       }
       updateSbCostHint();
       sbSaveDocNow();
@@ -329,6 +383,7 @@ async function runSbAnalysis() {
     renderSbAll();
     sbSaveDocNow();
     sbAnalyzeCooldownUntil = Date.now() + 4000;
+    refreshCredits();
   } catch (err) {
     alert('Ошибка анализа: ' + err.message);
   } finally {
@@ -372,7 +427,19 @@ function sbAggregateTimeOfDay(scenes) {
   return order.filter(k => map.has(k)).map(k => ({ name: k, sceneIdxs: map.get(k) }));
 }
 
-// ---------- tree ----------
+// ---------- tree (collapsible categories, chevron matches the main app's asset panel) ----------
+function wireSbTreeCollapse() {
+  document.getElementById('sbTree').addEventListener('click', (e) => {
+    const head = e.target.closest('.sb-cat-head');
+    if (!head) return;
+    const key = head.dataset.catKey;
+    if (sbCollapsedCats.has(key)) sbCollapsedCats.delete(key);
+    else sbCollapsedCats.add(key);
+    head.classList.toggle('collapsed');
+    const items = head.nextElementSibling;
+    if (items) items.classList.toggle('hidden');
+  });
+}
 function renderSbTree() {
   const tree = document.getElementById('sbTree');
   const scenes = sbCurrentDoc && sbCurrentDoc.scenes;
@@ -380,26 +447,34 @@ function renderSbTree() {
     tree.innerHTML = `<div class="gen-hint" style="padding:14px;">Вставьте сценарий слева и нажмите Analyze — разбор появится здесь.</div>`;
     return;
   }
-  function catBlock(title, list, type) {
+  const chev = `<svg class="chev" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>`;
+  function catBlock(key, title, list, type) {
     if (!list.length) return '';
-    return `<div class="script-cat-title">${title}</div>` + list.map(it => `
+    const collapsed = sbCollapsedCats.has(key);
+    const rows = list.map(it => `
       <div class="script-tree-item${sbSelectedItem && sbSelectedItem.type === type && sbSelectedItem.name === it.name ? ' active' : ''}" data-cat-type="${type}" data-cat-name="${sbEscapeHtml(it.name)}">
         <span>${sbEscapeHtml(it.name)}</span>
         <span class="sb-scene-count">${it.sceneIdxs.length}</span>
       </div>`).join('');
+    return `<div class="sb-cat-head${collapsed ? ' collapsed' : ''}" data-cat-key="${key}">${chev}<span class="sb-cat-name">${title}</span><span class="sb-scene-count">${list.length}</span></div>` +
+      `<div class="sb-cat-items${collapsed ? ' hidden' : ''}">${rows}</div>`;
   }
   let html = '';
-  html += catBlock('Персонажи', sbAggregateArrayField(scenes, 'characters'), 'character');
-  html += catBlock('Локации', sbAggregateSingularField(scenes, 'location'), 'location');
-  html += catBlock('Реквизит', sbAggregateArrayField(scenes, 'props'), 'prop');
-  const weapons = sbAggregateArrayField(scenes, 'weapons');
-  if (weapons.length) html += `<div class="script-tree-shots">${catBlock('Оружие', weapons, 'weapon')}</div>`;
-  html += catBlock('Транспорт', sbAggregateArrayField(scenes, 'vehicles'), 'vehicle');
-  html += catBlock('Режим', sbAggregateTimeOfDay(scenes), 'timeOfDay');
-  html += `<div class="script-cat-title">Сцены</div>` + scenes.map((sc, idx) => `
+  html += catBlock('character', 'Персонажи', sbAggregateArrayField(scenes, 'characters'), 'character');
+  html += catBlock('location', 'Локации', sbAggregateSingularField(scenes, 'location'), 'location');
+  html += catBlock('prop', 'Реквизит', sbAggregateArrayField(scenes, 'props'), 'prop');
+  html += catBlock('weapon', 'Оружие', sbAggregateArrayField(scenes, 'weapons'), 'weapon');
+  html += catBlock('vehicle', 'Транспорт', sbAggregateArrayField(scenes, 'vehicles'), 'vehicle');
+  html += catBlock('timeOfDay', 'Режим', sbAggregateTimeOfDay(scenes), 'timeOfDay');
+
+  const scenesCollapsed = sbCollapsedCats.has('scene');
+  const sceneRows = scenes.map((sc, idx) => `
     <div class="script-tree-item${sbSelectedItem && sbSelectedItem.type === 'scene' && sbSelectedItem.sceneIdx === idx ? ' active' : ''}" data-scene-idx="${idx}">
       <span>${idx + 1}. ${sbEscapeHtml(sc.title || '')}</span>
     </div>`).join('');
+  html += `<div class="sb-cat-head${scenesCollapsed ? ' collapsed' : ''}" data-cat-key="scene">${chev}<span class="sb-cat-name">Сцены</span><span class="sb-scene-count">${scenes.length}</span></div>` +
+    `<div class="sb-cat-items${scenesCollapsed ? ' hidden' : ''}">${sceneRows}</div>`;
+
   tree.innerHTML = html;
 
   tree.querySelectorAll('[data-cat-type]').forEach(el => {
@@ -522,6 +597,15 @@ function renderSbSummary() {
     };
   });
 }
+// Uses the browser's native print-to-PDF rather than a generated-PDF library — jsPDF's
+// built-in fonts have no Cyrillic glyphs, and embedding a font just to print Russian text
+// is a lot of moving parts for something the browser already does correctly for free.
+function exportSbSummaryToPdf() {
+  const scenes = sbCurrentDoc && sbCurrentDoc.scenes;
+  if (!scenes || !scenes.length) { alert('Сначала сделайте Analyze.'); return; }
+  switchSbView('summary');
+  setTimeout(() => window.print(), 50);
+}
 
 // ---------- tabs ----------
 function wireSbTabs() {
@@ -547,6 +631,7 @@ function renderSbAll() {
     textEl.innerText = sbCurrentDoc.rawText || '';
   }
   document.getElementById('sbModelSelect').value = sbCurrentDoc.model || 'gemini';
+  document.getElementById('sbAppTitle').textContent = sbCurrentDoc.title || '';
   updateSbCostHint();
   updateSbStatusHint();
   renderSbTree();
@@ -557,5 +642,68 @@ function renderSbAll() {
     renderSbInspectorForCategory(sbSelectedItem.type, sbSelectedItem.name);
   } else {
     renderSbInspectorEmpty();
+  }
+}
+
+// ---------- credits indicator (ported as-is from take:one's js/credits.js — same
+// /api/my-balance endpoint, same two-indicator admin behavior) ----------
+let sbCreditsRefreshTimer = null;
+function wireCreditsIndicator() {
+  const el = document.getElementById('creditsIndicator');
+  if (!el) return;
+  el.onclick = refreshCredits;
+  const personalEl = document.getElementById('personalBalanceIndicator');
+  if (personalEl) personalEl.onclick = refreshCredits;
+  refreshCredits();
+  if (sbCreditsRefreshTimer) clearInterval(sbCreditsRefreshTimer);
+  sbCreditsRefreshTimer = setInterval(refreshCredits, 5 * 60 * 1000);
+}
+async function refreshCredits() {
+  const el = document.getElementById('creditsIndicator');
+  const dot = document.getElementById('creditsDot');
+  const value = document.getElementById('creditsValue');
+  const spinner = document.getElementById('creditsSpinner');
+  if (!el || !dot || !value || !spinner) return;
+  el.classList.remove('hidden');
+  spinner.classList.remove('hidden');
+  try {
+    const res = await fetch('/api/my-balance');
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data || typeof data.credits !== 'number') {
+      const notConfigured = data && data.error === 'not_configured';
+      dot.className = 'credits-dot grey';
+      value.textContent = notConfigured ? 'not set up' : 'error';
+      el.title = (data && data.message) || 'Could not reach the server — click to retry';
+      return;
+    }
+    const imagesRemaining = data.imagesRemaining;
+    let cls = 'grey';
+    if (imagesRemaining === 0) cls = 'red';
+    else if (imagesRemaining !== null && imagesRemaining !== undefined && imagesRemaining < 20) cls = 'yellow';
+    else if (imagesRemaining !== null && imagesRemaining !== undefined) cls = 'green';
+    dot.className = 'credits-dot ' + cls;
+    const unit = data.isAdmin ? ' cr' : ' tokens';
+    value.textContent = data.credits + unit;
+    el.title = data.isAdmin ? ('KIE.ai: ' + data.credits + ' credits — click to refresh') : ('Your balance: ' + data.credits + ' tokens — click to refresh');
+
+    const personalEl = document.getElementById('personalBalanceIndicator');
+    const personalDot = document.getElementById('personalBalanceDot');
+    const personalValue = document.getElementById('personalBalanceValue');
+    if (personalEl && personalDot && personalValue) {
+      if (data.isAdmin && typeof data.personalBalance === 'number') {
+        personalEl.classList.remove('hidden');
+        personalDot.className = 'credits-dot green';
+        personalValue.textContent = data.personalBalance + ' cr (yours)';
+        personalEl.title = 'Your personal balance (KIE credits minus what\'s owed to users): ' + data.personalBalance + ' — click to refresh';
+      } else {
+        personalEl.classList.add('hidden');
+      }
+    }
+  } catch (err) {
+    dot.className = 'credits-dot red';
+    value.textContent = 'error';
+    el.title = 'Could not reach the server to check your balance — click to retry';
+  } finally {
+    spinner.classList.add('hidden');
   }
 }
