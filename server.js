@@ -25,6 +25,8 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs/promises';
 import os from 'os';
+import mammoth from 'mammoth';
+import pdfParse from 'pdf-parse';
 const execFileAsync = promisify(execFile);
 // Loaded defensively — this is only needed for one optional step (video faststart remux
 // for Motion Control), and a failed/missing install of this package must never be able to
@@ -531,6 +533,243 @@ app.get('/api/models', (req, res) => {
   // Costs are our best estimate from KIE's own published credit pricing ($0.005/credit) —
   // shown to the user as an approximation, not an invoice.
   res.json({ models: MODELS.map(m => ({ id: m.id, label: m.label, costUsd: m.costUsd, supportsReferenceImage: !!m.supportsReferenceImage })) });
+});
+
+// ---- Script Breakdown (standalone /script tool) ----
+// A separate full-screen page (script.html), unrelated to any take:one project — it only
+// shares the user/login system and cookies. Everything else (the parsed script, the
+// breakdown, the summary) lives client-side (IndexedDB), same as project data does for the
+// main app. Nothing here is stored in Postgres.
+
+// ---- text extraction from an uploaded file (PDF/DOCX/TXT only, per the agreed scope) ----
+app.post('/api/script-breakdown/extract-text', requireAuth, async (req, res) => {
+  const { dataUrl, filename } = req.body || {};
+  if (!dataUrl || typeof dataUrl !== 'string' || dataUrl.indexOf('data:') !== 0) {
+    return res.status(400).json({ error: 'bad_request', message: 'dataUrl is required.' });
+  }
+  try {
+    const commaIdx = dataUrl.indexOf(',');
+    const header = dataUrl.slice(0, commaIdx);
+    const mime = (header.match(/data:(.*?);base64/) || [])[1] || '';
+    const buffer = Buffer.from(dataUrl.slice(commaIdx + 1), 'base64');
+    const name = (filename || '').toLowerCase();
+    let text;
+    if (mime === 'application/pdf' || name.endsWith('.pdf')) {
+      const data = await pdfParse(buffer);
+      text = data.text;
+    } else if (mime.indexOf('officedocument.wordprocessingml') !== -1 || name.endsWith('.docx')) {
+      const result = await mammoth.extractRawText({ buffer });
+      text = result.value;
+    } else if (mime === 'text/plain' || name.endsWith('.txt')) {
+      text = buffer.toString('utf-8');
+    } else {
+      return res.status(400).json({ error: 'unsupported_format', message: 'Only PDF, DOCX, and TXT files are supported.' });
+    }
+    if (!text || !text.trim()) {
+      return res.status(422).json({ error: 'empty_text', message: 'Could not find any text in this file.' });
+    }
+    res.json({ text: text.trim() });
+  } catch (err) {
+    console.error('[server] /api/script-breakdown/extract-text failed:', err);
+    res.status(500).json({ error: 'server_error', message: 'Could not read this file: ' + String(err && err.message || err) });
+  }
+});
+
+// ---- model choice for the Analyze button ----
+// Gemini stays the default and is free (same GEMINI_API_KEY as the rest of the app's text
+// features). The two KIE alternatives exist for when Gemini's own rate limits get hit during
+// testing — they're real paid calls, billed per-token (unlike the flat per-generation cost
+// of the image/video catalogs), so a user's balance is checked against an ESTIMATE up front
+// and the ACTUAL cost (KIE reports it back as credits_consumed) is deducted afterward.
+const SCRIPT_BREAKDOWN_MODELS = [
+  { id: 'gemini', label: 'Gemini (бесплатно)', free: true },
+  { id: 'kie:gpt-5.4', label: 'GPT-5.4 (KIE)', free: false, kieModel: 'gpt-5-4', provider: 'gpt', inputCreditsPerM: 140, outputCreditsPerM: 1120 },
+  { id: 'kie:claude-sonnet-5', label: 'Claude Sonnet 5 (KIE)', free: false, kieModel: 'claude-sonnet-5', provider: 'claude', inputCreditsPerM: 170, outputCreditsPerM: 855 },
+];
+app.get('/api/script-breakdown/models', (req, res) => {
+  res.json({ models: SCRIPT_BREAKDOWN_MODELS.map(m => ({ id: m.id, label: m.label, free: m.free, inputCreditsPerM: m.inputCreditsPerM || 0, outputCreditsPerM: m.outputCreditsPerM || 0 })) });
+});
+
+// Rough, deliberately-overestimating token count (chars/3 — safe for both Cyrillic and Latin
+// scripts) used ONLY to show a ballpark cost before the call and to pre-check the balance.
+// The real, billed number always comes back from KIE itself as credits_consumed.
+function estimateTokenCount(text) {
+  return Math.ceil((text || '').length / 3);
+}
+function estimateScriptBreakdownCredits(scriptText, modelDef) {
+  if (!modelDef || modelDef.free) return 0;
+  const inputTok = estimateTokenCount(scriptText) + 400; // + fixed instruction overhead
+  // Output = the condensed retelling of every scene (roughly two-thirds the length of the
+  // original once dialogue is compressed) plus the structured JSON wrapper around it.
+  const outputTok = Math.ceil(estimateTokenCount(scriptText) * 0.7) + 1500;
+  return (inputTok / 1e6) * modelDef.inputCreditsPerM + (outputTok / 1e6) * modelDef.outputCreditsPerM;
+}
+function buildScriptBreakdownInstruction() {
+  return [
+    'Ты — ассистент для профессионального разбора киносценария (script breakdown), как в софте для кинопроизводства.',
+    'Разбей сценарий на сцены СТРОГО в том порядке, в котором они идут в тексте, ничего не пропуская.',
+    'Для каждой сцены определи: короткое название (title), место действия (location), время суток (timeOfDay — ровно одно из: Утро, День, Вечер, Ночь, Не указано; если не указано явно в тексте — определи наиболее вероятное по контексту), персонажей сцены (characters), реквизит (props — предметы, НЕ включая оружие), оружие отдельным списком (weapons), транспорт (vehicles).',
+    'headingText — скопируй ДОСЛОВНО, без изменений и перефразирования, короткий фрагмент текста (первая строка/заголовок этой сцены), по которому её можно однозначно найти в исходном тексте точным поиском подстроки.',
+    'condensedText — краткое содержание сцены: ремарки и описания действия оставляй как есть, по смыслу близко к оригиналу, а диалоги сжимай в пересказ своими словами. НО если реплика двигает сюжет — называет адрес, имя, план действий, важный факт или решение персонажа — обязательно сохрани её смысл как явную ремарку, а не растворяй в общем пересказе. Это нужно локейшен-менеджерам и другим членам съёмочной группы, которым не важен диалог дословно, но важно, что происходит и куда едут/что делают.',
+    'Пиши все названия, имена и текст на том же языке, что и сам сценарий — никогда не переводи.',
+    'Отвечай ТОЛЬКО валидным JSON, без markdown-обрамления (без ```), без пояснений до или после.',
+  ].join('\n');
+}
+const scriptBreakdownResponseSchema = {
+  type: 'object',
+  properties: {
+    scenes: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          headingText: { type: 'string' },
+          title: { type: 'string' },
+          location: { type: 'string' },
+          timeOfDay: { type: 'string' },
+          characters: { type: 'array', items: { type: 'string' } },
+          props: { type: 'array', items: { type: 'string' } },
+          weapons: { type: 'array', items: { type: 'string' } },
+          vehicles: { type: 'array', items: { type: 'string' } },
+          condensedText: { type: 'string' },
+        },
+        required: ['headingText', 'title', 'location', 'timeOfDay', 'characters', 'props', 'weapons', 'vehicles', 'condensedText'],
+      },
+    },
+  },
+  required: ['scenes'],
+};
+// Deducts an EXACT credit amount (not a flat per-model cost) — used for the KIE chat models,
+// which bill per-token. Admin accounts aren't touched: their KIE account gets debited for
+// real by the API call itself, there's no separate ledger row to update for them.
+async function deductExactCredits(userId, isAdmin, credits) {
+  if (!pool || !userId || isAdmin || !(credits > 0)) return;
+  const rounded = Math.ceil(credits);
+  try {
+    await pool.query('UPDATE users SET tokens = GREATEST(0, tokens - $1) WHERE id = $2 AND is_admin = false', [rounded, userId]);
+  } catch (err) {
+    console.error('[server] could not deduct script-breakdown credits for user ' + userId + ':', err);
+  }
+}
+async function checkCanAffordCredits(req, res, estimatedCredits) {
+  if (!req.user) return true;
+  try {
+    let balance;
+    if (req.user.is_admin) {
+      const p = await getPersonalBalanceCredits();
+      balance = p.personalBalance;
+    } else {
+      const result = await pool.query('SELECT tokens FROM users WHERE id = $1', [req.user.id]);
+      balance = result.rows.length ? result.rows[0].tokens : 0;
+    }
+    if (balance < estimatedCredits) {
+      res.status(400).json({
+        error: 'insufficient_balance',
+        message: `Not enough tokens — estimated cost is ~${Math.ceil(estimatedCredits)}, your balance is ${balance}.`,
+      });
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error('[server] script-breakdown balance check failed:', err);
+    res.status(500).json({ error: 'server_error', message: 'Could not verify your balance.' });
+    return false;
+  }
+}
+function stripJsonFence(text) {
+  return text.trim().replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/```\s*$/, '');
+}
+app.post('/api/script-breakdown/analyze', requireAuth, async (req, res) => {
+  const { scriptText, model } = req.body || {};
+  if (!scriptText || typeof scriptText !== 'string' || !scriptText.trim()) {
+    return res.status(400).json({ error: 'bad_request', message: 'scriptText is required.' });
+  }
+  const modelDef = SCRIPT_BREAKDOWN_MODELS.find(m => m.id === model) || SCRIPT_BREAKDOWN_MODELS[0];
+  const instruction = buildScriptBreakdownInstruction();
+
+  if (modelDef.free) {
+    if (!GEMINI_API_KEY) return res.status(503).json({ error: 'not_configured', message: 'GEMINI_API_KEY is not set on the server yet.' });
+    try {
+      const geminiRes = await fetch(`${GEMINI_BASE}/models/${GEMINI_MODEL}:generateContent`, {
+        method: 'POST',
+        headers: { 'x-goog-api-key': GEMINI_API_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: instruction + '\n\n---SCRIPT---\n\n' + scriptText }] }],
+          generationConfig: { responseMimeType: 'application/json', responseSchema: scriptBreakdownResponseSchema },
+        }),
+      });
+      const data = await geminiRes.json().catch(() => null);
+      if (!geminiRes.ok) {
+        console.warn('[server] Gemini script-breakdown request failed:', JSON.stringify(data));
+        return res.status(502).json({ error: 'provider_error', message: (data && data.error && data.error.message) || ('Gemini rejected the request (HTTP ' + geminiRes.status + ').') });
+      }
+      const text = data && data.candidates && data.candidates[0] && data.candidates[0].content
+        && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text;
+      if (!text) {
+        console.warn('[server] Gemini returned no usable text for script breakdown:', JSON.stringify(data));
+        return res.status(502).json({ error: 'provider_error', message: 'Gemini returned an empty response — it may have been blocked by a safety filter.' });
+      }
+      let parsed;
+      try { parsed = JSON.parse(text); }
+      catch (err) { return res.status(502).json({ error: 'provider_error', message: 'Gemini returned something that was not valid JSON.' }); }
+      return res.json({ scenes: parsed.scenes || [], creditsConsumed: 0 });
+    } catch (err) {
+      console.error('[server] /api/script-breakdown/analyze (gemini) failed:', err);
+      return res.status(500).json({ error: 'server_error', message: String(err && err.message || err) });
+    }
+  }
+
+  // Paid path — GPT-5.4 or Claude Sonnet 5, both via KIE.
+  if (!KIE_API_KEY) return res.status(503).json({ error: 'not_configured', message: 'KIE_API_KEY is not set on the server yet.' });
+  const estCredits = estimateScriptBreakdownCredits(scriptText, modelDef);
+  if (!(await checkCanAffordCredits(req, res, estCredits))) return;
+
+  const fullPrompt = instruction + '\n\n---SCRIPT---\n\n' + scriptText;
+  try {
+    let text, creditsConsumed;
+    if (modelDef.provider === 'gpt') {
+      const kieRes = await fetch(`${KIE_BASE}/codex/v1/responses`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${KIE_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: modelDef.kieModel, stream: false, input: fullPrompt }),
+      });
+      const data = await kieRes.json().catch(() => null);
+      if (!kieRes.ok) {
+        console.warn('[server] KIE script-breakdown (gpt) request failed:', JSON.stringify(data));
+        return res.status(502).json({ error: 'provider_error', message: (data && (data.error || data.message)) || ('KIE.ai rejected the request (HTTP ' + kieRes.status + ').') });
+      }
+      const msg = data && Array.isArray(data.output) && data.output.find(o => o.type === 'message');
+      const block = msg && Array.isArray(msg.content) && msg.content[0];
+      text = block && block.text;
+      creditsConsumed = data && data.credits_consumed;
+    } else {
+      const kieRes = await fetch(`${KIE_BASE}/claude/v1/messages`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${KIE_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: modelDef.kieModel, stream: false, max_tokens: 8192, messages: [{ role: 'user', content: fullPrompt }] }),
+      });
+      const data = await kieRes.json().catch(() => null);
+      if (!kieRes.ok) {
+        console.warn('[server] KIE script-breakdown (claude) request failed:', JSON.stringify(data));
+        return res.status(502).json({ error: 'provider_error', message: (data && (data.error || data.message)) || ('KIE.ai rejected the request (HTTP ' + kieRes.status + ').') });
+      }
+      const block = data && Array.isArray(data.content) && data.content.find(c => c.type === 'text');
+      text = block && block.text;
+      creditsConsumed = data && data.credits_consumed;
+    }
+    if (!text) return res.status(502).json({ error: 'provider_error', message: 'The model returned no text.' });
+    let parsed;
+    try { parsed = JSON.parse(stripJsonFence(text)); }
+    catch (err) {
+      console.warn('[server] KIE script-breakdown output was not valid JSON:', text.slice(0, 500));
+      return res.status(502).json({ error: 'provider_error', message: 'The model returned something that was not valid JSON — try again, or switch models.' });
+    }
+    if (typeof creditsConsumed === 'number') await deductExactCredits(req.user.id, req.user.is_admin, creditsConsumed);
+    return res.json({ scenes: parsed.scenes || [], creditsConsumed: creditsConsumed || 0 });
+  } catch (err) {
+    console.error('[server] /api/script-breakdown/analyze (kie) failed:', err);
+    return res.status(500).json({ error: 'server_error', message: String(err && err.message || err) });
+  }
 });
 
 // ---- video models (image-to-video, for animating an already-generated shot) ----

@@ -341,6 +341,7 @@ function wireToolsMenu(){
     if(action==='check') showCheckReport();
     else if(action==='ai-generator') showAiGeneratorModal();
     else if(action==='object-remover') showObjectRemoverModal();
+    else if(action==='script-breakdown') window.open('/script', '_blank');
   });
 }
 

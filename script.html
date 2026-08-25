@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="robots" content="noindex, nofollow">
+<title>Script Breakdown — take:one</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+  .sb-topbar-right{margin-left:auto;display:flex;align-items:center;gap:8px;}
+  .sb-docs-select{
+    background:transparent;border:1px solid var(--line);color:var(--text-2);border-radius:6px;
+    padding:5px 8px;font-size:12px;font-family:var(--font-ui);max-width:220px;
+  }
+  .sb-upload-row{display:flex;gap:8px;}
+  .sb-model-row{display:flex;gap:10px;align-items:flex-end;}
+  .sb-model-row .cf-field{flex:1 1 auto;margin-bottom:0;}
+  .sb-cost-hint{font-size:11px;color:var(--text-3);white-space:nowrap;padding-bottom:9px;min-width:80px;text-align:right;}
+  .sb-scene-count{color:var(--text-3);font-weight:400;font-size:10.5px;}
+  .sb-summary-wrap{flex:1 1 auto;overflow-y:auto;padding:24px;max-width:880px;margin:0 auto;width:100%;}
+  .sb-summary-scene{margin-bottom:22px;padding-bottom:16px;border-bottom:1px solid var(--line-soft);}
+  .sb-summary-scene h3{margin:0 0 6px;font-size:14px;color:var(--text-1);cursor:pointer;}
+  .sb-summary-scene h3:hover{color:var(--accent-text);}
+  .sb-summary-meta{font-size:11px;color:var(--text-3);margin-bottom:8px;display:flex;gap:14px;flex-wrap:wrap;}
+  .sb-summary-text{font-size:13px;color:var(--text-2);line-height:1.65;white-space:pre-wrap;}
+  .sb-empty{padding:50px 20px;text-align:center;color:var(--text-3);font-size:13px;}
+  #app.hidden{display:none;}
+</style>
+</head>
+<body>
+
+<div id="sbLoginScreen" class="home-screen">
+  <div class="np-box">
+    <div class="np-header"><h2>Sign in</h2></div>
+    <div class="cf-field"><label>Login</label><input type="text" id="sbLoginInput" autocomplete="username"></div>
+    <div class="cf-field"><label>Password</label><input type="password" id="sbPasswordInput" autocomplete="current-password"></div>
+    <div class="gen-hint" id="sbLoginErrorHint" style="color:var(--danger);display:none;"></div>
+    <div class="cf-actions">
+      <button class="cf-btn primary" id="sbLoginSubmitBtn" style="width:100%;">Sign in</button>
+    </div>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+
+  <div class="topbar">
+    <div class="brand"><i class="ti ti-file-text"></i>Script Breakdown</div>
+    <div class="sb-topbar-right">
+      <select class="sb-docs-select" id="sbDocsSelect" title="Сохранённые сценарии"></select>
+      <button class="tbtn" id="sbNewDocBtn">+ New</button>
+      <button class="tbtn" id="sbRenameDocBtn">Rename</button>
+      <button class="tbtn" id="sbDeleteDocBtn">Delete</button>
+      <span class="save-status" id="sbSaveStatus"></span>
+      <button class="tbtn" id="sbLogoutBtn">Log Out</button>
+    </div>
+  </div>
+
+  <div class="page-tabs">
+    <div class="page-tab active" data-view="breakdown">BREAKDOWN</div>
+    <div class="page-tab" data-view="summary">SUMMARY<span class="page-tab-badge" id="sbSummaryBadge" style="display:none;">0</span></div>
+  </div>
+
+  <div class="body-row" id="sbBreakdownView">
+    <div class="script-input-col">
+      <div class="script-input-header">
+        <span>Script</span>
+        <span class="gen-hint" id="sbStatusHint" style="margin:0;"></span>
+      </div>
+      <div class="sb-upload-row">
+        <button class="cf-btn" id="sbUploadBtn">Загрузить сценарий…</button>
+      </div>
+      <input type="file" id="sbFileInput" accept=".pdf,.docx,.txt" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;">
+      <div id="sbTextInput" class="script-textarea" contenteditable="true" data-placeholder="Вставьте текст сценария сюда, или загрузите файл (PDF / DOCX / TXT)..."></div>
+      <div class="sb-model-row">
+        <div class="cf-field">
+          <label>Модель для Analyze</label>
+          <select id="sbModelSelect"></select>
+        </div>
+        <div class="sb-cost-hint" id="sbCostHint"></div>
+      </div>
+      <div class="script-input-actions">
+        <button class="cf-btn" id="sbClearBtn">Clear</button>
+        <button class="cf-btn primary" id="sbAnalyzeBtn">Analyze</button>
+      </div>
+    </div>
+    <div class="col-resizer"></div>
+    <div class="assets" id="sbTree">
+      <div class="gen-hint" style="padding:14px;">Вставьте сценарий слева и нажмите Analyze — разбор появится здесь.</div>
+    </div>
+    <div class="col-resizer"></div>
+    <div class="inspector" id="sbInspector">
+      <div class="insp-tabs"><div class="insp-tab" style="cursor:default;">Inspector</div></div>
+      <div class="gen-hint" style="padding:14px;">Кликните на сцену или элемент слева, чтобы увидеть детали здесь.</div>
+    </div>
+  </div>
+
+  <div class="body-row hidden" id="sbSummaryViewWrap">
+    <div class="sb-summary-wrap" id="sbSummaryContent"></div>
+  </div>
+
+</div>
+
+<script src="js/script-breakdown.js"></script>
+</body>
+</html>
