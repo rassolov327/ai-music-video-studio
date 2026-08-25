@@ -712,6 +712,7 @@ function switchSbView(view) {
   document.querySelectorAll('.page-tabs .page-tab').forEach(t => t.classList.toggle('active', t.dataset.view === view));
   document.getElementById('sbBreakdownView').classList.toggle('hidden', view !== 'breakdown');
   document.getElementById('sbSummaryViewWrap').classList.toggle('hidden', view !== 'summary');
+  document.getElementById('sbMobileSubtabs').classList.toggle('sb-hidden', view !== 'breakdown');
   if (view !== 'breakdown') closeSbSheet();
 }
 
