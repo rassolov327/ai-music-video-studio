@@ -63,7 +63,20 @@ async function initDb() {
       );
     `);
     await pool.query(`CREATE INDEX IF NOT EXISTS script_documents_user_id_idx ON script_documents(user_id);`);
-    console.log('[db] connected — users + script_documents tables ready');
+    // Sharing: a script stays owned by exactly one user, but can be made visible (read-only)
+    // to other specific users — no copies, so a re-Analyze or edit by the owner is instantly
+    // what everyone sees. Admins already see every document regardless of this table.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS script_document_shares (
+        document_id TEXT NOT NULL REFERENCES script_documents(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        shared_by INTEGER NOT NULL REFERENCES users(id),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (document_id, user_id)
+      );
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS script_document_shares_user_id_idx ON script_document_shares(user_id);`);
+    console.log('[db] connected — users + script_documents + script_document_shares tables ready');
   } catch (err) {
     console.error('[db] could not initialize the database (login features will be unavailable):', err);
   }

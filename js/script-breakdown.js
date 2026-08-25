@@ -19,6 +19,9 @@ function sbPencilSvg(size) {
 function sbTrashSvg(size) {
   return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg>`;
 }
+function sbShareSvg(size) {
+  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>`;
+}
 function sbEscapeHtml(s) {
   return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
@@ -45,6 +48,33 @@ async function sbSaveDoc(doc) {
 }
 async function sbDeleteDoc(id) {
   await fetch('/api/script-breakdown/documents/' + encodeURIComponent(id), { method: 'DELETE' });
+}
+
+// ---------- sharing ----------
+async function sbFetchShareableUsers() {
+  const res = await fetch('/api/users');
+  if (!res.ok) return [];
+  const data = await res.json().catch(() => null);
+  return (data && data.users) || [];
+}
+async function sbFetchShares(docId) {
+  const res = await fetch('/api/script-breakdown/documents/' + encodeURIComponent(docId) + '/shares');
+  if (!res.ok) return [];
+  const data = await res.json().catch(() => null);
+  return (data && data.shares) || [];
+}
+async function sbAddShare(docId, userId) {
+  const res = await fetch('/api/script-breakdown/documents/' + encodeURIComponent(docId) + '/shares', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new Error((data && data.message) || 'Could not share this script.');
+  }
+}
+async function sbRemoveShare(docId, userId) {
+  await fetch('/api/script-breakdown/documents/' + encodeURIComponent(docId) + '/shares/' + encodeURIComponent(userId), { method: 'DELETE' });
 }
 
 // ---------- auth gate ----------
@@ -117,6 +147,7 @@ async function initSbApp() {
   wireSbAnalyzeModal();
   document.getElementById('sbAnalyzeBtnMobile').onclick = () => { closeAllSbSheets(); openSbAnalyzeModal(); };
   wireSbSettingsSheet();
+  wireSbShareModal();
   wireSbSearch();
   sbLoadTheme();
 
@@ -148,6 +179,28 @@ function openSbTool() {
   document.getElementById('sbHomeScreen').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
 }
+function sbRenderProjCard(d) {
+  const dateStr = d.updatedAt ? new Date(d.updatedAt).toLocaleDateString() : '';
+  const metaLine = d.ownerLabel
+    ? `<div class="proj-card-owner">от ${sbEscapeHtml(d.ownerLabel)}</div>`
+    : `<div class="proj-card-meta">${d.sceneCount ? d.sceneCount + ' сцен(а)' : 'ещё не разобран'}</div>`;
+  const actions = d.canEdit ? `
+        <div class="proj-card-actions">
+          ${d.isMine ? `<span class="proj-card-btn" data-action="share" title="Поделиться">${sbShareSvg(13)}</span>` : ''}
+          <span class="proj-card-btn" data-action="rename" title="Rename">${sbPencilSvg(13)}</span>
+          <span class="proj-card-btn" data-action="delete" title="Delete">${sbTrashSvg(13)}</span>
+        </div>` : '';
+  return `
+      <div class="proj-card" data-id="${d.id}">
+        <div class="proj-card-thumb"><i class="ti ti-file-text" style="font-size:22px;color:var(--text-2);"></i></div>
+        <div class="proj-card-body">
+          <div class="proj-card-name">${sbEscapeHtml(d.title || 'Untitled')}</div>
+          ${metaLine}
+          <div class="proj-card-date">${dateStr ? 'Изменён ' + dateStr : ''}</div>
+        </div>
+        ${actions}
+      </div>`;
+}
 async function renderSbHomeList() {
   const list = document.getElementById('sbHomeList');
   sbDocsList = await sbLoadAllDocs();
@@ -155,22 +208,16 @@ async function renderSbHomeList() {
     list.innerHTML = `<div class="home-empty">Пока нет ни одного сценария — создайте первый.</div>`;
     return;
   }
-  list.innerHTML = sbDocsList.map(d => {
-    const dateStr = d.updatedAt ? new Date(d.updatedAt).toLocaleDateString() : '';
-    return `
-      <div class="proj-card" data-id="${d.id}">
-        <div class="proj-card-thumb"><i class="ti ti-file-text" style="font-size:22px;color:var(--text-2);"></i></div>
-        <div class="proj-card-body">
-          <div class="proj-card-name">${sbEscapeHtml(d.title || 'Untitled')}</div>
-          <div class="proj-card-meta">${d.sceneCount ? d.sceneCount + ' сцен(а)' : 'ещё не разобран'}</div>
-          <div class="proj-card-date">${dateStr ? 'Изменён ' + dateStr : ''}</div>
-        </div>
-        <div class="proj-card-actions">
-          <span class="proj-card-btn" data-action="rename" title="Rename">${sbPencilSvg(13)}</span>
-          <span class="proj-card-btn" data-action="delete" title="Delete">${sbTrashSvg(13)}</span>
-        </div>
-      </div>`;
-  }).join('');
+  const mine = sbDocsList.filter(d => d.isMine);
+  const others = sbDocsList.filter(d => !d.isMine);
+  let html = '';
+  if (mine.length) {
+    html += `<div class="home-body-title" style="margin:0 0 10px;">Мои сценарии</div><div class="home-project-list">${mine.map(sbRenderProjCard).join('')}</div>`;
+  }
+  if (others.length) {
+    html += `<div class="home-body-title" style="margin:${mine.length ? '24px' : '0'} 0 10px;">Доступны мне</div><div class="home-project-list">${others.map(sbRenderProjCard).join('')}</div>`;
+  }
+  list.innerHTML = html;
 
   list.querySelectorAll('.proj-card').forEach(card => {
     const id = card.dataset.id;
@@ -178,7 +225,10 @@ async function renderSbHomeList() {
       if (e.target.closest('.proj-card-btn')) return;
       openSbDoc(id).then(openSbTool);
     };
-    card.querySelector('[data-action="rename"]').onclick = async (e) => {
+    const shareBtn = card.querySelector('[data-action="share"]');
+    if (shareBtn) shareBtn.onclick = (e) => { e.stopPropagation(); openSbShareModal(id, card.querySelector('.proj-card-name').textContent); };
+    const renameBtn = card.querySelector('[data-action="rename"]');
+    if (renameBtn) renameBtn.onclick = async (e) => {
       e.stopPropagation();
       const current = card.querySelector('.proj-card-name').textContent;
       const title = prompt('Название сценария:', current);
@@ -189,7 +239,8 @@ async function renderSbHomeList() {
       await sbSaveDoc(doc);
       renderSbHomeList();
     };
-    card.querySelector('[data-action="delete"]').onclick = async (e) => {
+    const deleteBtn = card.querySelector('[data-action="delete"]');
+    if (deleteBtn) deleteBtn.onclick = async (e) => {
       e.stopPropagation();
       const current = card.querySelector('.proj-card-name').textContent;
       if (!confirm(`Удалить сценарий "${current}" безвозвратно?`)) return;
@@ -200,11 +251,68 @@ async function renderSbHomeList() {
   });
 }
 
+// ---------- share modal ----------
+let sbShareDocId = null;
+function wireSbShareModal() {
+  const modal = document.getElementById('sbShareModal');
+  document.getElementById('sbShareModalCloseBtn').onclick = closeSbShareModal;
+  modal.onclick = (e) => { if (e.target === modal) closeSbShareModal(); };
+  document.getElementById('sbShareAddBtn').onclick = async () => {
+    const sel = document.getElementById('sbShareUserSelect');
+    const userId = Number(sel.value);
+    if (!userId) return;
+    const errHint = document.getElementById('sbShareErrorHint');
+    errHint.style.display = 'none';
+    try {
+      await sbAddShare(sbShareDocId, userId);
+      await renderSbShareList();
+    } catch (err) {
+      errHint.textContent = err.message;
+      errHint.style.display = '';
+    }
+  };
+}
+async function openSbShareModal(docId, title) {
+  sbShareDocId = docId;
+  document.querySelector('#sbShareModal h2').textContent = 'Поделиться: ' + title;
+  document.getElementById('sbShareErrorHint').style.display = 'none';
+  document.getElementById('sbShareModal').classList.remove('hidden');
+  await renderSbShareList();
+}
+function closeSbShareModal() {
+  document.getElementById('sbShareModal').classList.add('hidden');
+  sbShareDocId = null;
+}
+async function renderSbShareList() {
+  const [shares, allUsers] = await Promise.all([sbFetchShares(sbShareDocId), sbFetchShareableUsers()]);
+  const listEl = document.getElementById('sbShareList');
+  listEl.innerHTML = shares.length
+    ? shares.map(u => `
+      <div class="sb-share-row">
+        <span>${sbEscapeHtml(u.name)} <span class="gen-hint" style="margin:0;">(${sbEscapeHtml(u.login)})</span></span>
+        <span class="proj-card-btn" data-remove-user="${u.id}" title="Убрать доступ">${sbTrashSvg(13)}</span>
+      </div>`).join('')
+    : `<div class="sb-share-empty">Пока ни с кем не расшарено.</div>`;
+  listEl.querySelectorAll('[data-remove-user]').forEach(el => {
+    el.onclick = async () => {
+      await sbRemoveShare(sbShareDocId, el.dataset.removeUser);
+      await renderSbShareList();
+    };
+  });
+  const sharedIds = new Set(shares.map(u => String(u.id)));
+  const selectable = allUsers.filter(u => !sharedIds.has(String(u.id)));
+  const sel = document.getElementById('sbShareUserSelect');
+  sel.innerHTML = selectable.length
+    ? selectable.map(u => `<option value="${u.id}">${sbEscapeHtml(u.name)} (${sbEscapeHtml(u.login)})</option>`).join('')
+    : `<option value="">Больше некому — все уже добавлены</option>`;
+}
+
 // ---------- document management ----------
 function sbNewDocObject() {
   return {
     id: 'sb' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
     title: 'Untitled script', rawText: '', structuredHtml: null, model: 'gemini', scenes: null,
+    isMine: true, canEdit: true, ownerLabel: null,
   };
 }
 function newSbDoc() {
@@ -229,7 +337,7 @@ function sbSaveSoon() {
   sbSaveTimer = setTimeout(sbSaveDocNow, 800);
 }
 async function sbSaveDocNow() {
-  if (!sbCurrentDoc) return;
+  if (!sbCurrentDoc || sbCurrentDoc.canEdit === false) return;
   setSbSaveStatus('Saving…');
   try {
     await sbSaveDoc(sbCurrentDoc);
@@ -866,7 +974,9 @@ function updateSbStatusHint() {
 function renderSbAll() {
   sbRenderScriptText();
   document.getElementById('sbModelSelect').value = sbCurrentDoc.model || 'gemini';
-  document.getElementById('sbAppTitle').textContent = sbCurrentDoc.title || '';
+  document.getElementById('sbAppTitle').textContent = (sbCurrentDoc.title || '')
+    + (sbCurrentDoc.ownerLabel ? ' · ' + sbCurrentDoc.ownerLabel : '');
+  document.body.classList.toggle('sb-readonly', sbCurrentDoc.canEdit === false);
   updateSbCostHint();
   updateSbStatusHint();
   renderSbTree();

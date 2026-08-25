@@ -632,16 +632,65 @@ app.post('/api/script-breakdown/extract-text', requireAuth, async (req, res) => 
   }
 });
 
-// ---- script documents (Postgres, scoped to the logged-in user) ----
+// ---- lightweight user directory (for the share-picker — no tokens/passwords, just who to
+// pick) — any logged-in user, not just admins, since sharing is a peer-to-peer thing. ----
+app.get('/api/users', requireAuth, async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'not_configured', message: 'The database is not available.' });
+  try {
+    // Admins are excluded from the picker — they already see every document regardless of
+    // sharing, so adding them as a share target would never do anything.
+    const result = await pool.query(
+      'SELECT id, name, login FROM users WHERE id != $1 AND is_admin = false ORDER BY name',
+      [req.user.id]
+    );
+    res.json({ users: result.rows });
+  } catch (err) {
+    console.error('[server] /api/users failed:', err);
+    res.status(500).json({ error: 'server_error', message: 'Could not load users.' });
+  }
+});
+
+// ---- script documents (Postgres) ----
+// Ownership + sharing model: a document has exactly one owner (user_id). It's always visible
+// to its owner and to admins (admins see and can edit everything — no share row needed for
+// them). Other users see it only if explicitly given a (read-only) share via
+// script_document_shares. Editing (PUT/DELETE/managing shares) is owner-or-admin only.
 app.get('/api/script-breakdown/documents', requireAuth, async (req, res) => {
   if (!pool) return res.status(503).json({ error: 'not_configured', message: 'The database is not available.' });
   try {
-    const result = await pool.query(
-      `SELECT id, title, updated_at, jsonb_array_length(COALESCE(scenes, '[]'::jsonb)) AS scene_count
-       FROM script_documents WHERE user_id = $1 ORDER BY updated_at DESC`,
-      [req.user.id]
-    );
-    res.json({ documents: result.rows.map(r => ({ id: r.id, title: r.title, updatedAt: r.updated_at, sceneCount: r.scene_count })) });
+    if (req.user.is_admin) {
+      const result = await pool.query(
+        `SELECT d.id, d.title, d.updated_at, jsonb_array_length(COALESCE(d.scenes, '[]'::jsonb)) AS scene_count,
+                d.user_id AS owner_id, u.name AS owner_name
+         FROM script_documents d JOIN users u ON u.id = d.user_id
+         ORDER BY d.updated_at DESC`
+      );
+      return res.json({ documents: result.rows.map(r => ({
+        id: r.id, title: r.title, updatedAt: r.updated_at, sceneCount: r.scene_count,
+        isMine: r.owner_id === req.user.id, canEdit: true,
+        ownerLabel: r.owner_id === req.user.id ? null : r.owner_name,
+      })) });
+    }
+    const [owned, shared] = await Promise.all([
+      pool.query(
+        `SELECT id, title, updated_at, jsonb_array_length(COALESCE(scenes, '[]'::jsonb)) AS scene_count
+         FROM script_documents WHERE user_id = $1 ORDER BY updated_at DESC`,
+        [req.user.id]
+      ),
+      pool.query(
+        `SELECT d.id, d.title, d.updated_at, jsonb_array_length(COALESCE(d.scenes, '[]'::jsonb)) AS scene_count, u.name AS owner_name
+         FROM script_documents d
+         JOIN script_document_shares s ON s.document_id = d.id
+         JOIN users u ON u.id = d.user_id
+         WHERE s.user_id = $1
+         ORDER BY d.updated_at DESC`,
+        [req.user.id]
+      ),
+    ]);
+    res.json({ documents: [
+      ...owned.rows.map(r => ({ id: r.id, title: r.title, updatedAt: r.updated_at, sceneCount: r.scene_count, isMine: true, canEdit: true, ownerLabel: null })),
+      ...shared.rows.map(r => ({ id: r.id, title: r.title, updatedAt: r.updated_at, sceneCount: r.scene_count, isMine: false, canEdit: false, ownerLabel: r.owner_name })),
+    ] });
   } catch (err) {
     console.error('[server] /api/script-breakdown/documents (list) failed:', err);
     res.status(500).json({ error: 'server_error', message: 'Could not load your scripts.' });
@@ -651,15 +700,31 @@ app.get('/api/script-breakdown/documents/:id', requireAuth, async (req, res) => 
   if (!pool) return res.status(503).json({ error: 'not_configured', message: 'The database is not available.' });
   try {
     const result = await pool.query(
-      `SELECT id, title, raw_text, structured_html, model, scenes, created_at, updated_at
-       FROM script_documents WHERE id = $1 AND user_id = $2`,
-      [req.params.id, req.user.id]
+      `SELECT id, user_id, title, raw_text, structured_html, model, scenes, created_at, updated_at
+       FROM script_documents WHERE id = $1`,
+      [req.params.id]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'not_found', message: 'Script not found.' });
     const r = result.rows[0];
+    const isMine = r.user_id === req.user.id;
+    let canView = isMine || req.user.is_admin;
+    if (!canView) {
+      const shareCheck = await pool.query(
+        'SELECT 1 FROM script_document_shares WHERE document_id = $1 AND user_id = $2',
+        [req.params.id, req.user.id]
+      );
+      canView = shareCheck.rows.length > 0;
+    }
+    if (!canView) return res.status(404).json({ error: 'not_found', message: 'Script not found.' });
+    let ownerLabel = null;
+    if (!isMine) {
+      const ownerRes = await pool.query('SELECT name FROM users WHERE id = $1', [r.user_id]);
+      ownerLabel = ownerRes.rows.length ? ownerRes.rows[0].name : null;
+    }
     res.json({ document: {
       id: r.id, title: r.title, rawText: r.raw_text, structuredHtml: r.structured_html,
       model: r.model, scenes: r.scenes, createdAt: r.created_at, updatedAt: r.updated_at,
+      isMine, canEdit: isMine || req.user.is_admin, ownerLabel,
     } });
   } catch (err) {
     console.error('[server] /api/script-breakdown/documents/:id (get) failed:', err);
@@ -672,17 +737,22 @@ app.put('/api/script-breakdown/documents/:id', requireAuth, async (req, res) => 
   if (!id) return res.status(400).json({ error: 'bad_request', message: 'id is required.' });
   const { title, rawText, structuredHtml, model, scenes } = req.body || {};
   try {
-    const result = await pool.query(
+    // Look up the real owner first — a new id gets this user as owner, but an existing one
+    // must keep its original owner even when an admin is the one saving the edit (admins can
+    // edit anyone's script; they don't thereby become its owner).
+    const existing = await pool.query('SELECT user_id FROM script_documents WHERE id = $1', [id]);
+    const ownerId = existing.rows.length ? existing.rows[0].user_id : req.user.id;
+    if (ownerId !== req.user.id && !req.user.is_admin) {
+      return res.status(403).json({ error: 'forbidden', message: 'You do not have permission to edit this script.' });
+    }
+    await pool.query(
       `INSERT INTO script_documents (id, user_id, title, raw_text, structured_html, model, scenes, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, now())
        ON CONFLICT (id) DO UPDATE SET
          title = EXCLUDED.title, raw_text = EXCLUDED.raw_text, structured_html = EXCLUDED.structured_html,
-         model = EXCLUDED.model, scenes = EXCLUDED.scenes, updated_at = now()
-       WHERE script_documents.user_id = $2
-       RETURNING id`,
-      [id, req.user.id, title || 'Untitled script', rawText || '', structuredHtml || null, model || 'gemini', scenes ? JSON.stringify(scenes) : null]
+         model = EXCLUDED.model, scenes = EXCLUDED.scenes, updated_at = now()`,
+      [id, ownerId, title || 'Untitled script', rawText || '', structuredHtml || null, model || 'gemini', scenes ? JSON.stringify(scenes) : null]
     );
-    if (!result.rowCount) return res.status(403).json({ error: 'forbidden', message: 'This script does not belong to you.' });
     res.json({ ok: true });
   } catch (err) {
     console.error('[server] /api/script-breakdown/documents/:id (put) failed:', err);
@@ -692,11 +762,71 @@ app.put('/api/script-breakdown/documents/:id', requireAuth, async (req, res) => 
 app.delete('/api/script-breakdown/documents/:id', requireAuth, async (req, res) => {
   if (!pool) return res.status(503).json({ error: 'not_configured', message: 'The database is not available.' });
   try {
-    await pool.query('DELETE FROM script_documents WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    if (req.user.is_admin) {
+      await pool.query('DELETE FROM script_documents WHERE id = $1', [req.params.id]);
+    } else {
+      await pool.query('DELETE FROM script_documents WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    }
     res.json({ ok: true });
   } catch (err) {
     console.error('[server] /api/script-breakdown/documents/:id (delete) failed:', err);
     res.status(500).json({ error: 'server_error', message: 'Could not delete this script.' });
+  }
+});
+
+// ---- sharing (owner-or-admin only) ----
+async function requireDocOwnerOrAdmin(req, res) {
+  const result = await pool.query('SELECT user_id FROM script_documents WHERE id = $1', [req.params.id]);
+  if (!result.rows.length) { res.status(404).json({ error: 'not_found', message: 'Script not found.' }); return false; }
+  if (result.rows[0].user_id !== req.user.id && !req.user.is_admin) {
+    res.status(403).json({ error: 'forbidden', message: 'Only the owner can manage sharing.' });
+    return false;
+  }
+  return true;
+}
+app.get('/api/script-breakdown/documents/:id/shares', requireAuth, async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'not_configured', message: 'The database is not available.' });
+  try {
+    if (!(await requireDocOwnerOrAdmin(req, res))) return;
+    const result = await pool.query(
+      `SELECT u.id, u.name, u.login FROM script_document_shares s JOIN users u ON u.id = s.user_id
+       WHERE s.document_id = $1 ORDER BY u.name`,
+      [req.params.id]
+    );
+    res.json({ shares: result.rows });
+  } catch (err) {
+    console.error('[server] /api/script-breakdown/documents/:id/shares (list) failed:', err);
+    res.status(500).json({ error: 'server_error', message: 'Could not load sharing for this script.' });
+  }
+});
+app.post('/api/script-breakdown/documents/:id/shares', requireAuth, async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'not_configured', message: 'The database is not available.' });
+  const userId = Number(req.body && req.body.userId);
+  if (!Number.isInteger(userId)) return res.status(400).json({ error: 'bad_request', message: 'userId is required.' });
+  try {
+    if (!(await requireDocOwnerOrAdmin(req, res))) return;
+    await pool.query(
+      'INSERT INTO script_document_shares (document_id, user_id, shared_by) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
+      [req.params.id, userId, req.user.id]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[server] /api/script-breakdown/documents/:id/shares (add) failed:', err);
+    res.status(500).json({ error: 'server_error', message: 'Could not share this script.' });
+  }
+});
+app.delete('/api/script-breakdown/documents/:id/shares/:userId', requireAuth, async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'not_configured', message: 'The database is not available.' });
+  try {
+    if (!(await requireDocOwnerOrAdmin(req, res))) return;
+    await pool.query(
+      'DELETE FROM script_document_shares WHERE document_id = $1 AND user_id = $2',
+      [req.params.id, req.params.userId]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[server] /api/script-breakdown/documents/:id/shares (remove) failed:', err);
+    res.status(500).json({ error: 'server_error', message: 'Could not revoke access to this script.' });
   }
 });
 

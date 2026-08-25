@@ -150,12 +150,29 @@
       transform:translateY(105%);transition:transform .2s ease;overflow-y:auto;
     }
     .sb-settings-sheet.sb-sheet-open{transform:translateY(0);}
+
+    /* rename/delete/share on a script card were hover-only (from the shared .proj-card
+       CSS, built for a mouse) — there's no hover on a touchscreen, so they were simply
+       unreachable. Just show them always here. */
+    .proj-card-actions{opacity:1;}
   }
   .sb-insp-scene-title{cursor:pointer;}
   .sb-insp-scene-title:hover{color:var(--accent-text);}
   .sb-settings-credit-row{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--text-1);padding:6px 0;}
   .sb-theme-row{display:flex;gap:8px;}
   .sb-theme-row .sb-subtab{flex:1 1 auto;}
+  .sb-share-row{display:flex;align-items:center;justify-content:space-between;padding:6px 0;font-size:13px;color:var(--text-1);}
+  .sb-share-empty{font-size:11px;color:var(--text-3);padding:6px 0;}
+  .proj-card-owner{font-size:11px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+
+  /* Read-only mode — viewing a script someone else shared with you (or, for an admin,
+     any script they don't own): editing controls disappear everywhere, on any screen size.
+     The text itself is already locked read-only post-Analyze regardless of ownership; this
+     just removes the controls that would let you change WHICH script/analysis is showing. */
+  body.sb-readonly .sb-upload-row,
+  body.sb-readonly .script-input-actions,
+  body.sb-readonly #sbUploadBtnMobile,
+  body.sb-readonly #sbAnalyzeBtnMobile{display:none;}
 </style>
 </head>
 <body>
@@ -186,7 +203,7 @@
         <button class="cf-btn primary" id="sbHomeNewBtn"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg> New Script</button>
       </div>
     </div>
-    <div class="home-project-list" id="sbHomeList"></div>
+    <div id="sbHomeList"></div>
   </div>
 </div>
 
@@ -269,6 +286,25 @@
     <div class="gen-hint" id="sbAnalyzeModalCostHint" style="margin-bottom:14px;"></div>
     <div class="cf-actions">
       <button class="cf-btn primary" id="sbAnalyzeModalConfirmBtn" style="width:100%;">Analyze</button>
+    </div>
+  </div>
+</div>
+
+<div class="task-preview-modal hidden" id="sbShareModal">
+  <div class="np-box" style="max-width:380px;">
+    <div class="np-header">
+      <h2>Поделиться сценарием</h2>
+      <button class="np-close" id="sbShareModalCloseBtn"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+    </div>
+    <div class="np-field-title" style="margin-top:0;">Уже доступно</div>
+    <div id="sbShareList"></div>
+    <div class="cf-field">
+      <label>Добавить пользователя</label>
+      <select id="sbShareUserSelect"></select>
+    </div>
+    <div class="gen-hint" id="sbShareErrorHint" style="color:var(--danger);display:none;"></div>
+    <div class="cf-actions">
+      <button class="cf-btn primary" id="sbShareAddBtn" style="width:100%;">Добавить</button>
     </div>
   </div>
 </div>
