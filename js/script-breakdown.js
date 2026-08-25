@@ -107,13 +107,14 @@ async function initSbApp() {
   wireSbUpload();
   wireSbTextInput();
   wireSbTreeCollapse();
-  document.getElementById('sbAnalyzeBtn').onclick = runSbAnalysis;
+  document.getElementById('sbAnalyzeBtn').onclick = onSbAnalyzeBtnClick;
   document.getElementById('sbClearBtn').onclick = clearSbScript;
   document.getElementById('sbModelSelect').onchange = updateSbCostHint;
   document.getElementById('sbBackHomeBtn').onclick = showSbHome;
   document.getElementById('sbHomeNewBtn').onclick = () => { newSbDoc(); openSbTool(); };
   document.getElementById('sbExportPdfBtn').onclick = exportSbSummaryToPdf;
   document.getElementById('sbSheetBackdrop').onclick = closeSbSheet;
+  wireSbAnalyzeModal();
 
   await loadSbModels();
   wireCreditsIndicator();
@@ -128,8 +129,9 @@ async function loadSbModels() {
   } catch (err) {
     sbModels = [{ id: 'gemini', label: 'Gemini (бесплатно)', free: true }];
   }
-  const sel = document.getElementById('sbModelSelect');
-  sel.innerHTML = sbModels.map(m => `<option value="${m.id}">${sbEscapeHtml(m.label)}</option>`).join('');
+  const optionsHtml = sbModels.map(m => `<option value="${m.id}">${sbEscapeHtml(m.label)}</option>`).join('');
+  document.getElementById('sbModelSelect').innerHTML = optionsHtml;
+  document.getElementById('sbAnalyzeModalModelSelect').innerHTML = optionsHtml;
 }
 
 // ---------- home screen (per-user script list — take:one's project picker, same idea) ----------
@@ -311,21 +313,56 @@ function sbFileToDataUrl(file) {
 
 // ---------- cost estimate (mirrors the server's rough estimate — no network round-trip
 // needed just to update a label on every keystroke) ----------
+function sbCostHintText(modelId) {
+  const modelDef = sbModels.find(m => m.id === modelId);
+  if (!modelDef || modelDef.free) return 'Бесплатно';
+  const text = sbCurrentDoc ? (sbCurrentDoc.rawText || '') : '';
+  if (!text) return '';
+  const inputTok = Math.ceil(text.length / 3) + 400;
+  const outputTok = Math.ceil((text.length / 3) * 0.7) + 1500;
+  const credits = (inputTok / 1e6) * modelDef.inputCreditsPerM + (outputTok / 1e6) * modelDef.outputCreditsPerM;
+  return '≈ ' + Math.ceil(credits) + ' кр KIE';
+}
 function updateSbCostHint() {
   const hintEl = document.getElementById('sbCostHint');
   const sel = document.getElementById('sbModelSelect');
   if (!hintEl || !sel) return;
-  const modelDef = sbModels.find(m => m.id === sel.value);
-  if (!modelDef || modelDef.free) { hintEl.textContent = 'Бесплатно'; return; }
-  const text = sbCurrentDoc ? (sbCurrentDoc.rawText || '') : '';
-  if (!text) { hintEl.textContent = ''; return; }
-  const inputTok = Math.ceil(text.length / 3) + 400;
-  const outputTok = Math.ceil((text.length / 3) * 0.7) + 1500;
-  const credits = (inputTok / 1e6) * modelDef.inputCreditsPerM + (outputTok / 1e6) * modelDef.outputCreditsPerM;
-  hintEl.textContent = '≈ ' + Math.ceil(credits) + ' кр KIE';
+  hintEl.textContent = sbCostHintText(sel.value);
 }
 
 // ---------- Analyze ----------
+// On mobile there's no room for an inline model select, so Analyze opens a small confirm
+// modal instead; on desktop the inline select next to the button is already the picker, so
+// the button just runs the analysis directly, same as before.
+function onSbAnalyzeBtnClick() {
+  if (window.matchMedia('(max-width:760px)').matches) openSbAnalyzeModal();
+  else runSbAnalysis();
+}
+function wireSbAnalyzeModal() {
+  const modal = document.getElementById('sbAnalyzeModal');
+  document.getElementById('sbAnalyzeModalCloseBtn').onclick = closeSbAnalyzeModal;
+  modal.onclick = (e) => { if (e.target === modal) closeSbAnalyzeModal(); };
+  document.getElementById('sbAnalyzeModalModelSelect').onchange = updateSbAnalyzeModalCostHint;
+  document.getElementById('sbAnalyzeModalConfirmBtn').onclick = () => {
+    document.getElementById('sbModelSelect').value = document.getElementById('sbAnalyzeModalModelSelect').value;
+    updateSbCostHint();
+    closeSbAnalyzeModal();
+    runSbAnalysis();
+  };
+}
+function updateSbAnalyzeModalCostHint() {
+  const sel = document.getElementById('sbAnalyzeModalModelSelect');
+  document.getElementById('sbAnalyzeModalCostHint').textContent = sbCostHintText(sel.value);
+}
+function openSbAnalyzeModal() {
+  const modalSel = document.getElementById('sbAnalyzeModalModelSelect');
+  modalSel.value = document.getElementById('sbModelSelect').value;
+  updateSbAnalyzeModalCostHint();
+  document.getElementById('sbAnalyzeModal').classList.remove('hidden');
+}
+function closeSbAnalyzeModal() {
+  document.getElementById('sbAnalyzeModal').classList.add('hidden');
+}
 async function runSbAnalysis() {
   if (!sbCurrentDoc) return;
   const text = (sbCurrentDoc.scenes ? sbCurrentDoc.rawText : (document.getElementById('sbTextInput').innerText || '')).trim();
@@ -575,7 +612,7 @@ function renderSbInspectorForScene(idx) {
   const field = (label, list) => (list && list.length) ? `<div class="cf-field"><label>${label}</label><div class="gen-hint" style="margin:0;">${list.map(sbEscapeHtml).join(', ')}</div></div>` : '';
   insp.innerHTML = sbInspectorShell(`
     <div style="padding:14px;">
-      <div style="font-size:13px;font-weight:600;color:var(--text-1);margin-bottom:8px;">${idx + 1}. ${sbEscapeHtml(sc.title || '')}</div>
+      <div class="sb-insp-scene-title" data-jump-self="${idx}" style="font-size:13px;font-weight:600;color:var(--text-1);margin-bottom:8px;" title="Перейти к этой сцене в тексте">${idx + 1}. ${sbEscapeHtml(sc.title || '')}</div>
       <div class="cf-field"><label>Локация</label><div class="gen-hint" style="margin:0;">${sbEscapeHtml(sc.location || '—')}</div></div>
       <div class="cf-field"><label>Время суток</label><div class="gen-hint" style="margin:0;">${sbEscapeHtml(sc.timeOfDay || '—')}</div></div>
       ${field('Персонажи', sc.characters)}
@@ -592,6 +629,18 @@ function renderSbInspectorEmpty() {
 function wireSbInspectorShell() {
   const closeBtn = document.getElementById('sbSheetCloseBtn');
   if (closeBtn) closeBtn.onclick = closeSbSheet;
+  const jumpTitle = document.querySelector('.sb-insp-scene-title');
+  if (jumpTitle) jumpTitle.onclick = () => sbGoToSceneInText(Number(jumpTitle.dataset.jumpSelf));
+}
+// Jumping to a scene from a link INSIDE the Inspector (as opposed to selecting the scene in
+// the tree, which already jumps as part of selection) — re-runs the highlight/scroll and, on
+// mobile, gets the sheet out of the way so the text is actually visible afterward.
+function sbGoToSceneInText(idx) {
+  sbJumpToScene(idx);
+  if (window.matchMedia('(max-width:760px)').matches) {
+    switchSbMobilePane('text');
+    closeSbSheet();
+  }
 }
 
 // ---------- mobile bottom sheet (Inspector) ----------

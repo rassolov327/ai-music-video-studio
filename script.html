@@ -98,7 +98,17 @@
     #personalBalanceIndicator{bottom:36px;}
     .home-body{padding:20px 16px 40px;}
     .home-hero{padding:32px 20px 24px;}
+
+    /* Compact mobile input column: the model choice moves into the Analyze confirm modal
+       (no room for an inline select + cost hint), Clear is dropped, and the upload button
+       takes the slot the plain "Script" label used to occupy. */
+    .sb-model-row{display:none;}
+    #sbClearBtn{display:none;}
+    .sb-header-label{display:none;}
+    .sb-upload-row{order:-1;}
   }
+  .sb-insp-scene-title{cursor:pointer;}
+  .sb-insp-scene-title:hover{color:var(--accent-text);}
 </style>
 </head>
 <body>
@@ -156,7 +166,7 @@
   <div class="body-row" id="sbBreakdownView" data-mobile-pane="text">
     <div class="script-input-col">
       <div class="script-input-header">
-        <span>Script</span>
+        <span class="sb-header-label">Script</span>
         <span class="gen-hint" id="sbStatusHint" style="margin:0;"></span>
       </div>
       <div class="sb-upload-row">
@@ -196,6 +206,23 @@
     <div class="sb-summary-wrap" id="sbSummaryContent"></div>
   </div>
 
+</div>
+
+<div class="task-preview-modal hidden" id="sbAnalyzeModal">
+  <div class="np-box" style="max-width:340px;">
+    <div class="np-header">
+      <h2>Analyze</h2>
+      <button class="np-close" id="sbAnalyzeModalCloseBtn"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+    </div>
+    <div class="cf-field">
+      <label>Модель</label>
+      <select id="sbAnalyzeModalModelSelect"></select>
+    </div>
+    <div class="gen-hint" id="sbAnalyzeModalCostHint" style="margin-bottom:14px;"></div>
+    <div class="cf-actions">
+      <button class="cf-btn primary" id="sbAnalyzeModalConfirmBtn" style="width:100%;">Analyze</button>
+    </div>
+  </div>
 </div>
 
 <div class="credits-indicator hidden" id="creditsIndicator" title="Баланс — клик для обновления">
