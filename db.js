@@ -46,7 +46,24 @@ async function initDb() {
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       );
     `);
-    console.log('[db] connected — users table ready');
+    // Script Breakdown documents — the one place project-shaped data lives in Postgres
+    // (everything in the main take:one app stays client-side). Scoped by user_id so each
+    // user only ever sees their own scripts, from any device.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS script_documents (
+        id TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        title TEXT NOT NULL DEFAULT 'Untitled script',
+        raw_text TEXT NOT NULL DEFAULT '',
+        structured_html TEXT,
+        model TEXT NOT NULL DEFAULT 'gemini',
+        scenes JSONB,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS script_documents_user_id_idx ON script_documents(user_id);`);
+    console.log('[db] connected — users + script_documents tables ready');
   } catch (err) {
     console.error('[db] could not initialize the database (login features will be unavailable):', err);
   }

@@ -537,9 +537,64 @@ app.get('/api/models', (req, res) => {
 
 // ---- Script Breakdown (standalone /script tool) ----
 // A separate full-screen page (script.html), unrelated to any take:one project — it only
-// shares the user/login system and cookies. Everything else (the parsed script, the
-// breakdown, the summary) lives client-side (IndexedDB), same as project data does for the
-// main app. Nothing here is stored in Postgres.
+// shares the user/login system and cookies. The parsed script/breakdown DOES live in
+// Postgres (script_documents, scoped by user_id) so it follows a user across devices —
+// the one place in this app where real user content, not just the token ledger, is stored
+// server-side.
+
+// ---- DOCX screenplay-style detection ----
+// Word screenwriting templates (Final Draft/Celtx/etc. "export to Word", or a purpose-built
+// template like the one this was built against) tag paragraphs with named styles —
+// SCENE HEADING/CHARACTER/DIALOG/ACTION/PARENTHETICAL/TRANSITION/NOTE. When present, mammoth
+// can map them straight to CSS classes for real screenplay formatting (centered dialogue,
+// proper margins) instead of guessing from plain text. A plain Word doc with no such styles
+// just won't match enough of these and falls back to the client's heuristic classifier.
+// :fresh matters — without it, mammoth treats consecutive source paragraphs that map to the
+// same target element as ONE continued element and silently runs their text together with no
+// separator at all (confirmed against a real script: six distinct ACTION paragraphs collapsed
+// into a single run-on <p>). :fresh forces a new element per source paragraph, matching what
+// the document actually has.
+const SCRIPT_STYLE_MAP = [
+  "p[style-name='SCENE HEADING'] => p.scr-heading:fresh",
+  "p[style-name='Scene Heading'] => p.scr-heading:fresh",
+  "p[style-name='Slugline'] => p.scr-heading:fresh",
+  "p[style-name='CHARACTER'] => p.scr-character:fresh",
+  "p[style-name='Character'] => p.scr-character:fresh",
+  "p[style-name='DIALOG'] => p.scr-dialogue:fresh",
+  "p[style-name='Dialog'] => p.scr-dialogue:fresh",
+  "p[style-name='DIALOGUE'] => p.scr-dialogue:fresh",
+  "p[style-name='Dialogue'] => p.scr-dialogue:fresh",
+  "p[style-name='ACTION'] => p.scr-action:fresh",
+  "p[style-name='Action'] => p.scr-action:fresh",
+  "p[style-name='PARENTHETICAL'] => p.scr-paren:fresh",
+  "p[style-name='Parenthetical'] => p.scr-paren:fresh",
+  "p[style-name='TRANSITION'] => p.scr-transition:fresh",
+  "p[style-name='Transition'] => p.scr-transition:fresh",
+  "p[style-name='NOTE'] => p.scr-note:fresh",
+  "p[style-name='SCENE CHARACTERS'] => p.scr-note:fresh",
+  "p[style-name='SCENE DESCRIPTION'] => p.scr-action:fresh",
+  "p[style-name='TITLE HEADER'] => p.scr-title:fresh",
+  "p[style-name='LYRICS'] => p.scr-lyrics:fresh",
+];
+async function extractDocxStructuredHtml(buffer) {
+  try {
+    const result = await mammoth.convertToHtml({ buffer }, { styleMap: SCRIPT_STYLE_MAP });
+    const html = result.value;
+    // Only trust it as "structured" once enough paragraphs actually matched a known
+    // screenplay style — otherwise this is a plain Word doc and the client's heuristic
+    // classifier (which at least works on any text) is the better fallback.
+    const matchedCount = (html.match(/class="scr-(heading|character|dialogue)"/g) || []).length;
+    if (matchedCount < 3) return null;
+    // Many scripts have literal empty paragraphs between lines for visual spacing, ON TOP
+    // OF the margins the CSS classes above already provide — that double-spacing is exactly
+    // what produced the "huge gap between lines" complaint. Dropping empty paragraphs here
+    // means the spacing comes from one place (the CSS), not two.
+    return html.replace(/<p[^>]*>(\s|&nbsp;)*<\/p>/g, '');
+  } catch (err) {
+    console.warn('[server] DOCX structured-HTML extraction failed, falling back to plain text:', err && err.message);
+    return null;
+  }
+}
 
 // ---- text extraction from an uploaded file (PDF/DOCX/TXT only, per the agreed scope) ----
 app.post('/api/script-breakdown/extract-text', requireAuth, async (req, res) => {
@@ -554,12 +609,14 @@ app.post('/api/script-breakdown/extract-text', requireAuth, async (req, res) => 
     const buffer = Buffer.from(dataUrl.slice(commaIdx + 1), 'base64');
     const name = (filename || '').toLowerCase();
     let text;
+    let structuredHtml = null;
     if (mime === 'application/pdf' || name.endsWith('.pdf')) {
       const data = await pdfParse(buffer);
       text = data.text;
     } else if (mime.indexOf('officedocument.wordprocessingml') !== -1 || name.endsWith('.docx')) {
       const result = await mammoth.extractRawText({ buffer });
       text = result.value;
+      structuredHtml = await extractDocxStructuredHtml(buffer);
     } else if (mime === 'text/plain' || name.endsWith('.txt')) {
       text = buffer.toString('utf-8');
     } else {
@@ -568,10 +625,78 @@ app.post('/api/script-breakdown/extract-text', requireAuth, async (req, res) => 
     if (!text || !text.trim()) {
       return res.status(422).json({ error: 'empty_text', message: 'Could not find any text in this file.' });
     }
-    res.json({ text: text.trim() });
+    res.json({ text: text.trim(), structuredHtml });
   } catch (err) {
     console.error('[server] /api/script-breakdown/extract-text failed:', err);
     res.status(500).json({ error: 'server_error', message: 'Could not read this file: ' + String(err && err.message || err) });
+  }
+});
+
+// ---- script documents (Postgres, scoped to the logged-in user) ----
+app.get('/api/script-breakdown/documents', requireAuth, async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'not_configured', message: 'The database is not available.' });
+  try {
+    const result = await pool.query(
+      `SELECT id, title, updated_at, jsonb_array_length(COALESCE(scenes, '[]'::jsonb)) AS scene_count
+       FROM script_documents WHERE user_id = $1 ORDER BY updated_at DESC`,
+      [req.user.id]
+    );
+    res.json({ documents: result.rows.map(r => ({ id: r.id, title: r.title, updatedAt: r.updated_at, sceneCount: r.scene_count })) });
+  } catch (err) {
+    console.error('[server] /api/script-breakdown/documents (list) failed:', err);
+    res.status(500).json({ error: 'server_error', message: 'Could not load your scripts.' });
+  }
+});
+app.get('/api/script-breakdown/documents/:id', requireAuth, async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'not_configured', message: 'The database is not available.' });
+  try {
+    const result = await pool.query(
+      `SELECT id, title, raw_text, structured_html, model, scenes, created_at, updated_at
+       FROM script_documents WHERE id = $1 AND user_id = $2`,
+      [req.params.id, req.user.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'not_found', message: 'Script not found.' });
+    const r = result.rows[0];
+    res.json({ document: {
+      id: r.id, title: r.title, rawText: r.raw_text, structuredHtml: r.structured_html,
+      model: r.model, scenes: r.scenes, createdAt: r.created_at, updatedAt: r.updated_at,
+    } });
+  } catch (err) {
+    console.error('[server] /api/script-breakdown/documents/:id (get) failed:', err);
+    res.status(500).json({ error: 'server_error', message: 'Could not load this script.' });
+  }
+});
+app.put('/api/script-breakdown/documents/:id', requireAuth, async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'not_configured', message: 'The database is not available.' });
+  const id = req.params.id;
+  if (!id) return res.status(400).json({ error: 'bad_request', message: 'id is required.' });
+  const { title, rawText, structuredHtml, model, scenes } = req.body || {};
+  try {
+    const result = await pool.query(
+      `INSERT INTO script_documents (id, user_id, title, raw_text, structured_html, model, scenes, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+       ON CONFLICT (id) DO UPDATE SET
+         title = EXCLUDED.title, raw_text = EXCLUDED.raw_text, structured_html = EXCLUDED.structured_html,
+         model = EXCLUDED.model, scenes = EXCLUDED.scenes, updated_at = now()
+       WHERE script_documents.user_id = $2
+       RETURNING id`,
+      [id, req.user.id, title || 'Untitled script', rawText || '', structuredHtml || null, model || 'gemini', scenes ? JSON.stringify(scenes) : null]
+    );
+    if (!result.rowCount) return res.status(403).json({ error: 'forbidden', message: 'This script does not belong to you.' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[server] /api/script-breakdown/documents/:id (put) failed:', err);
+    res.status(500).json({ error: 'server_error', message: 'Could not save this script.' });
+  }
+});
+app.delete('/api/script-breakdown/documents/:id', requireAuth, async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'not_configured', message: 'The database is not available.' });
+  try {
+    await pool.query('DELETE FROM script_documents WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[server] /api/script-breakdown/documents/:id (delete) failed:', err);
+    res.status(500).json({ error: 'server_error', message: 'Could not delete this script.' });
   }
 });
 

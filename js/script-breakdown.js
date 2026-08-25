@@ -1,22 +1,17 @@
 // ---------- Script Breakdown (standalone /script tool) ----------
 // Entirely separate from the main take:one app — no state.js, no persistence.js, no shared
-// globals. The only things it shares with take:one are the login/session system (same
-// /api/me, /api/login, /api/logout, /api/my-balance) and the styles.css theme. Everything
-// else (the script text, the breakdown, the summary) lives in its own IndexedDB database,
-// per browser — see the note on server-side storage in the project chat for what it would
-// take to make a script follow a user across devices instead.
+// globals. It shares the login/session system with take:one (same /api/me, /api/login,
+// /api/logout, /api/my-balance) and the styles.css theme. Scripts themselves are stored in
+// Postgres (script_documents, scoped by user_id) so a user's scripts follow them across
+// devices — the one place in this app where real user content lives server-side.
 
-const SB_DB_NAME = 'script_breakdown_db';
-const SB_STORE = 'documents';
-
-let sbDb = null;
 let sbModels = [];
-let sbDocsList = [];       // [{id,title,updatedAt,...}] — sorted newest first
-let sbCurrentDoc = null;   // { id, title, createdAt, updatedAt, rawText, model, scenes }
+let sbDocsList = [];       // [{id,title,updatedAt,sceneCount}] — sorted newest first
+let sbCurrentDoc = null;   // { id, title, rawText, structuredHtml, model, scenes }
 let sbSelectedItem = null; // {type:'character'|'location'|'prop'|'weapon'|'vehicle'|'timeOfDay', name} or {type:'scene', sceneIdx}
 let sbSaveTimer = null;
 let sbAnalyzeCooldownUntil = 0;
-let sbCollapsedCats = new Set(); // category keys collapsed in THIS session — resets on reload
+let sbCollapsedCats = new Set(); // category keys collapsed in the tree
 
 function sbPencilSvg(size) {
   return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4Z"></path></svg>`;
@@ -24,62 +19,32 @@ function sbPencilSvg(size) {
 function sbTrashSvg(size) {
   return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg>`;
 }
-
-// ---------- tiny IndexedDB wrapper ----------
-function sbOpenDb() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(SB_DB_NAME, 1);
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      if (!db.objectStoreNames.contains(SB_STORE)) db.createObjectStore(SB_STORE, { keyPath: 'id' });
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-async function sbGetDb() {
-  if (!sbDb) sbDb = await sbOpenDb();
-  return sbDb;
-}
-async function sbTx(mode) {
-  const db = await sbGetDb();
-  return db.transaction(SB_STORE, mode).objectStore(SB_STORE);
-}
-async function sbSaveDoc(doc) {
-  const store = await sbTx('readwrite');
-  return new Promise((resolve, reject) => {
-    const req = store.put(doc);
-    req.onsuccess = () => resolve();
-    req.onerror = () => reject(req.error);
-  });
-}
-async function sbLoadAllDocs() {
-  const store = await sbTx('readonly');
-  return new Promise((resolve, reject) => {
-    const req = store.getAll();
-    req.onsuccess = () => resolve(req.result || []);
-    req.onerror = () => reject(req.error);
-  });
-}
-async function sbGetDoc(id) {
-  const store = await sbTx('readonly');
-  return new Promise((resolve, reject) => {
-    const req = store.get(id);
-    req.onsuccess = () => resolve(req.result || null);
-    req.onerror = () => reject(req.error);
-  });
-}
-async function sbDeleteDoc(id) {
-  const store = await sbTx('readwrite');
-  return new Promise((resolve, reject) => {
-    const req = store.delete(id);
-    req.onsuccess = () => resolve();
-    req.onerror = () => reject(req.error);
-  });
-}
-
 function sbEscapeHtml(s) {
   return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// ---------- server-backed document storage (Postgres, scoped to the logged-in user) ----------
+async function sbLoadAllDocs() {
+  const res = await fetch('/api/script-breakdown/documents');
+  if (!res.ok) return [];
+  const data = await res.json().catch(() => null);
+  return (data && data.documents) || [];
+}
+async function sbGetDoc(id) {
+  const res = await fetch('/api/script-breakdown/documents/' + encodeURIComponent(id));
+  if (!res.ok) return null;
+  const data = await res.json().catch(() => null);
+  return (data && data.document) || null;
+}
+async function sbSaveDoc(doc) {
+  const res = await fetch('/api/script-breakdown/documents/' + encodeURIComponent(doc.id), {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(doc),
+  });
+  if (!res.ok) throw new Error('Could not save this script.');
+}
+async function sbDeleteDoc(id) {
+  await fetch('/api/script-breakdown/documents/' + encodeURIComponent(id), { method: 'DELETE' });
 }
 
 // ---------- auth gate ----------
@@ -128,17 +93,17 @@ function sbEscapeHtml(s) {
   document.getElementById('sbPasswordInput').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') document.getElementById('sbLoginSubmitBtn').click();
   });
-  async function sbLogout() {
+  document.getElementById('sbHomeLogoutBtn').onclick = async () => {
     try { await fetch('/api/logout', { method: 'POST' }); } catch (err) {}
     location.reload();
-  }
-  document.getElementById('sbHomeLogoutBtn').onclick = sbLogout;
+  };
   tryEnter();
 })();
 
 // ---------- bootstrap ----------
 async function initSbApp() {
   wireSbTabs();
+  wireSbMobileNav();
   wireSbUpload();
   wireSbTextInput();
   wireSbTreeCollapse();
@@ -148,6 +113,7 @@ async function initSbApp() {
   document.getElementById('sbBackHomeBtn').onclick = showSbHome;
   document.getElementById('sbHomeNewBtn').onclick = () => { newSbDoc(); openSbTool(); };
   document.getElementById('sbExportPdfBtn').onclick = exportSbSummaryToPdf;
+  document.getElementById('sbSheetBackdrop').onclick = closeSbSheet;
 
   await loadSbModels();
   wireCreditsIndicator();
@@ -178,22 +144,19 @@ function openSbTool() {
 }
 async function renderSbHomeList() {
   const list = document.getElementById('sbHomeList');
-  const docs = await sbLoadAllDocs();
-  docs.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-  sbDocsList = docs;
-  if (!docs.length) {
+  sbDocsList = await sbLoadAllDocs();
+  if (!sbDocsList.length) {
     list.innerHTML = `<div class="home-empty">Пока нет ни одного сценария — создайте первый.</div>`;
     return;
   }
-  list.innerHTML = docs.map(d => {
-    const scenesCount = d.scenes ? d.scenes.length : 0;
+  list.innerHTML = sbDocsList.map(d => {
     const dateStr = d.updatedAt ? new Date(d.updatedAt).toLocaleDateString() : '';
     return `
       <div class="proj-card" data-id="${d.id}">
         <div class="proj-card-thumb"><i class="ti ti-file-text" style="font-size:22px;color:var(--text-2);"></i></div>
         <div class="proj-card-body">
           <div class="proj-card-name">${sbEscapeHtml(d.title || 'Untitled')}</div>
-          <div class="proj-card-meta">${scenesCount ? scenesCount + ' сцен(а)' : 'ещё не разобран'}</div>
+          <div class="proj-card-meta">${d.sceneCount ? d.sceneCount + ' сцен(а)' : 'ещё не разобран'}</div>
           <div class="proj-card-date">${dateStr ? 'Изменён ' + dateStr : ''}</div>
         </div>
         <div class="proj-card-actions">
@@ -217,7 +180,6 @@ async function renderSbHomeList() {
       const doc = await sbGetDoc(id);
       if (!doc) return;
       doc.title = title.trim() || 'Untitled script';
-      doc.updatedAt = Date.now();
       await sbSaveDoc(doc);
       renderSbHomeList();
     };
@@ -236,13 +198,13 @@ async function renderSbHomeList() {
 function sbNewDocObject() {
   return {
     id: 'sb' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
-    title: 'Untitled script', createdAt: Date.now(), updatedAt: Date.now(),
-    rawText: '', model: 'gemini', scenes: null,
+    title: 'Untitled script', rawText: '', structuredHtml: null, model: 'gemini', scenes: null,
   };
 }
 function newSbDoc() {
   sbCurrentDoc = sbNewDocObject();
   sbSelectedItem = null;
+  sbCollapsedCats = new Set();
   renderSbAll();
   sbSaveDocNow();
 }
@@ -251,7 +213,9 @@ async function openSbDoc(id) {
   if (!doc) { newSbDoc(); return; }
   sbCurrentDoc = doc;
   sbSelectedItem = null;
-  sbCollapsedCats = new Set();
+  // Every category starts collapsed — a fresh script shouldn't dump its whole cast/prop
+  // list open before the user has asked to see any of it.
+  sbCollapsedCats = new Set(['character', 'location', 'prop', 'weapon', 'vehicle', 'timeOfDay', 'scene']);
   renderSbAll();
 }
 function sbSaveSoon() {
@@ -260,7 +224,6 @@ function sbSaveSoon() {
 }
 async function sbSaveDocNow() {
   if (!sbCurrentDoc) return;
-  sbCurrentDoc.updatedAt = Date.now();
   setSbSaveStatus('Saving…');
   try {
     await sbSaveDoc(sbCurrentDoc);
@@ -274,7 +237,7 @@ function setSbSaveStatus(text) {
   if (el) el.textContent = text;
 }
 
-// ---------- script text input ----------
+// ---------- script text input (editable only while drafting — locked once scenes exist) ----------
 function wireSbTextInput() {
   const el = document.getElementById('sbTextInput');
   el.addEventListener('paste', (e) => {
@@ -283,6 +246,7 @@ function wireSbTextInput() {
     document.execCommand('insertText', false, text);
   });
   el.addEventListener('input', () => {
+    if (sbCurrentDoc.scenes) return; // locked — shouldn't fire, but never trust contenteditable=false alone
     sbCurrentDoc.rawText = el.innerText;
     updateSbCostHint();
     sbSaveSoon();
@@ -292,9 +256,9 @@ function clearSbScript() {
   if (!sbCurrentDoc) return;
   if (((sbCurrentDoc.rawText || '').trim() || sbCurrentDoc.scenes) && !confirm('Очистить текст и разбор? Это затронет только этот документ.')) return;
   sbCurrentDoc.rawText = '';
+  sbCurrentDoc.structuredHtml = null;
   sbCurrentDoc.scenes = null;
   sbSelectedItem = null;
-  document.getElementById('sbTextInput').innerText = '';
   renderSbAll();
   sbSaveDocNow();
 }
@@ -320,8 +284,9 @@ function wireSbUpload() {
       });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data || typeof data.text !== 'string') throw new Error((data && data.message) || 'Не удалось прочитать файл.');
-      document.getElementById('sbTextInput').innerText = data.text;
       sbCurrentDoc.rawText = data.text;
+      sbCurrentDoc.structuredHtml = data.structuredHtml || null;
+      document.getElementById('sbTextInput').innerText = data.text;
       if (!sbCurrentDoc.title || sbCurrentDoc.title === 'Untitled script') {
         sbCurrentDoc.title = file.name.replace(/\.[^.]+$/, '');
         document.getElementById('sbAppTitle').textContent = sbCurrentDoc.title;
@@ -363,7 +328,7 @@ function updateSbCostHint() {
 // ---------- Analyze ----------
 async function runSbAnalysis() {
   if (!sbCurrentDoc) return;
-  const text = (document.getElementById('sbTextInput').innerText || '').trim();
+  const text = (sbCurrentDoc.scenes ? sbCurrentDoc.rawText : (document.getElementById('sbTextInput').innerText || '')).trim();
   if (!text) { alert('Вставьте или загрузите сценарий сначала.'); return; }
   if (Date.now() < sbAnalyzeCooldownUntil) { alert('Подождите пару секунд перед повторным анализом.'); return; }
   const btn = document.getElementById('sbAnalyzeBtn');
@@ -380,6 +345,7 @@ async function runSbAnalysis() {
     sbCurrentDoc.model = modelId;
     sbCurrentDoc.scenes = data.scenes;
     sbSelectedItem = null;
+    sbCollapsedCats = new Set(['character', 'location', 'prop', 'weapon', 'vehicle', 'timeOfDay', 'scene']);
     renderSbAll();
     sbSaveDocNow();
     sbAnalyzeCooldownUntil = Date.now() + 4000;
@@ -389,6 +355,57 @@ async function runSbAnalysis() {
   } finally {
     btn.disabled = false; btn.textContent = 'Analyze';
   }
+}
+
+// ---------- screenplay text rendering ----------
+// Read-only, locked once a script has been analyzed — editing afterward could silently break
+// scene navigation (headings are matched against this text) and undermine the whole point of
+// a formatted, non-editable "document" view.
+function sbSetTextLocked(locked) {
+  const el = document.getElementById('sbTextInput');
+  el.contentEditable = locked ? 'false' : 'true';
+}
+// Heuristic classifier for text with no known structure (PDF, TXT, pasted text, or a DOCX
+// that didn't use recognized screenplay styles). Splits on blank lines, then guesses each
+// block's role the way most screenplay parsers do: a short all-caps line is a character
+// cue, "(...)"-wrapped is a parenthetical, INT./EXT./scene-number lines are headings, and
+// everything else is either dialogue (if it follows a cue) or action.
+function sbClassifyScriptText(text) {
+  const blocks = (text || '').split(/\n\s*\n+/).map(b => b.trim()).filter(Boolean);
+  const out = [];
+  let prevType = null;
+  for (const block of blocks) {
+    const singleLine = !block.includes('\n');
+    const hasLetters = /[a-zA-Zа-яА-ЯёЁ]/.test(block);
+    const isAllCaps = hasLetters && block === block.toUpperCase();
+    const isHeading = /^(\d+[-.]?\d*\.?\s*)?(ИНТ|НАТ|INT|EXT)[.\s]/i.test(block);
+    const isParenthetical = /^\(.*\)$/.test(block);
+    let type;
+    if (isHeading) type = 'heading';
+    else if (isParenthetical) type = 'paren';
+    else if (singleLine && isAllCaps && block.length <= 40) type = 'character';
+    else if (prevType === 'character' || prevType === 'paren') type = 'dialogue';
+    else type = 'action';
+    out.push({ type, text: block });
+    prevType = type;
+  }
+  return out;
+}
+function sbRenderClassifiedHtml(text) {
+  const classFor = { heading: 'scr-heading', character: 'scr-character', dialogue: 'scr-dialogue', action: 'scr-action', paren: 'scr-paren' };
+  return sbClassifyScriptText(text).map(b => `<p class="${classFor[b.type]}">${sbEscapeHtml(b.text).replace(/\n/g, '<br>')}</p>`).join('');
+}
+function sbRenderScriptText() {
+  const el = document.getElementById('sbTextInput');
+  const locked = !!(sbCurrentDoc && sbCurrentDoc.scenes);
+  sbSetTextLocked(locked);
+  if (!locked) {
+    if (document.activeElement !== el && el.innerText !== (sbCurrentDoc.rawText || '')) {
+      el.innerText = sbCurrentDoc.rawText || '';
+    }
+    return;
+  }
+  el.innerHTML = sbCurrentDoc.structuredHtml || sbRenderClassifiedHtml(sbCurrentDoc.rawText);
 }
 
 // ---------- aggregation (the asset tree is always DERIVED from the per-scene tags the
@@ -489,39 +506,41 @@ function selectSbCategoryItem(type, name) {
   sbSelectedItem = { type, name };
   renderSbTree();
   renderSbInspectorForCategory(type, name);
+  openSbSheet();
 }
 function selectSbScene(idx) {
   sbSelectedItem = { type: 'scene', sceneIdx: idx };
   renderSbTree();
   renderSbInspectorForScene(idx);
   sbJumpToScene(idx);
+  openSbSheet();
+  if (window.matchMedia('(max-width:760px)').matches) switchSbMobilePane('text');
 }
 
-// Searches the ORIGINAL text for the scene's verbatim headingText rather than trusting the
-// model to report exact character positions (positions can't survive re-typing anyway, and
-// this mirrors the same "search, don't trust offsets" approach already used in the
-// in-project SCRIPT tab for highlighting character names).
+// Jump-to-scene only ever runs once a script is analyzed — the text is always in its locked,
+// rendered (structured or heuristic) form at that point, so this looks for the DOM element
+// whose text matches the scene's heading rather than searching raw characters.
 function sbJumpToScene(idx) {
   const el = document.getElementById('sbTextInput');
   if (!el || !sbCurrentDoc) return;
+  el.querySelectorAll('.sb-jump-highlight').forEach(n => n.classList.remove('sb-jump-highlight'));
   const scene = sbCurrentDoc.scenes[idx];
-  const plainText = el.innerText;
-  const escapedHtml = sbEscapeHtml(plainText);
-  if (!scene || !scene.headingText) { el.innerHTML = escapedHtml; return; }
-  const needle = scene.headingText.trim();
-  const pos = needle ? plainText.indexOf(needle) : -1;
-  if (pos === -1) { el.innerHTML = escapedHtml; return; }
-  const before = sbEscapeHtml(plainText.slice(0, pos));
-  const match = sbEscapeHtml(plainText.slice(pos, pos + needle.length));
-  const after = sbEscapeHtml(plainText.slice(pos + needle.length));
-  el.innerHTML = before + '<mark class="script-highlight" id="sbJumpMark">' + match + '</mark>' + after;
-  const mark = document.getElementById('sbJumpMark');
-  if (mark) mark.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  const needle = scene && scene.headingText ? scene.headingText.trim() : '';
+  if (!needle) return;
+  const nodes = el.querySelectorAll('p, div');
+  let target = null;
+  for (const node of nodes) {
+    const t = (node.textContent || '').trim();
+    if (t && (t === needle || t.includes(needle) || needle.includes(t))) { target = node; break; }
+  }
+  if (!target) return;
+  target.classList.add('sb-jump-highlight');
+  target.scrollIntoView({ block: 'center', behavior: 'smooth' });
 }
 
 // ---------- inspector ----------
 function sbInspectorShell(inner) {
-  return `<div class="insp-tabs"><div class="insp-tab" style="cursor:default;">Inspector</div></div>${inner}`;
+  return `<div class="insp-tabs"><div class="insp-tab" style="cursor:default;">Inspector</div><span class="np-close sb-sheet-close" id="sbSheetCloseBtn" style="margin-left:auto;"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></span></div>${inner}`;
 }
 function renderSbInspectorForCategory(type, name) {
   const insp = document.getElementById('sbInspector');
@@ -544,6 +563,7 @@ function renderSbInspectorForCategory(type, name) {
       <div class="gen-hint" style="margin:0 0 10px;">Сцен: ${idxs.length} — кликните, чтобы перейти в тексте</div>
     </div>
     ${listHtml}`);
+  wireSbInspectorShell();
   insp.querySelectorAll('[data-jump-scene]').forEach(el => {
     el.onclick = () => selectSbScene(Number(el.dataset.jumpScene));
   });
@@ -563,9 +583,37 @@ function renderSbInspectorForScene(idx) {
       ${field('Оружие', sc.weapons)}
       ${field('Транспорт', sc.vehicles)}
     </div>`);
+  wireSbInspectorShell();
 }
 function renderSbInspectorEmpty() {
   document.getElementById('sbInspector').innerHTML = sbInspectorShell(`<div class="gen-hint" style="padding:14px;">Кликните на сцену или элемент слева, чтобы увидеть детали здесь.</div>`);
+  wireSbInspectorShell();
+}
+function wireSbInspectorShell() {
+  const closeBtn = document.getElementById('sbSheetCloseBtn');
+  if (closeBtn) closeBtn.onclick = closeSbSheet;
+}
+
+// ---------- mobile bottom sheet (Inspector) ----------
+function openSbSheet() {
+  if (!window.matchMedia('(max-width:760px)').matches) return;
+  document.getElementById('sbInspector').classList.add('sb-sheet-open');
+  document.getElementById('sbSheetBackdrop').classList.add('show');
+}
+function closeSbSheet() {
+  document.getElementById('sbInspector').classList.remove('sb-sheet-open');
+  document.getElementById('sbSheetBackdrop').classList.remove('show');
+}
+
+// ---------- mobile sub-nav (Text / Assets, inside BREAKDOWN) ----------
+function wireSbMobileNav() {
+  document.querySelectorAll('.sb-subtab').forEach(tab => {
+    tab.onclick = () => switchSbMobilePane(tab.dataset.pane);
+  });
+}
+function switchSbMobilePane(pane) {
+  document.querySelectorAll('.sb-subtab').forEach(t => t.classList.toggle('active', t.dataset.pane === pane));
+  document.getElementById('sbBreakdownView').dataset.mobilePane = pane;
 }
 
 // ---------- summary tab ----------
@@ -597,14 +645,61 @@ function renderSbSummary() {
     };
   });
 }
-// Uses the browser's native print-to-PDF rather than a generated-PDF library — jsPDF's
-// built-in fonts have no Cyrillic glyphs, and embedding a font just to print Russian text
-// is a lot of moving parts for something the browser already does correctly for free.
-function exportSbSummaryToPdf() {
+
+// ---------- PDF export (pdfmake, lazy-loaded — its default Roboto font covers Cyrillic out
+// of the box, so this produces a real, selectable-text PDF via a normal "Save File" prompt,
+// no print dialog involved) ----------
+let sbPdfMakeLoading = null;
+function sbLoadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = resolve;
+    s.onerror = () => reject(new Error('Could not load ' + src));
+    document.head.appendChild(s);
+  });
+}
+async function ensurePdfMakeLoaded() {
+  if (window.pdfMake && window.pdfMake.vfs) return window.pdfMake;
+  if (!sbPdfMakeLoading) {
+    sbPdfMakeLoading = (async () => {
+      await sbLoadScript('https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.10/pdfmake.min.js');
+      await sbLoadScript('https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.10/vfs_fonts.js');
+      return window.pdfMake;
+    })();
+  }
+  return sbPdfMakeLoading;
+}
+async function exportSbSummaryToPdf() {
   const scenes = sbCurrentDoc && sbCurrentDoc.scenes;
   if (!scenes || !scenes.length) { alert('Сначала сделайте Analyze.'); return; }
-  switchSbView('summary');
-  setTimeout(() => window.print(), 50);
+  const btn = document.getElementById('sbExportPdfBtn');
+  const originalLabel = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Готовим PDF…';
+  try {
+    const pdfMake = await ensurePdfMakeLoaded();
+    const content = [
+      { text: sbCurrentDoc.title || 'Script Breakdown', fontSize: 16, bold: true, margin: [0, 0, 0, 14] },
+    ];
+    scenes.forEach((sc, idx) => {
+      const metaParts = [sc.location || '—', sc.timeOfDay || '—'];
+      if (sc.characters && sc.characters.length) metaParts.push(sc.characters.join(', '));
+      content.push({ text: `${idx + 1}. ${sc.title || ''}`, fontSize: 13, bold: true, margin: [0, idx ? 14 : 0, 0, 3] });
+      content.push({ text: metaParts.join('   •   '), fontSize: 9, color: '#888888', margin: [0, 0, 0, 6] });
+      content.push({ text: sc.condensedText || '', fontSize: 10.5, margin: [0, 0, 0, 4] });
+    });
+    const docDefinition = {
+      content,
+      defaultStyle: { font: 'Roboto' },
+      pageMargins: [40, 40, 40, 40],
+    };
+    const filename = (sbCurrentDoc.title || 'script-breakdown').replace(/[^\p{L}\p{N}\-_ ]/gu, '').trim() || 'script-breakdown';
+    pdfMake.createPdf(docDefinition).download(filename + '.pdf');
+  } catch (err) {
+    alert('Не удалось собрать PDF: ' + err.message);
+  } finally {
+    btn.disabled = false; btn.textContent = originalLabel;
+  }
 }
 
 // ---------- tabs ----------
@@ -617,6 +712,7 @@ function switchSbView(view) {
   document.querySelectorAll('.page-tabs .page-tab').forEach(t => t.classList.toggle('active', t.dataset.view === view));
   document.getElementById('sbBreakdownView').classList.toggle('hidden', view !== 'breakdown');
   document.getElementById('sbSummaryViewWrap').classList.toggle('hidden', view !== 'summary');
+  if (view !== 'breakdown') closeSbSheet();
 }
 
 // ---------- full re-render ----------
@@ -626,10 +722,7 @@ function updateSbStatusHint() {
   hint.textContent = scenes && scenes.length ? (scenes.length + ' сцен(а)') : '';
 }
 function renderSbAll() {
-  const textEl = document.getElementById('sbTextInput');
-  if (textEl.innerText !== (sbCurrentDoc.rawText || '') && document.activeElement !== textEl) {
-    textEl.innerText = sbCurrentDoc.rawText || '';
-  }
+  sbRenderScriptText();
   document.getElementById('sbModelSelect').value = sbCurrentDoc.model || 'gemini';
   document.getElementById('sbAppTitle').textContent = sbCurrentDoc.title || '';
   updateSbCostHint();
