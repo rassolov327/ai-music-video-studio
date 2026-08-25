@@ -58,11 +58,24 @@
   .sb-empty{padding:50px 20px;text-align:center;color:var(--text-3);font-size:13px;}
   #app.hidden{display:none;}
 
+  /* ---- Light theme (toggle lives in the mobile settings sheet) — overrides the shared
+     dark palette from styles.css; scoped to this page only, doesn't touch take:one itself. ---- */
+  html[data-sb-theme="light"]{
+    --bg-app:#f4f4f2; --bg-panel:#ffffff; --bg-panel-2:#f0f0ed; --bg-elevated:#e9e9e5;
+    --line:#dcdcd7; --line-soft:#e6e6e2;
+    --text-1:#1c1c1a; --text-2:#54554e; --text-3:#8b8c84;
+    --accent:#c17a26; --accent-dim:#f2dfc0; --accent-text:#7c4c15;
+    --ok:#3c8256; --warn:#9c7015; --danger:#b8483d;
+  }
+
   /* ---- Mobile (<=760px): the three-pane Breakdown view collapses to one pane at a time,
      switched via a small sub-tab bar, and the Inspector becomes a bottom sheet instead of a
      third column — the standard "list-detail" adaptive pattern for a layout this shape. ---- */
   .sb-subtabs{display:none;}
   .sb-sheet-backdrop{display:none;}
+  .sb-app-scene-count{display:none;color:var(--text-3);font-size:11px;margin-left:8px;}
+  .sb-settings-sheet{display:none;}
+  .sb-gear-btn{display:none;}
   @media (max-width: 760px){
     .sb-subtabs{
       display:flex;gap:6px;padding:8px 10px;flex:0 0 auto;background:var(--bg-panel);border-bottom:1px solid var(--line);
@@ -94,21 +107,42 @@
     }
     .sb-sheet-backdrop.show{opacity:1;pointer-events:auto;}
 
-    #creditsIndicator{font-size:10px;padding:4px 8px;}
-    #personalBalanceIndicator{bottom:36px;}
+    /* The floating credit badges are replaced by a gear button on mobile — same info,
+       plus upload/theme/search, lives in the settings sheet instead of eating corner space. */
+    #creditsIndicator, #personalBalanceIndicator{display:none;}
     .home-body{padding:20px 16px 40px;}
     .home-hero{padding:32px 20px 24px;}
 
     /* Compact mobile input column: the model choice moves into the Analyze confirm modal
-       (no room for an inline select + cost hint), Clear is dropped, and the upload button
-       takes the slot the plain "Script" label used to occupy. */
+       (no room for an inline select + cost hint), Clear is dropped, the whole header row
+       (label + scene count) is gone — scene count moved to the topbar, upload button moved
+       into the settings sheet. */
     .sb-model-row{display:none;}
     #sbClearBtn{display:none;}
-    .sb-header-label{display:none;}
-    .sb-upload-row{order:-1;}
+    .script-input-header{display:none;}
+    .sb-upload-row{display:none;}
+    .sb-app-scene-count{display:inline;}
+
+    .sb-gear-btn{
+      position:fixed;right:12px;bottom:12px;z-index:900;
+      width:34px;height:34px;border-radius:50%;
+      display:flex;align-items:center;justify-content:center;
+      background:var(--bg-panel);border:1px solid var(--line);color:var(--text-2);
+    }
+    .sb-settings-sheet{
+      display:flex;flex-direction:column;
+      position:fixed;left:0;right:0;bottom:0;top:auto;height:72vh;z-index:960;
+      background:var(--bg-panel);border-top:1px solid var(--line);
+      border-radius:14px 14px 0 0;box-shadow:0 -10px 30px rgba(0,0,0,.45);
+      transform:translateY(105%);transition:transform .2s ease;overflow-y:auto;
+    }
+    .sb-settings-sheet.sb-sheet-open{transform:translateY(0);}
   }
   .sb-insp-scene-title{cursor:pointer;}
   .sb-insp-scene-title:hover{color:var(--accent-text);}
+  .sb-settings-credit-row{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--text-1);padding:6px 0;}
+  .sb-theme-row{display:flex;gap:8px;}
+  .sb-theme-row .sb-subtab{flex:1 1 auto;}
 </style>
 </head>
 <body>
@@ -148,6 +182,7 @@
   <div class="topbar">
     <div class="brand"><i class="ti ti-file-text"></i>Script Breakdown</div>
     <div class="proj-title" id="sbAppTitle"></div>
+    <span class="sb-app-scene-count" id="sbAppSceneCount"></span>
     <div class="sb-topbar-right">
       <span class="save-status" id="sbSaveStatus"></span>
       <button class="tbtn icon-only" id="sbBackHomeBtn" title="Back to scripts"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"></path><path d="M5 10v10a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V10"></path></svg></button>
@@ -222,6 +257,35 @@
     <div class="cf-actions">
       <button class="cf-btn primary" id="sbAnalyzeModalConfirmBtn" style="width:100%;">Analyze</button>
     </div>
+  </div>
+</div>
+
+<button class="tbtn icon-only sb-gear-btn" id="sbSettingsGearBtn" title="Настройки">
+  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+</button>
+<div class="sb-settings-sheet" id="sbSettingsSheet">
+  <div class="insp-tabs">
+    <div class="insp-tab" style="cursor:default;">Настройки</div>
+    <span class="np-close" id="sbSettingsCloseBtn" style="margin-left:auto;"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></span>
+  </div>
+  <div style="padding:14px;">
+    <div class="np-field-title" style="margin-top:0;">Баланс</div>
+    <div id="sbSettingsCredits"></div>
+
+    <div class="np-field-title">Сценарий</div>
+    <button class="cf-btn" id="sbUploadBtnMobile" style="width:100%;">Загрузить сценарий…</button>
+
+    <div class="np-field-title">Тема</div>
+    <div class="sb-theme-row">
+      <div class="sb-subtab" id="sbThemeDarkBtn">Тёмная</div>
+      <div class="sb-subtab" id="sbThemeLightBtn">Светлая</div>
+    </div>
+
+    <div class="np-field-title">Поиск по тексту</div>
+    <div class="cf-field" style="margin-bottom:4px;">
+      <input type="text" id="sbSearchInput" placeholder="Найти в сценарии… (Enter)">
+    </div>
+    <div class="gen-hint" id="sbSearchHint"></div>
   </div>
 </div>
 

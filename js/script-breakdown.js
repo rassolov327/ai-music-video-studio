@@ -113,8 +113,11 @@ async function initSbApp() {
   document.getElementById('sbBackHomeBtn').onclick = showSbHome;
   document.getElementById('sbHomeNewBtn').onclick = () => { newSbDoc(); openSbTool(); };
   document.getElementById('sbExportPdfBtn').onclick = exportSbSummaryToPdf;
-  document.getElementById('sbSheetBackdrop').onclick = closeSbSheet;
+  document.getElementById('sbSheetBackdrop').onclick = closeAllSbSheets;
   wireSbAnalyzeModal();
+  wireSbSettingsSheet();
+  wireSbSearch();
+  sbLoadTheme();
 
   await loadSbModels();
   wireCreditsIndicator();
@@ -266,10 +269,14 @@ function clearSbScript() {
 }
 
 // ---------- file upload (PDF / DOCX / TXT) ----------
+// Two trigger buttons share one hidden file input: the inline one (desktop) and the one
+// inside the mobile settings sheet (where it relocates to on narrow screens).
 function wireSbUpload() {
-  const btn = document.getElementById('sbUploadBtn');
   const input = document.getElementById('sbFileInput');
+  const btn = document.getElementById('sbUploadBtn');
+  const mobileBtn = document.getElementById('sbUploadBtnMobile');
   btn.onclick = () => input.click();
+  mobileBtn.onclick = () => { closeAllSbSheets(); input.click(); };
   input.onchange = async () => {
     const file = input.files[0];
     input.value = '';
@@ -277,7 +284,7 @@ function wireSbUpload() {
     const ext = file.name.toLowerCase().split('.').pop();
     if (!['pdf', 'docx', 'txt'].includes(ext)) { alert('Поддерживаются только PDF, DOCX и TXT.'); return; }
     const originalLabel = btn.textContent;
-    btn.disabled = true; btn.textContent = 'Загрузка…';
+    [btn, mobileBtn].forEach(b => { b.disabled = true; b.textContent = 'Загрузка…'; });
     try {
       const dataUrl = await sbFileToDataUrl(file);
       const res = await fetch('/api/script-breakdown/extract-text', {
@@ -298,7 +305,7 @@ function wireSbUpload() {
     } catch (err) {
       alert('Ошибка: ' + err.message);
     } finally {
-      btn.disabled = false; btn.textContent = originalLabel;
+      [btn, mobileBtn].forEach(b => { b.disabled = false; b.textContent = originalLabel; });
     }
   };
 }
@@ -643,15 +650,98 @@ function sbGoToSceneInText(idx) {
   }
 }
 
-// ---------- mobile bottom sheet (Inspector) ----------
+// ---------- mobile bottom sheets (Inspector + Settings share one backdrop; opening one
+// closes the other, same as any bottom-sheet stack) ----------
 function openSbSheet() {
   if (!window.matchMedia('(max-width:760px)').matches) return;
+  closeSbSettingsSheet();
   document.getElementById('sbInspector').classList.add('sb-sheet-open');
   document.getElementById('sbSheetBackdrop').classList.add('show');
 }
 function closeSbSheet() {
   document.getElementById('sbInspector').classList.remove('sb-sheet-open');
   document.getElementById('sbSheetBackdrop').classList.remove('show');
+}
+function wireSbSettingsSheet() {
+  document.getElementById('sbSettingsGearBtn').onclick = openSbSettingsSheet;
+  document.getElementById('sbSettingsCloseBtn').onclick = closeSbSettingsSheet;
+}
+function openSbSettingsSheet() {
+  closeSbSheet();
+  document.getElementById('sbSettingsSheet').classList.add('sb-sheet-open');
+  document.getElementById('sbSheetBackdrop').classList.add('show');
+  refreshCredits();
+}
+function closeSbSettingsSheet() {
+  document.getElementById('sbSettingsSheet').classList.remove('sb-sheet-open');
+  document.getElementById('sbSheetBackdrop').classList.remove('show');
+}
+function closeAllSbSheets() {
+  closeSbSheet();
+  closeSbSettingsSheet();
+}
+
+// ---------- theme (mobile settings sheet only — a per-viewer preference, so localStorage
+// is the right place for it rather than saving it onto the document) ----------
+function sbApplyTheme(theme) {
+  if (theme === 'light') document.documentElement.dataset.sbTheme = 'light';
+  else delete document.documentElement.dataset.sbTheme;
+  document.getElementById('sbThemeDarkBtn').classList.toggle('active', theme !== 'light');
+  document.getElementById('sbThemeLightBtn').classList.toggle('active', theme === 'light');
+  try { localStorage.setItem('sb_theme', theme); } catch (err) {}
+}
+function sbLoadTheme() {
+  let saved = 'dark';
+  try { saved = localStorage.getItem('sb_theme') || 'dark'; } catch (err) {}
+  sbApplyTheme(saved);
+  document.getElementById('sbThemeDarkBtn').onclick = () => sbApplyTheme('dark');
+  document.getElementById('sbThemeLightBtn').onclick = () => sbApplyTheme('light');
+}
+
+// ---------- search-in-text (mobile settings sheet) ----------
+// Works over the rendered <p class="scr-*"> elements, same as scene jump — meaning it only
+// finds anything once a script is locked (analyzed). Searching the draft/editable text isn't
+// really the point of "find in the script you're reading", so it's not supported there.
+let sbSearchMatches = [];
+let sbSearchIndex = -1;
+function wireSbSearch() {
+  const input = document.getElementById('sbSearchInput');
+  input.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    if (input.value.trim() !== sbSearchQuery) sbRunSearch(input.value);
+    else sbSearchNext();
+  });
+}
+let sbSearchQuery = '';
+function sbRunSearch(query) {
+  sbSearchQuery = (query || '').trim();
+  const hint = document.getElementById('sbSearchHint');
+  document.querySelectorAll('.sb-jump-highlight').forEach(n => n.classList.remove('sb-jump-highlight'));
+  sbSearchMatches = [];
+  sbSearchIndex = -1;
+  if (!sbSearchQuery) { hint.textContent = ''; return; }
+  if (!sbCurrentDoc || !sbCurrentDoc.scenes) { hint.textContent = 'Сначала сделайте Analyze.'; return; }
+  const needle = sbSearchQuery.toLowerCase();
+  const nodes = document.getElementById('sbTextInput').querySelectorAll('p, div');
+  sbSearchMatches = Array.from(nodes).filter(n => (n.textContent || '').toLowerCase().includes(needle));
+  if (!sbSearchMatches.length) { hint.textContent = 'Ничего не найдено.'; return; }
+  sbSearchIndex = 0;
+  sbGoToSearchMatch();
+}
+function sbSearchNext() {
+  if (!sbSearchMatches.length) return;
+  sbSearchIndex = (sbSearchIndex + 1) % sbSearchMatches.length;
+  sbGoToSearchMatch();
+}
+function sbGoToSearchMatch() {
+  document.querySelectorAll('.sb-jump-highlight').forEach(n => n.classList.remove('sb-jump-highlight'));
+  const node = sbSearchMatches[sbSearchIndex];
+  if (!node) return;
+  document.getElementById('sbSearchHint').textContent = `${sbSearchIndex + 1} из ${sbSearchMatches.length} — Enter для следующего`;
+  node.classList.add('sb-jump-highlight');
+  switchSbMobilePane('text');
+  closeSbSettingsSheet();
+  node.scrollIntoView({ block: 'center', behavior: 'smooth' });
 }
 
 // ---------- mobile sub-nav (Text / Assets, inside BREAKDOWN) ----------
@@ -767,9 +857,10 @@ function switchSbView(view) {
 
 // ---------- full re-render ----------
 function updateSbStatusHint() {
-  const hint = document.getElementById('sbStatusHint');
   const scenes = sbCurrentDoc && sbCurrentDoc.scenes;
-  hint.textContent = scenes && scenes.length ? (scenes.length + ' сцен(а)') : '';
+  const text = scenes && scenes.length ? (scenes.length + ' сцен(а)') : '';
+  document.getElementById('sbStatusHint').textContent = text;
+  document.getElementById('sbAppSceneCount').textContent = text;
 }
 function renderSbAll() {
   sbRenderScriptText();
@@ -817,8 +908,10 @@ async function refreshCredits() {
       dot.className = 'credits-dot grey';
       value.textContent = notConfigured ? 'not set up' : 'error';
       el.title = (data && data.message) || 'Could not reach the server — click to retry';
+      renderSbSettingsCredits(null);
       return;
     }
+    renderSbSettingsCredits(data);
     const imagesRemaining = data.imagesRemaining;
     let cls = 'grey';
     if (imagesRemaining === 0) cls = 'red';
@@ -846,7 +939,23 @@ async function refreshCredits() {
     dot.className = 'credits-dot red';
     value.textContent = 'error';
     el.title = 'Could not reach the server to check your balance — click to retry';
+    renderSbSettingsCredits(null);
   } finally {
     spinner.classList.add('hidden');
   }
+}
+// Mirrors the floating credit badges into the mobile settings sheet — same data, one fetch.
+function renderSbSettingsCredits(data) {
+  const wrap = document.getElementById('sbSettingsCredits');
+  if (!wrap) return;
+  if (!data || typeof data.credits !== 'number') {
+    wrap.innerHTML = `<div class="gen-hint">Не удалось получить баланс.</div>`;
+    return;
+  }
+  const unit = data.isAdmin ? ' cr' : ' tokens';
+  let html = `<div class="sb-settings-credit-row"><span class="credits-dot green"></span><span>${data.credits}${unit}</span></div>`;
+  if (data.isAdmin && typeof data.personalBalance === 'number') {
+    html += `<div class="sb-settings-credit-row"><span class="credits-dot green"></span><span>${data.personalBalance} cr (yours)</span></div>`;
+  }
+  wrap.innerHTML = html;
 }
