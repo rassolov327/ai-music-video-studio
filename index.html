@@ -15,8 +15,20 @@
     font-family:-apple-system,Roboto,"Segoe UI",Helvetica,Arial,sans-serif;}
   body{padding-bottom:70px;}
   header{padding:14px 16px 8px;}
+  .headerRow{display:flex;align-items:flex-start;gap:10px;}
+  .iconBtn{background:none;border:0;color:var(--text);font-size:20px;padding:2px 4px;line-height:1;flex-shrink:0;}
   header h1{font-size:17px;margin:0 0 2px;font-weight:600;}
   header p{margin:0;font-size:12px;color:var(--sub);}
+  .menuOverlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:20;}
+  .menuOverlay.open{display:block;}
+  .sideMenu{position:fixed;top:0;left:0;bottom:0;width:min(78vw,300px);background:var(--panel);
+    border-right:1px solid var(--border);z-index:21;padding:16px;transform:translateX(-100%);
+    transition:transform .2s ease;display:flex;flex-direction:column;gap:6px;}
+  .sideMenu.open{transform:translateX(0);}
+  .sideMenu h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--sub);margin:8px 0 10px;}
+  .menuItem{background:none;border:0;color:var(--text);text-align:left;padding:12px 8px;
+    font-size:15px;border-radius:8px;}
+  .menuItem:active{background:var(--panel2);}
   .status{display:inline-block;margin-top:6px;font-size:11px;padding:3px 8px;
     border-radius:20px;background:var(--panel2);color:var(--sub);border:1px solid var(--border);}
   .status.live{color:var(--accent2);border-color:#2a4a35;}
@@ -62,10 +74,21 @@
 <body>
 
 <header>
-  <h1>LM4 Cine Meter</h1>
-  <p>Автономный экспонометр и анализ света для Opple Light Master 4</p>
+  <div class="headerRow">
+    <button id="btnMenu" class="iconBtn" onclick="toggleMenu()" aria-label="Меню">☰</button>
+    <div class="headerTitle">
+      <h1>LM4 Cine Meter</h1>
+      <p>Автономный экспонометр и анализ света для Opple Light Master 4</p>
+    </div>
+  </div>
   <span id="connStatus" class="status">Прибор: ручной ввод (BLE ещё не подключён)</span>
 </header>
+
+<div id="menuOverlay" class="menuOverlay" onclick="toggleMenu()"></div>
+<nav id="sideMenu" class="sideMenu">
+  <h2>Меню</h2>
+  <button class="menuItem" onclick="openCalibFromMenu()">🔗 Калибровка</button>
+</nav>
 
 <main>
 
@@ -122,19 +145,28 @@
 
       <div class="row">
         <div class="field">
-          <label>Желаемая диафрагма T/F (для расчёта ND), опционально</label>
-          <input type="number" id="desiredStop" placeholder="напр. 2.8" inputmode="decimal">
+          <label>ND-фильтр (что уже стоит на объективе)</label>
+          <select id="ndFilter">
+            <option value="0">Без ND</option>
+            <option value="1">ND2 (0.3) — 1 стоп</option>
+            <option value="2">ND4 (0.6) — 2 стопа</option>
+            <option value="3">ND8 (0.9) — 3 стопа</option>
+            <option value="4">ND16 (1.2) — 4 стопа</option>
+            <option value="5">ND32 (1.5) — 5 стопов</option>
+            <option value="6">ND64 (1.8) — 6 стопов</option>
+            <option value="7">ND128 (2.1) — 7 стопов</option>
+            <option value="8">ND256 (2.4) — 8 стопов</option>
+            <option value="9">ND512 (2.7) — 9 стопов</option>
+            <option value="10">ND1000 (3.0) — 10 стопов</option>
+          </select>
         </div>
       </div>
     </div>
 
     <div class="card">
       <h2>Результат</h2>
-      <div class="result"><span class="k">EV (при заданном ISO)</span><span class="v" id="outEV">—</span></div>
-      <div class="result"><span class="k">Рекомендуемая диафрагма при этой выдержке</span><span class="v big" id="outAperture">—</span></div>
-      <div class="result"><span class="k">Нужный ND (если задана желаемая диафрагма)</span><span class="v" id="outND">—</span></div>
-      <div class="result"><span class="k">Ближайший стандартный фильтр</span><span class="v" id="outNDName">—</span></div>
-      <div class="note" id="ndNote"></div>
+      <div class="result"><span class="k">Рекомендуемая диафрагма</span><span class="v big" id="outAperture">—</span></div>
+      <div class="result"><span class="k">EV (с учётом ND)</span><span class="v" id="outEV">—</span></div>
     </div>
 
   </section>
@@ -258,9 +290,6 @@
   <button id="navLight" onclick="showPage('light')">
     <span class="ic">💡</span><span>Свет</span>
   </button>
-  <button id="navCalib" onclick="showPage('calib')">
-    <span class="ic">🔗</span><span>Калибровка</span>
-  </button>
 </nav>
 
 <script>
@@ -279,7 +308,15 @@ function showPage(name){
   document.getElementById('page-'+name).classList.add('active');
   document.getElementById('navCamera').classList.toggle('on', name==='camera');
   document.getElementById('navLight').classList.toggle('on', name==='light');
-  document.getElementById('navCalib').classList.toggle('on', name==='calib');
+}
+
+function toggleMenu(){
+  document.getElementById('sideMenu').classList.toggle('open');
+  document.getElementById('menuOverlay').classList.toggle('open');
+}
+function openCalibFromMenu(){
+  toggleMenu();
+  showPage('calib');
 }
 
 let shutterMode = 'shutter';
@@ -294,11 +331,14 @@ function setShutterMode(mode){
 
 // ---------- exposure math (ISO 2720 incident-light meter equation) ----------
 // Ev(100) = log2( Lux * ISO / C )
+// ND — известный вход (что уже стоит на объективе): каждый стоп ND
+// снижает эффективный Ev на столько же стопов, отдаём диафрагму как результат.
 // N (f-number) at shutter time t (sec):  N = sqrt( t * 2^Ev )
 function calcCamera(){
   const lux = parseFloat(document.getElementById('lux').value) || 0;
   const iso = parseFloat(document.getElementById('iso').value) || 100;
   const C = parseFloat(document.getElementById('calC').value) || 250;
+  const ndStops = parseFloat(document.getElementById('ndFilter').value) || 0;
 
   let t; // seconds
   if(shutterMode === 'shutter'){
@@ -313,69 +353,19 @@ function calcCamera(){
   if(lux <= 0){
     document.getElementById('outEV').textContent = '—';
     document.getElementById('outAperture').textContent = '—';
-    document.getElementById('outND').textContent = '—';
-    document.getElementById('outNDName').textContent = '—';
     return;
   }
 
-  const Ev = Math.log2(lux * iso / C);
+  const Ev = Math.log2(lux * iso / C) - ndStops;
   const N = Math.sqrt(t * Math.pow(2, Ev));
 
   document.getElementById('outEV').textContent = Ev.toFixed(2);
   document.getElementById('outAperture').textContent = 'T/F ' + formatStop(N);
-
-  // ND recommendation
-  const desired = parseFloat(document.getElementById('desiredStop').value);
-  const ndNote = document.getElementById('ndNote');
-  if(desired && desired > 0){
-    // stops to cut = 2*log2(N_needed_at_desired / N_natural)... easier via EV difference
-    const evAtDesired = 2*Math.log2(desired) - Math.log2(t); // EV implied by desired aperture & same shutter
-    const stopsToCut = evAtDesired - Ev;
-    if(stopsToCut <= 0.05){
-      document.getElementById('outND').textContent = 'не нужен';
-      document.getElementById('outNDName').textContent = '—';
-      ndNote.textContent = 'Света и так не хватает или ровно достаточно на желаемой диафрагме — ND не требуется (возможно, наоборот, не хватает света).';
-    } else {
-      const density = stopsToCut * 0.3; // 0.3 density ≈ 1 stop
-      const nd = nearestND(stopsToCut);
-      document.getElementById('outND').textContent = stopsToCut.toFixed(2) + ' ступ. (D≈' + density.toFixed(2) + ')';
-      document.getElementById('outNDName').textContent = nd.name;
-      ndNote.textContent = 'Округлено до ближайшего стандартного шага плотности. Точная нейтральность (без сдвига по зелени/CCT) зависит от конкретного стекла/желатина — дешёвые ND нередко подсвечивают зеленью, стоит перепроверить по прибору после установки.';
-    }
-  } else {
-    document.getElementById('outND').textContent = '—';
-    document.getElementById('outNDName').textContent = '—';
-    ndNote.textContent = 'Укажите желаемую диафрагму, чтобы получить рекомендацию по ND.';
-  }
 }
 
 function formatStop(n){
   // snap to nearest common cine/photo stop label for readability, but show raw too
   return n.toFixed(2);
-}
-
-const ND_TABLE = [
-  {stops:1, density:0.3, name:'ND2 (0.3)'},
-  {stops:2, density:0.6, name:'ND4 (0.6)'},
-  {stops:3, density:0.9, name:'ND8 (0.9)'},
-  {stops:4, density:1.2, name:'ND16 (1.2)'},
-  {stops:5, density:1.5, name:'ND32 (1.5)'},
-  {stops:6, density:1.8, name:'ND64 (1.8)'},
-  {stops:7, density:2.1, name:'ND128 (2.1)'},
-  {stops:8, density:2.4, name:'ND256 (2.4)'},
-  {stops:9, density:2.7, name:'ND512 (2.7)'},
-  {stops:10,density:3.0, name:'ND1000 (3.0)'},
-];
-function nearestND(stops){
-  let best = ND_TABLE[0];
-  for(const row of ND_TABLE){
-    if(Math.abs(row.stops - stops) < Math.abs(best.stops - stops)) best = row;
-  }
-  // if exceeds table, suggest stacking
-  if(stops > ND_TABLE[ND_TABLE.length-1].stops){
-    return {name: best.name + ' + доп. фильтр (сумма стёкол/стек)'};
-  }
-  return best;
 }
 
 // ---------- green/magenta filtration ----------
@@ -447,9 +437,10 @@ function badgeFor(val, thresholds){
 }
 
 // ---------- wire up ----------
-['lux','calC','iso','shutterDenom','shutterAngle','fps','desiredStop'].forEach(id=>{
+['lux','calC','iso','shutterDenom','shutterAngle','fps'].forEach(id=>{
   document.getElementById(id).addEventListener('input', calcCamera);
 });
+document.getElementById('ndFilter').addEventListener('change', calcCamera);
 ['cct','duv','cri','r9'].forEach(id=>{
   document.getElementById(id).addEventListener('input', calcLight);
 });
