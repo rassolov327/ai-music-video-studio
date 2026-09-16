@@ -24,9 +24,11 @@ const MODEL_TABLE = {
   // during the first real run (2026-09-16/17); the request format itself is
   // confirmed correct (matches kie.ai's documented Anthropic Messages shape),
   // so this reads as a transient kie.ai/Anthropic-side issue, not a bug here.
-  // Architecture routed to Gemini as a working fallback while that's flaky.
+  // Architecture AND draft routed to Gemini as a working fallback while
+  // Claude's kie.ai proxy is flaky (confirmed failing on both models, both
+  // phases, across many minutes — not a one-off blip). Revisit once stable.
   architecture: { model: GOOGLE_SLUGS.flash, provider: 'Google' },
-  draft: { model: 'claude-sonnet-5', provider: 'Anthropic' },
+  draft: { model: GOOGLE_SLUGS.pro, provider: 'Google' },
   continuityAudit: { model: GOOGLE_SLUGS.flash, provider: 'Google' },
   canonAudit: { model: GOOGLE_SLUGS.pro, provider: 'Google' },
   redTeam: { model: 'claude-opus-5', provider: 'Anthropic' },
