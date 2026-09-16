@@ -1,8 +1,8 @@
 {
-  "name": "lm4",
+  "name": "book",
   "version": "1.0.0",
   "private": true,
-  "description": "LM4 Cine Meter — standalone static page, served as-is.",
+  "description": "Book — standalone static page, served as-is.",
   "scripts": {
     "start": "node server.js"
   },
