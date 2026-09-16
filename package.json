@@ -2,14 +2,16 @@
   "name": "book",
   "version": "1.0.0",
   "private": true,
-  "description": "Book — standalone static page, served as-is.",
+  "description": "Autonomous novel-writing pipeline: game + author style in, PDF novel out.",
   "scripts": {
-    "start": "node server.js"
+    "start": "node src/server.js"
   },
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
-    "express": "^4.19.2"
+    "express": "^4.22.3",
+    "nodemailer": "^10.0.10",
+    "pdfkit": "^0.20.2"
   }
 }

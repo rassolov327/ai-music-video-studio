@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Фабрика романов</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Автономная фабрика романов</h1>
+    <div id="dryRunBanner" class="banner hidden"></div>
+  </header>
+
+  <section id="formSection">
+    <form id="jobForm">
+      <label>
+        Игра
+        <input type="text" name="game" placeholder="Sanitarium" required>
+      </label>
+      <label>
+        Стиль автора
+        <input type="text" name="style" placeholder="Стивен Кинг" value="Стивен Кинг" required>
+      </label>
+      <label>
+        Объём (слов)
+        <input type="number" name="targetWords" value="100000" min="10000" step="5000" required>
+      </label>
+      <label>
+        Email для готового PDF
+        <input type="email" name="email" placeholder="you@example.com">
+      </label>
+      <button type="submit">Начать</button>
+      <p id="formError" class="error hidden"></p>
+    </form>
+  </section>
+
+  <section id="statusSection" class="hidden">
+    <h2 id="statusTitle">—</h2>
+    <div class="progress">
+      <div id="progressBar" class="progress-bar"></div>
+    </div>
+    <p id="phaseLabel">—</p>
+    <p id="chapterProgress" class="muted"></p>
+    <div id="downloadBox" class="hidden">
+      <a id="downloadLink" href="#" class="button">Скачать PDF</a>
+    </div>
+    <p id="errorBox" class="error hidden"></p>
+    <h3>Логи</h3>
+    <pre id="logPanel"></pre>
+  </section>
+</div>
+<script src="app.js"></script>
+</body>
+</html>
