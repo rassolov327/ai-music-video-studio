@@ -10,7 +10,11 @@ const KIE_API_KEY = process.env.KIE_API_KEY || null;
 // pricing page (2026-09): strong creative model for prose, a huge-context
 // model for whole-manuscript audits, cheap models for mechanical passes.
 const MODEL_TABLE = {
-  architecture: { model: 'claude-opus-5', provider: 'Anthropic' },
+  // claude-opus-5 via kie.ai was returning repeated 503/429 "internal
+  // error" on 2026-09-16/17 during the first real run — using sonnet here
+  // too until that stabilizes. Revisit for the full pipeline once confirmed
+  // reliable again (architecture planning doesn't strictly need Opus).
+  architecture: { model: 'claude-sonnet-5', provider: 'Anthropic' },
   draft: { model: 'claude-sonnet-5', provider: 'Anthropic' },
   continuityAudit: { model: 'Gemini 3.6 Flash', provider: 'Google' },
   canonAudit: { model: 'Gemini 3.1 Pro', provider: 'Google' },
@@ -121,8 +125,10 @@ async function chatComplete({ phase, system, prompt, targetWords = 300 }) {
     if (!res.ok) {
       const errBody = await res.text().catch(() => '');
       lastErr = new Error(`kie.ai request failed (${res.status}) for phase ${phase}: ${errBody.slice(0, 500)}`);
-      if (res.status >= 500 && attempt < MAX_ATTEMPTS) {
-        await new Promise((r) => setTimeout(r, 2000 * attempt));
+      const retryable = res.status >= 500 || res.status === 429;
+      if (retryable && attempt < MAX_ATTEMPTS) {
+        const delay = res.status === 429 ? 8000 * attempt : 2000 * attempt;
+        await new Promise((r) => setTimeout(r, delay));
         continue;
       }
       throw lastErr;
