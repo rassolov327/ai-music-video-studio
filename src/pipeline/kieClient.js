@@ -9,22 +9,31 @@ const KIE_API_KEY = process.env.KIE_API_KEY || null;
 // Which kie.ai model handles which pipeline phase. Chosen from kie.ai's live
 // pricing page (2026-09): strong creative model for prose, a huge-context
 // model for whole-manuscript audits, cheap models for mechanical passes.
+// Google only exposes an OpenAI-compatible chat/completions shim for a
+// couple of specific Gemini variants (confirmed against docs.kie.ai) — any
+// other Gemini display name 422s ("model not supported"). `model` below is
+// the literal slug these two need, not a display name to be slugified.
+const GOOGLE_SLUGS = {
+  flash: 'gemini-3-8-flash-openai',
+  pro: 'gemini-3-pro',
+};
+
 const MODEL_TABLE = {
-  // Both claude-opus-5 and claude-sonnet-5 via kie.ai's /claude/v1/messages
-  // returned repeated identical 503 "Internal error, please try again
-  // later" during the first real run (2026-09-16/17) — looks like kie.ai's
-  // Claude proxy specifically, not a request-format bug (draft never even
-  // got reached). Routing architecture through Gemini instead, both as a
-  // practical workaround and to isolate whether it's Claude-endpoint-wide.
-  architecture: { model: 'Gemini 3.6 Flash', provider: 'Google' },
+  // claude-opus-5 and claude-sonnet-5 both hit repeated identical 503
+  // "Internal error, please try again later" from kie.ai's /claude/v1/messages
+  // during the first real run (2026-09-16/17); the request format itself is
+  // confirmed correct (matches kie.ai's documented Anthropic Messages shape),
+  // so this reads as a transient kie.ai/Anthropic-side issue, not a bug here.
+  // Architecture routed to Gemini as a working fallback while that's flaky.
+  architecture: { model: GOOGLE_SLUGS.flash, provider: 'Google' },
   draft: { model: 'claude-sonnet-5', provider: 'Anthropic' },
-  continuityAudit: { model: 'Gemini 3.6 Flash', provider: 'Google' },
-  canonAudit: { model: 'Gemini 3.1 Pro', provider: 'Google' },
+  continuityAudit: { model: GOOGLE_SLUGS.flash, provider: 'Google' },
+  canonAudit: { model: GOOGLE_SLUGS.pro, provider: 'Google' },
   redTeam: { model: 'claude-opus-5', provider: 'Anthropic' },
   revision: { model: 'claude-sonnet-5', provider: 'Anthropic' },
   literaryEdit: { model: 'claude-opus-5', provider: 'Anthropic' },
   microAudits: { model: 'Claude-Haiku-4-5', provider: 'Anthropic' },
-  proofread: { model: 'gpt-5.6-luna', provider: 'OpenAI' },
+  proofread: { model: 'gpt-5-6-luna', provider: 'OpenAI' }, // confirmed exact slug from docs.kie.ai — dots become hyphens here, unlike Claude/Gemini names
 };
 
 function isDryRun() {
