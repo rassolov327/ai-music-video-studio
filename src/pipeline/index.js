@@ -1,4 +1,5 @@
 const jobStore = require('../jobStore');
+const { isDryRun } = require('./kieClient');
 const research = require('./phases/research');
 const architecture = require('./phases/architecture');
 const draft = require('./phases/draft');
@@ -16,7 +17,7 @@ const { sendPdfEmail } = require('../email/send');
 // to fail the whole job. State is persisted after every phase so a server
 // restart resumes from the next phase (phases like draft/proofread are
 // internally resumable per-chapter too).
-const PHASES = [
+const FULL_PHASES = [
   { key: 'research', label: 'Исследование', run: research.run },
   { key: 'architecture', label: 'Архитектура романа', run: architecture.run },
   { key: 'draft', label: 'Черновик', run: draft.run },
@@ -31,6 +32,22 @@ const PHASES = [
   { key: 'pdf', label: 'Сборка PDF', run: pdfPhase.run },
   { key: 'deliver', label: 'Отправка', run: deliverPhase },
 ];
+
+// A short preview fragment (one chapter): research + a light plan + the
+// chapter itself + proofread + PDF. No audits/revision — those only make
+// sense once there's a full manuscript to check for consistency.
+const SAMPLE_PHASES = [
+  { key: 'research', label: 'Исследование', run: research.run },
+  { key: 'architecture', label: 'Архитектура (глава 1)', run: architecture.run },
+  { key: 'draft', label: 'Черновик главы 1', run: draft.run },
+  { key: 'proofread', label: 'Финальная вычитка', run: proofread.run },
+  { key: 'pdf', label: 'Сборка PDF', run: pdfPhase.run },
+  { key: 'deliver', label: 'Отправка', run: deliverPhase },
+];
+
+function phasesFor(job) {
+  return job.input.mode === 'sample' ? SAMPLE_PHASES : FULL_PHASES;
+}
 
 async function deliverPhase(job) {
   const to = job.input.email;
@@ -57,17 +74,27 @@ async function runJob(jobId) {
     let job = jobStore.getJob(jobId);
     if (!job) throw new Error(`Job ${jobId} not found`);
 
-    jobStore.updateJob(jobId, { status: 'running', error: null });
-    jobStore.appendLog(jobId, `Запуск: игра="${job.input.game}", стиль="${job.input.style}", объём=${job.input.targetWords} слов`);
+    // Real (non-dry-run) generation spends real kie.ai credits and must be
+    // explicitly confirmed by the user first — see POST /api/jobs/:id/confirm.
+    // This check is deliberately re-verified here (not just in the route)
+    // so a server restart can never auto-resume an unconfirmed real job.
+    if (!isDryRun() && !job.confirmed) {
+      jobStore.appendLog(jobId, 'Запуск отклонён: реальная генерация требует подтверждения траты кредитов.');
+      return;
+    }
 
+    jobStore.updateJob(jobId, { status: 'running', error: null });
+    jobStore.appendLog(jobId, `Запуск (${job.input.mode || 'full'}): игра="${job.input.game}", стиль="${job.input.style}", объём=${job.input.targetWords} слов`);
+
+    const phases = phasesFor(job);
     const startIndex = job.phaseIndex || 0;
-    for (let i = startIndex; i < PHASES.length; i++) {
-      const phase = PHASES[i];
+    for (let i = startIndex; i < phases.length; i++) {
+      const phase = phases[i];
       job = jobStore.updateJob(jobId, {
         phaseIndex: i,
         phaseKey: phase.key,
         phaseLabel: phase.label,
-        progressPercent: Math.round((i / PHASES.length) * 100),
+        progressPercent: Math.round((i / phases.length) * 100),
       });
       jobStore.appendLog(jobId, `>>> Фаза: ${phase.label}`);
       await phase.run(job);
@@ -94,4 +121,4 @@ function resumeUnfinishedJobs() {
   }
 }
 
-module.exports = { PHASES, runJob, resumeUnfinishedJobs };
+module.exports = { FULL_PHASES, SAMPLE_PHASES, runJob, resumeUnfinishedJobs };

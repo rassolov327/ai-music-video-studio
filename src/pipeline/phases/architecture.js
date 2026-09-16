@@ -3,10 +3,13 @@ const { chatComplete } = require('../kieClient');
 
 // Turns the Story Bible into a chapter-by-chapter plan sized to the
 // requested word count (~2500 words/chapter is a natural pacing unit).
+// In 'sample' mode (a short preview fragment) we plan just chapter one and
+// skip foreshadowing/motifs — those only make sense across a full book.
 async function run(job) {
-  const { game, style, targetWords, language } = job.input;
-  const chapterLen = 2500;
-  const chapterCount = Math.max(8, Math.round(targetWords / chapterLen));
+  const { game, style, targetWords, language, mode } = job.input;
+  const isSample = mode === 'sample';
+  const chapterLen = isSample ? targetWords : 2500;
+  const chapterCount = isSample ? 1 : Math.max(8, Math.round(targetWords / chapterLen));
 
   jobStore.appendLog(job.id, `Architecture: планирую ${chapterCount} глав (~${chapterLen} слов каждая)`);
 
@@ -18,32 +21,35 @@ async function run(job) {
     phase: 'architecture',
     system:
       'Ты — литературный архитектор. На основе Story Bible построй план романа: тема, ' +
-      'арки персонажей, структура по главам, ключевые повороты, кульминация, финал.',
+      'арки персонажей, структура по главам, ключевые повороты, кульминация, финал.' +
+      (isSample ? ' Это ознакомительный фрагмент — распланируй подробно только первую главу.' : ''),
     prompt:
       `Игра: ${game}\nСтиль: ${style}\nЯзык: ${language}\nЦелевой объём: ${targetWords} слов, ${chapterCount} глав.\n\n` +
       `Story Bible:\n${storyBible}`,
-    targetWords: 1200,
+    targetWords: isSample ? 400 : 1200,
   });
   jobStore.writeFile(job.id, 'planning/novel_architecture.md', architecture);
   jobStore.appendLog(job.id, `Architecture: novel_architecture.md готов (модель ${model})`);
 
-  const { text: foreshadowing } = await chatComplete({
-    phase: 'architecture',
-    system: 'Составь базу форшедоуинга: ключевые разгадки и где их подготовить заранее.',
-    prompt: architecture,
-    targetWords: 400,
-  });
-  jobStore.writeFile(job.id, 'planning/foreshadowing.md', foreshadowing);
+  if (!isSample) {
+    const { text: foreshadowing } = await chatComplete({
+      phase: 'architecture',
+      system: 'Составь базу форшедоуинга: ключевые разгадки и где их подготовить заранее.',
+      prompt: architecture,
+      targetWords: 400,
+    });
+    jobStore.writeFile(job.id, 'planning/foreshadowing.md', foreshadowing);
 
-  const { text: motifs } = await chatComplete({
-    phase: 'architecture',
-    system: 'Составь базу повторяющихся мотивов (образы, предметы, фразы).',
-    prompt: architecture,
-    targetWords: 300,
-  });
-  jobStore.writeFile(job.id, 'planning/motifs.md', motifs);
+    const { text: motifs } = await chatComplete({
+      phase: 'architecture',
+      system: 'Составь базу повторяющихся мотивов (образы, предметы, фразы).',
+      prompt: architecture,
+      targetWords: 300,
+    });
+    jobStore.writeFile(job.id, 'planning/motifs.md', motifs);
 
-  jobStore.appendLog(job.id, 'Architecture: foreshadowing.md и motifs.md готовы');
+    jobStore.appendLog(job.id, 'Architecture: foreshadowing.md и motifs.md готовы');
+  }
 
   // Build a simple per-chapter brief list for the draft phase to consume.
   const chapters = Array.from({ length: chapterCount }, (_, i) => ({

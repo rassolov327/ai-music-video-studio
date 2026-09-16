@@ -1,20 +1,26 @@
-const formSection = document.getElementById('formSection');
+const emptySection = document.getElementById('emptySection');
 const statusSection = document.getElementById('statusSection');
-const jobForm = document.getElementById('jobForm');
-const formError = document.getElementById('formError');
 const statusTitle = document.getElementById('statusTitle');
 const progressBar = document.getElementById('progressBar');
 const phaseLabel = document.getElementById('phaseLabel');
 const chapterProgress = document.getElementById('chapterProgress');
 const downloadBox = document.getElementById('downloadBox');
 const downloadLink = document.getElementById('downloadLink');
+const confirmBox = document.getElementById('confirmBox');
+const costEstimateText = document.getElementById('costEstimateText');
+const confirmBtn = document.getElementById('confirmBtn');
+const cancelBtn = document.getElementById('cancelBtn');
 const errorBox = document.getElementById('errorBox');
 const logPanel = document.getElementById('logPanel');
 const dryRunBanner = document.getElementById('dryRunBanner');
+const creditsLine = document.getElementById('creditsLine');
 
-const JOB_KEY = 'novelFactoryJobId';
+let currentJobId = null;
 
 async function init() {
+  refreshCredits();
+  setInterval(refreshCredits, 60000);
+
   try {
     const status = await fetch('/api/status').then((r) => r.json());
     if (status.dryRun) {
@@ -23,42 +29,30 @@ async function init() {
     }
   } catch {}
 
-  const savedId = localStorage.getItem(JOB_KEY);
-  if (savedId) {
-    const job = await fetch(`/api/jobs/${savedId}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
-    if (job) return showStatus(job.id);
-  }
-
   const jobs = await fetch('/api/jobs').then((r) => r.json()).catch(() => []);
-  const active = jobs.find((j) => j.status === 'running' || j.status === 'pending');
-  if (active) return showStatus(active.id);
-}
-
-jobForm.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  formError.classList.add('hidden');
-  const data = Object.fromEntries(new FormData(jobForm).entries());
-  const res = await fetch('/api/jobs', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  });
-  const body = await res.json();
-  if (!res.ok) {
-    formError.textContent = body.error || 'Не удалось запустить.';
-    formError.classList.remove('hidden');
+  if (jobs.length === 0) {
+    emptySection.classList.remove('hidden');
     return;
   }
-  showStatus(body.id);
-});
+  showStatus(jobs[0].id); // listJobs() is sorted newest-first
+}
 
-function phaseIndexTotal() {
-  return 13; // keep in sync with server PHASES length, for display only
+async function refreshCredits() {
+  try {
+    const data = await fetch('/api/kie-balance').then((r) => r.json());
+    if (!data.available) {
+      creditsLine.textContent = data.error ? `Баланс kie.ai: ошибка (${data.error})` : 'Баланс kie.ai: —';
+    } else {
+      creditsLine.textContent = `Баланс kie.ai: ${data.credits} кредитов`;
+    }
+  } catch {
+    creditsLine.textContent = 'Баланс kie.ai: недоступен';
+  }
 }
 
 function showStatus(jobId) {
-  localStorage.setItem(JOB_KEY, jobId);
-  formSection.classList.add('hidden');
+  currentJobId = jobId;
+  emptySection.classList.add('hidden');
   statusSection.classList.remove('hidden');
   logPanel.textContent = '';
 
@@ -71,13 +65,10 @@ function showStatus(jobId) {
   es.addEventListener('state', (e) => {
     const job = JSON.parse(e.data);
     renderState(job);
-    if (job.status === 'done' || job.status === 'error') {
+    if (['done', 'error', 'cancelled'].includes(job.status)) {
       es.close();
     }
   });
-  es.onerror = () => {
-    // EventSource auto-reconnects; nothing to do.
-  };
 }
 
 function renderState(job) {
@@ -88,16 +79,43 @@ function renderState(job) {
     ? `Глав написано: ${job.chaptersWritten || 0} / ${job.chaptersTotal}`
     : '';
 
+  if (job.status === 'awaiting_confirmation' && job.costEstimate) {
+    const e = job.costEstimate;
+    costEstimateText.textContent =
+      `Примерная стоимость: $${e.lowUsd}–$${e.highUsd} (~${e.lowCredits}–${e.highCredits} кредитов kie.ai), ` +
+      `${e.chapterCount} глав, ~${e.manuscriptWords.toLocaleString('ru-RU')} слов черновика.`;
+    confirmBox.classList.remove('hidden');
+  } else {
+    confirmBox.classList.add('hidden');
+  }
+
   if (job.status === 'done') {
     downloadBox.classList.remove('hidden');
     downloadLink.href = `/api/jobs/${job.id}/download`;
+  } else {
+    downloadBox.classList.add('hidden');
   }
+
   if (job.status === 'error') {
     errorBox.textContent = `Ошибка: ${job.error}`;
+    errorBox.classList.remove('hidden');
+  } else if (job.status === 'cancelled') {
+    errorBox.textContent = 'Запуск отменён.';
     errorBox.classList.remove('hidden');
   } else {
     errorBox.classList.add('hidden');
   }
 }
+
+confirmBtn.addEventListener('click', async () => {
+  confirmBtn.disabled = true;
+  await fetch(`/api/jobs/${currentJobId}/confirm`, { method: 'POST' });
+  confirmBtn.disabled = false;
+});
+
+cancelBtn.addEventListener('click', async () => {
+  await fetch(`/api/jobs/${currentJobId}/cancel`, { method: 'POST' });
+  location.reload();
+});
 
 init();

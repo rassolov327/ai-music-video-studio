@@ -2,7 +2,8 @@ const express = require('express');
 const path = require('path');
 const jobStore = require('./jobStore');
 const pipeline = require('./pipeline');
-const { isDryRun } = require('./pipeline/kieClient');
+const { isDryRun, getCreditBalance } = require('./pipeline/kieClient');
+const { estimateCost } = require('./pipeline/costEstimate');
 const { smtpConfigured } = require('./email/send');
 
 const app = express();
@@ -29,26 +30,64 @@ if (APP_USER && APP_PASSWORD) {
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
 // --- API ---
+const ACTIVE_STATUSES = ['awaiting_confirmation', 'running', 'pending'];
+
 app.post('/api/jobs', (req, res) => {
-  const { game, style, targetWords, language, email } = req.body || {};
+  const { game, style, targetWords, language, email, mode } = req.body || {};
   if (!game || !style) {
     return res.status(400).json({ error: 'Нужно указать игру и стиль автора.' });
   }
-  const active = jobStore.listJobs().find((j) => j.status === 'running' || j.status === 'pending');
+  const active = jobStore.listJobs().find((j) => ACTIVE_STATUSES.includes(j.status));
   if (active) {
     return res.status(409).json({ error: 'Уже выполняется другая книга. Дождитесь завершения.', jobId: active.id });
   }
 
-  const job = jobStore.createJob({
+  const input = {
     game: String(game).trim(),
     style: String(style).trim(),
     targetWords: Number(targetWords) || 100000,
     language: language ? String(language).trim() : 'ru',
     email: email ? String(email).trim() : null,
-  });
+    mode: mode === 'sample' ? 'sample' : 'full',
+  };
 
+  const job = jobStore.createJob(input);
+  const costEstimate = estimateCost({ targetWords: input.targetWords, mode: input.mode });
+
+  if (isDryRun()) {
+    // Nothing real is spent — start immediately, no confirmation needed.
+    jobStore.updateJob(job.id, { costEstimate });
+    pipeline.runJob(job.id);
+  } else {
+    // Real kie.ai credits would be spent — wait for explicit confirmation.
+    jobStore.updateJob(job.id, { status: 'awaiting_confirmation', costEstimate });
+    jobStore.appendLog(job.id, `Оценка стоимости: ~$${costEstimate.lowUsd}–$${costEstimate.highUsd} (~${costEstimate.lowCredits}–${costEstimate.highCredits} кредитов kie.ai). Жду подтверждения.`);
+  }
+
+  res.json(jobStore.getJob(job.id));
+});
+
+app.post('/api/jobs/:id/confirm', (req, res) => {
+  const job = jobStore.getJob(req.params.id);
+  if (!job) return res.status(404).json({ error: 'not found' });
+  if (job.status !== 'awaiting_confirmation') {
+    return res.status(409).json({ error: 'Эта книга не ждёт подтверждения.' });
+  }
+  jobStore.updateJob(job.id, { confirmed: true, status: 'pending' });
+  jobStore.appendLog(job.id, 'Подтверждено: запускаю реальную генерацию через kie.ai.');
   pipeline.runJob(job.id);
-  res.json(job);
+  res.json(jobStore.getJob(job.id));
+});
+
+app.post('/api/jobs/:id/cancel', (req, res) => {
+  const job = jobStore.getJob(req.params.id);
+  if (!job) return res.status(404).json({ error: 'not found' });
+  if (job.status !== 'awaiting_confirmation') {
+    return res.status(409).json({ error: 'Отменить можно только книгу, ожидающую подтверждения.' });
+  }
+  jobStore.updateJob(job.id, { status: 'cancelled' });
+  jobStore.appendLog(job.id, 'Отменено пользователем до траты кредитов.');
+  res.json(jobStore.getJob(job.id));
 });
 
 app.get('/api/jobs', (req, res) => {
@@ -101,6 +140,16 @@ app.get('/api/jobs/:id/download', (req, res) => {
 
 app.get('/api/status', (req, res) => {
   res.json({ dryRun: isDryRun(), emailConfigured: smtpConfigured() });
+});
+
+let balanceCache = { at: 0, data: null };
+app.get('/api/kie-balance', async (req, res) => {
+  if (Date.now() - balanceCache.at < 30000 && balanceCache.data) {
+    return res.json(balanceCache.data);
+  }
+  const data = await getCreditBalance().catch((err) => ({ available: false, error: String(err.message || err) }));
+  balanceCache = { at: Date.now(), data };
+  res.json(data);
 });
 
 const PORT = process.env.PORT || 3000;

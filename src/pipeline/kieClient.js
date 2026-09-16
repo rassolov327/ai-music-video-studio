@@ -3,7 +3,7 @@
 // filler text so the rest of the pipeline (files, PDF, logs, email) can be
 // exercised end-to-end for free.
 
-const KIE_API_BASE = process.env.KIE_API_BASE || 'https://api.kie.ai/v1';
+const KIE_API_BASE = process.env.KIE_API_BASE || 'https://api.kie.ai';
 const KIE_API_KEY = process.env.KIE_API_KEY || null;
 
 // Which kie.ai model handles which pipeline phase. Chosen from kie.ai's live
@@ -102,27 +102,99 @@ async function chatComplete({ phase, system, prompt, targetWords = 300 }) {
     };
   }
 
-  const res = await fetch(`${KIE_API_BASE}/chat/completions`, {
+  const { url, body, extractText } = buildRequest(route, system, prompt);
+  const res = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${KIE_API_KEY}`,
     },
-    body: JSON.stringify({
-      model: route.model,
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => '');
+    throw new Error(`kie.ai request failed (${res.status}) for phase ${phase}: ${errBody.slice(0, 500)}`);
+  }
+  const data = await res.json();
+  // kie.ai's gateway returns HTTP 200 even on its own errors (bad key,
+  // rate limit, etc) — the real outcome is in a numeric top-level `code`
+  // field (200 = ok). Native provider success responses never have this
+  // field, so its presence+non-200 value unambiguously means a gateway
+  // error, not a real model response.
+  if (typeof data.code === 'number' && data.code !== 200) {
+    throw new Error(`kie.ai error (code ${data.code}) for phase ${phase}: ${data.msg || 'unknown error'}`);
+  }
+  const text = extractText(data);
+  if (!text) {
+    throw new Error(`kie.ai returned an empty response for phase ${phase} (model ${route.model}) — check response shape: ${JSON.stringify(data).slice(0, 300)}`);
+  }
+  return { text, model: route.model, dryRun: false };
+}
+
+// kie.ai doesn't expose one uniform chat-completions endpoint — each
+// provider family uses its own path and native request/response shape.
+// Confirmed against docs.kie.ai (2026-09): Claude -> Anthropic Messages API,
+// GPT -> OpenAI Responses API, Gemini -> OpenAI Chat Completions API.
+// Re-verify against the live docs before the first real paid run — these
+// shift as kie.ai adds model versions.
+function buildRequest(route, system, prompt) {
+  const slug = route.model.toLowerCase().replace(/\s+/g, '-');
+
+  if (route.provider === 'Anthropic') {
+    return {
+      url: `${KIE_API_BASE}/claude/v1/messages`,
+      body: {
+        model: route.model,
+        max_tokens: 8192,
+        system: system || '',
+        messages: [{ role: 'user', content: prompt }],
+      },
+      extractText: (data) => (data.content || []).map((b) => b.text || '').join(''),
+    };
+  }
+
+  if (route.provider === 'OpenAI') {
+    return {
+      url: `${KIE_API_BASE}/codex/v1/responses`,
+      body: {
+        model: slug,
+        input: [
+          { role: 'system', content: [{ type: 'input_text', text: system || '' }] },
+          { role: 'user', content: [{ type: 'input_text', text: prompt }] },
+        ],
+      },
+      extractText: (data) => {
+        const msg = (data.output || []).find((o) => o.type === 'message');
+        return (msg?.content || []).map((c) => c.text || '').join('');
+      },
+    };
+  }
+
+  // Google / Gemini
+  return {
+    url: `${KIE_API_BASE}/${slug}/v1/chat/completions`,
+    body: {
+      model: slug,
       messages: [
         { role: 'system', content: system || '' },
         { role: 'user', content: prompt },
       ],
-    }),
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`kie.ai request failed (${res.status}) for phase ${phase}: ${body.slice(0, 500)}`);
-  }
-  const data = await res.json();
-  const text = data.choices?.[0]?.message?.content || '';
-  return { text, model: route.model, dryRun: false };
+    },
+    extractText: (data) => data.choices?.[0]?.message?.content || '',
+  };
 }
 
-module.exports = { chatComplete, isDryRun, MODEL_TABLE };
+async function getCreditBalance() {
+  if (!KIE_API_KEY) return { available: false };
+  const res = await fetch(`${KIE_API_BASE}/api/v1/chat/credit`, {
+    headers: { Authorization: `Bearer ${KIE_API_KEY}` },
+  });
+  // kie.ai returns HTTP 200 even on auth failure — the real result is in
+  // the JSON body's own `code` field, not the HTTP status.
+  if (!res.ok) return { available: false, error: `HTTP ${res.status}` };
+  const data = await res.json();
+  if (data.code !== 200) return { available: false, error: data.msg || `code ${data.code}` };
+  return { available: true, credits: data.data };
+}
+
+module.exports = { chatComplete, isDryRun, MODEL_TABLE, getCreditBalance };

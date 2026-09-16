@@ -9,31 +9,13 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>Автономная фабрика романов</h1>
+    <h1>Фабрика романов — монитор</h1>
     <div id="dryRunBanner" class="banner hidden"></div>
+    <p id="creditsLine" class="muted">Баланс kie.ai: —</p>
   </header>
 
-  <section id="formSection">
-    <form id="jobForm">
-      <label>
-        Игра
-        <input type="text" name="game" placeholder="Sanitarium" required>
-      </label>
-      <label>
-        Стиль автора
-        <input type="text" name="style" placeholder="Стивен Кинг" value="Стивен Кинг" required>
-      </label>
-      <label>
-        Объём (слов)
-        <input type="number" name="targetWords" value="100000" min="10000" step="5000" required>
-      </label>
-      <label>
-        Email для готового PDF
-        <input type="email" name="email" placeholder="you@example.com">
-      </label>
-      <button type="submit">Начать</button>
-      <p id="formError" class="error hidden"></p>
-    </form>
+  <section id="emptySection" class="hidden">
+    <p class="muted">Активной книги нет. Задачи ставятся через чат с Клодом — эта страница только показывает ход работы.</p>
   </section>
 
   <section id="statusSection" class="hidden">
@@ -43,6 +25,12 @@
     </div>
     <p id="phaseLabel">—</p>
     <p id="chapterProgress" class="muted"></p>
+    <div id="confirmBox" class="hidden confirm-box">
+      <p><strong>Требуется подтверждение траты кредитов kie.ai.</strong></p>
+      <p id="costEstimateText" class="muted"></p>
+      <button id="confirmBtn" type="button">Подтвердить и запустить</button>
+      <button id="cancelBtn" type="button" class="secondary">Отменить</button>
+    </div>
     <div id="downloadBox" class="hidden">
       <a id="downloadLink" href="#" class="button">Скачать PDF</a>
     </div>

@@ -116,3 +116,19 @@ button, .button {
 }
 
 #downloadBox { margin: 16px 0; }
+
+.confirm-box {
+  margin: 16px 0;
+  padding: 14px;
+  background: #241b0f;
+  border: 1px solid #6b5420;
+  border-radius: 8px;
+}
+
+.confirm-box button { margin-right: 10px; margin-top: 8px; }
+
+button.secondary {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+}

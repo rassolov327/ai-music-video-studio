@@ -4,7 +4,7 @@ const PDFDocument = require('pdfkit');
 
 const FONTS_DIR = path.join(__dirname, '..', '..', 'fonts');
 
-const MARGIN = 72; // 1 inch
+const MARGIN = 50; // book-like density on A5 — 1 inch (72pt) reads as sparse/bloated on this trim size
 
 function registerFonts(doc) {
   doc.registerFont('Body', path.join(FONTS_DIR, 'PTSerif-Regular.ttf'));
@@ -81,13 +81,20 @@ function renderNovelPdf({ title, author, chapters, outPath }) {
     }
 
     // --- Page numbers on every page except the title page ---
+    // Drawing this close to the bottom edge sits inside pdfkit's bottom
+    // margin, which otherwise makes .text() think the content overflows
+    // and silently starts a new page (doubled our page count end to end).
+    // Zeroing the margin just for this call keeps it on the current page.
     const range = doc.bufferedPageRange();
     for (let i = range.start; i < range.start + range.count; i++) {
       if (i === 0) continue;
       doc.switchToPage(i);
+      const originalBottom = doc.page.margins.bottom;
+      doc.page.margins.bottom = 0;
       doc.font('Body').fontSize(9).text(String(i + 1), 0, doc.page.height - MARGIN + 20, {
         align: 'center',
       });
+      doc.page.margins.bottom = originalBottom;
     }
 
     doc.end();

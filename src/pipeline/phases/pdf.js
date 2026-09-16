@@ -14,7 +14,10 @@ async function run(job) {
     body: jobStore.readFile(job.id, `manuscript/${f}`),
   }));
 
-  const title = `Роман по мотивам «${job.input.game}»`;
+  const isSample = job.input.mode === 'sample';
+  const title = isSample
+    ? `«${job.input.game}» — ознакомительный фрагмент`
+    : `Роман по мотивам «${job.input.game}»`;
   const author = `Литературные качества в духе: ${job.input.style}`;
 
   const pdfPath = jobStore.jobDir(job.id, 'final', 'FINAL_NOVEL.pdf');

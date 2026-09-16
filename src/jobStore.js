@@ -38,7 +38,9 @@ function createJob(input) {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     input,
-    status: 'pending', // pending | running | done | error
+    status: 'pending', // awaiting_confirmation | pending | running | done | error | cancelled
+    confirmed: false,
+    costEstimate: null,
     phaseIndex: 0,
     phaseKey: null,
     phaseLabel: null,
