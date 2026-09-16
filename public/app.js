@@ -11,6 +11,7 @@ const costEstimateText = document.getElementById('costEstimateText');
 const confirmBtn = document.getElementById('confirmBtn');
 const cancelBtn = document.getElementById('cancelBtn');
 const errorBox = document.getElementById('errorBox');
+const retryBtn = document.getElementById('retryBtn');
 const logPanel = document.getElementById('logPanel');
 const dryRunBanner = document.getElementById('dryRunBanner');
 const creditsLine = document.getElementById('creditsLine');
@@ -99,13 +100,23 @@ function renderState(job) {
   if (job.status === 'error') {
     errorBox.textContent = `Ошибка: ${job.error}`;
     errorBox.classList.remove('hidden');
+    retryBtn.classList.remove('hidden');
   } else if (job.status === 'cancelled') {
     errorBox.textContent = 'Запуск отменён.';
     errorBox.classList.remove('hidden');
+    retryBtn.classList.add('hidden');
   } else {
     errorBox.classList.add('hidden');
+    retryBtn.classList.add('hidden');
   }
 }
+
+retryBtn.addEventListener('click', async () => {
+  retryBtn.disabled = true;
+  await fetch(`/api/jobs/${currentJobId}/retry`, { method: 'POST' });
+  retryBtn.disabled = false;
+  showStatus(currentJobId); // reopen the log/status stream, closed when it errored
+});
 
 confirmBtn.addEventListener('click', async () => {
   confirmBtn.disabled = true;

@@ -79,6 +79,20 @@ app.post('/api/jobs/:id/confirm', (req, res) => {
   res.json(jobStore.getJob(job.id));
 });
 
+app.post('/api/jobs/:id/retry', (req, res) => {
+  const job = jobStore.getJob(req.params.id);
+  if (!job) return res.status(404).json({ error: 'not found' });
+  if (job.status !== 'error') {
+    return res.status(409).json({ error: 'Повторить можно только книгу с ошибкой.' });
+  }
+  // Resumes from job.phaseIndex (the phase that failed), not from scratch —
+  // already-confirmed spend isn't re-authorized, just continued.
+  jobStore.updateJob(job.id, { status: 'pending', error: null });
+  jobStore.appendLog(job.id, 'Повтор после ошибки — возобновляю с фазы, на которой остановились.');
+  pipeline.runJob(job.id);
+  res.json(jobStore.getJob(job.id));
+});
+
 app.post('/api/jobs/:id/cancel', (req, res) => {
   const job = jobStore.getJob(req.params.id);
   if (!job) return res.status(404).json({ error: 'not found' });
