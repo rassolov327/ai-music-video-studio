@@ -203,6 +203,7 @@ function buildRequest(route, system, prompt) {
       url: `${KIE_API_BASE}/codex/v1/responses`,
       body: {
         model: slug,
+        stream: false,
         input: [
           { role: 'system', content: [{ type: 'input_text', text: system || '' }] },
           { role: 'user', content: [{ type: 'input_text', text: prompt }] },
