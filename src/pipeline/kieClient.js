@@ -10,11 +10,13 @@ const KIE_API_KEY = process.env.KIE_API_KEY || null;
 // pricing page (2026-09): strong creative model for prose, a huge-context
 // model for whole-manuscript audits, cheap models for mechanical passes.
 const MODEL_TABLE = {
-  // claude-opus-5 via kie.ai was returning repeated 503/429 "internal
-  // error" on 2026-09-16/17 during the first real run — using sonnet here
-  // too until that stabilizes. Revisit for the full pipeline once confirmed
-  // reliable again (architecture planning doesn't strictly need Opus).
-  architecture: { model: 'claude-sonnet-5', provider: 'Anthropic' },
+  // Both claude-opus-5 and claude-sonnet-5 via kie.ai's /claude/v1/messages
+  // returned repeated identical 503 "Internal error, please try again
+  // later" during the first real run (2026-09-16/17) — looks like kie.ai's
+  // Claude proxy specifically, not a request-format bug (draft never even
+  // got reached). Routing architecture through Gemini instead, both as a
+  // practical workaround and to isolate whether it's Claude-endpoint-wide.
+  architecture: { model: 'Gemini 3.6 Flash', provider: 'Google' },
   draft: { model: 'claude-sonnet-5', provider: 'Anthropic' },
   continuityAudit: { model: 'Gemini 3.6 Flash', provider: 'Google' },
   canonAudit: { model: 'Gemini 3.1 Pro', provider: 'Google' },
