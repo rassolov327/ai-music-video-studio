@@ -6,6 +6,11 @@ const { isDryRun, getCreditBalance } = require('./pipeline/kieClient');
 const { estimateCost } = require('./pipeline/costEstimate');
 const { smtpConfigured } = require('./email/send');
 
+// Log-and-survive instead of letting Node crash the whole process (and
+// silently drop any in-flight job) over one bad promise/exception.
+process.on('unhandledRejection', (err) => console.error('unhandledRejection:', err));
+process.on('uncaughtException', (err) => console.error('uncaughtException:', err));
+
 const app = express();
 app.use(express.json());
 
