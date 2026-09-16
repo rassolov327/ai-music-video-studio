@@ -103,32 +103,58 @@ async function chatComplete({ phase, system, prompt, targetWords = 300 }) {
   }
 
   const { url, body, extractText } = buildRequest(route, system, prompt);
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${KIE_API_KEY}`,
-    },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const errBody = await res.text().catch(() => '');
-    throw new Error(`kie.ai request failed (${res.status}) for phase ${phase}: ${errBody.slice(0, 500)}`);
+
+  // Upstream providers occasionally return a transient 5xx ("internal
+  // error, try again later") — retry a few times with backoff before
+  // giving up, rather than failing the whole job over a blip.
+  const MAX_ATTEMPTS = 4;
+  let lastErr;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${KIE_API_KEY}`,
+      },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      lastErr = new Error(`kie.ai request failed (${res.status}) for phase ${phase}: ${errBody.slice(0, 500)}`);
+      if (res.status >= 500 && attempt < MAX_ATTEMPTS) {
+        await new Promise((r) => setTimeout(r, 2000 * attempt));
+        continue;
+      }
+      throw lastErr;
+    }
+
+    const data = await res.json();
+    // kie.ai's gateway returns HTTP 200 even on its own errors (bad key,
+    // rate limit, transient upstream failure) — the real outcome is in a
+    // numeric top-level `code` field (200 = ok). Native provider success
+    // responses never have this field, so its presence+non-200 value
+    // unambiguously means a gateway error, not a real model response.
+    if (typeof data.code === 'number' && data.code !== 200) {
+      lastErr = new Error(`kie.ai error (code ${data.code}) for phase ${phase}: ${data.msg || 'unknown error'}`);
+      if (data.code >= 500 && attempt < MAX_ATTEMPTS) {
+        await new Promise((r) => setTimeout(r, 2000 * attempt));
+        continue;
+      }
+      throw lastErr;
+    }
+
+    const text = extractText(data);
+    if (!text) {
+      lastErr = new Error(`kie.ai returned an empty response for phase ${phase} (model ${route.model}) — check response shape: ${JSON.stringify(data).slice(0, 300)}`);
+      if (attempt < MAX_ATTEMPTS) {
+        await new Promise((r) => setTimeout(r, 2000 * attempt));
+        continue;
+      }
+      throw lastErr;
+    }
+    return { text, model: route.model, dryRun: false };
   }
-  const data = await res.json();
-  // kie.ai's gateway returns HTTP 200 even on its own errors (bad key,
-  // rate limit, etc) — the real outcome is in a numeric top-level `code`
-  // field (200 = ok). Native provider success responses never have this
-  // field, so its presence+non-200 value unambiguously means a gateway
-  // error, not a real model response.
-  if (typeof data.code === 'number' && data.code !== 200) {
-    throw new Error(`kie.ai error (code ${data.code}) for phase ${phase}: ${data.msg || 'unknown error'}`);
-  }
-  const text = extractText(data);
-  if (!text) {
-    throw new Error(`kie.ai returned an empty response for phase ${phase} (model ${route.model}) — check response shape: ${JSON.stringify(data).slice(0, 300)}`);
-  }
-  return { text, model: route.model, dryRun: false };
+  throw lastErr;
 }
 
 // kie.ai doesn't expose one uniform chat-completions endpoint — each
