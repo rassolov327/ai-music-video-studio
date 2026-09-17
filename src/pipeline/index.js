@@ -31,16 +31,22 @@ const SETUP_PHASES = [
   { key: 'architecture', label: 'Архитектура романа', run: architecture.run },
 ];
 
+// Only `draft` (the actual content) and `pdf`/`deliverBatch` (the delivery
+// of whatever content exists) are load-bearing. Everything between is a
+// quality pass — valuable when it works, but kie.ai has been intermittently
+// unreliable tonight, and a chapter is already a complete, readable chapter
+// before any of these run. Marked `optional` so one hung/failed audit can't
+// block the user from getting the batch at all.
 function batchPhases(fromChapter, toChapter) {
   return [
     { key: 'draft', label: `Черновик (главы ${fromChapter}-${toChapter})`, run: (job) => draft.run(job, { fromChapter, toChapter }) },
-    { key: 'continuityAudit', label: 'Проверка непрерывности блока', run: (job) => continuityAudit.run(job, { fromChapter, toChapter }) },
-    { key: 'canonAudit', label: 'Проверка канона блока', run: (job) => canonAudit.run(job, { fromChapter, toChapter }) },
-    { key: 'redTeam', label: 'Red team блока', run: (job) => redTeam.run(job, { fromChapter, toChapter }) },
-    { key: 'revision', label: 'Правки блока', run: (job) => revision.run(job, { fromChapter, toChapter }) },
-    { key: 'literaryEdit', label: 'Литературная редактура блока', run: (job) => literaryEdit.run(job, { fromChapter, toChapter }) },
-    { key: 'microAudits', label: 'Точечные проверки блока', run: (job) => microAudits.run(job, { fromChapter, toChapter }) },
-    { key: 'proofread', label: 'Вычитка блока', run: (job) => proofread.run(job, { fromChapter, toChapter }) },
+    { key: 'continuityAudit', label: 'Проверка непрерывности блока', optional: true, run: (job) => continuityAudit.run(job, { fromChapter, toChapter }) },
+    { key: 'canonAudit', label: 'Проверка канона блока', optional: true, run: (job) => canonAudit.run(job, { fromChapter, toChapter }) },
+    { key: 'redTeam', label: 'Red team блока', optional: true, run: (job) => redTeam.run(job, { fromChapter, toChapter }) },
+    { key: 'revision', label: 'Правки блока', optional: true, run: (job) => revision.run(job, { fromChapter, toChapter }) },
+    { key: 'literaryEdit', label: 'Литературная редактура блока', optional: true, run: (job) => literaryEdit.run(job, { fromChapter, toChapter }) },
+    { key: 'microAudits', label: 'Точечные проверки блока', optional: true, run: (job) => microAudits.run(job, { fromChapter, toChapter }) },
+    { key: 'proofread', label: 'Вычитка блока', optional: true, run: (job) => proofread.run(job, { fromChapter, toChapter }) },
     { key: 'pdf', label: 'Сборка PDF блока', run: (job) => pdfPhase.run(job, { fromChapter, toChapter, isSample: false }) },
     { key: 'deliverBatch', label: 'Отправка блока', run: (job) => deliverBatch(job) },
   ];
@@ -121,7 +127,12 @@ async function runPhaseList(jobId, phases) {
       phaseLabel: phase.label,
     });
     jobStore.appendLog(jobId, `>>> Фаза: ${phase.label}`);
-    await phase.run(job);
+    try {
+      await phase.run(job);
+    } catch (err) {
+      if (!phase.optional) throw err;
+      jobStore.appendLog(jobId, `Фаза "${phase.label}" пропущена из-за ошибки: ${err.message}`);
+    }
     job = jobStore.getJob(jobId);
   }
   return job;

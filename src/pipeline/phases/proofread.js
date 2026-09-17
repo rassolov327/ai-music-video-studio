@@ -14,15 +14,27 @@ async function run(job, { fromChapter, toChapter }) {
     const original = jobStore.readFile(job.id, `manuscript/${file}`);
     const originalWords = wordCount(original);
     jobStore.appendLog(job.id, `Proofread: вычитываю главу ${i}`);
-    const { text, model } = await chatComplete({
-      phase: 'proofread',
-      system:
-        'Вычитай художественный текст на опечатки, орфографию и пунктуацию. ' +
-        'Не меняй сюжет, стиль и объём. В ответе выведи ТОЛЬКО исправленный текст целиком, ' +
-        'без комментариев, без списка найденных ошибок, без пояснений — только сам текст главы.',
-      prompt: original,
-      targetWords: originalWords,
-    });
+
+    // Best-effort: a chapter is already a complete, usable chapter before
+    // this step even runs. Proofreading is polish, not a gate — if kie.ai
+    // is having a rough moment, skip this chapter's proofread rather than
+    // failing the whole batch (which would block the audits/PDF/delivery
+    // that already happened) over a typo-fixing pass.
+    let text, model;
+    try {
+      ({ text, model } = await chatComplete({
+        phase: 'proofread',
+        system:
+          'Вычитай художественный текст на опечатки, орфографию и пунктуацию. ' +
+          'Не меняй сюжет, стиль и объём. В ответе выведи ТОЛЬКО исправленный текст целиком, ' +
+          'без комментариев, без списка найденных ошибок, без пояснений — только сам текст главы.',
+        prompt: original,
+        targetWords: originalWords,
+      }));
+    } catch (err) {
+      jobStore.appendLog(job.id, `Proofread: вычитка главы ${i} не удалась (${err.message}) — оставляю как есть.`);
+      continue;
+    }
 
     if (wordCount(text) < originalWords * 0.6) {
       jobStore.appendLog(
