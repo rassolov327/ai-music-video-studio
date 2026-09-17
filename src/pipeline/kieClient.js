@@ -27,7 +27,7 @@ const MODEL_TABLE = {
   // Architecture AND draft routed to Gemini as a working fallback while
   // Claude's kie.ai proxy is flaky (confirmed failing on both models, both
   // phases, across many minutes — not a one-off blip). Revisit once stable.
-  architecture: { model: GOOGLE_SLUGS.flash, provider: 'Google' },
+  architecture: { model: 'claude-sonnet-5', provider: 'Anthropic' }, // TEMP probe: is kie.ai's Claude proxy back up? revert to GOOGLE_SLUGS.flash if not
   draft: { model: GOOGLE_SLUGS.pro, provider: 'Google' },
   continuityAudit: { model: GOOGLE_SLUGS.flash, provider: 'Google' },
   canonAudit: { model: GOOGLE_SLUGS.pro, provider: 'Google' },
