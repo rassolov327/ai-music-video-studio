@@ -28,9 +28,9 @@ const GOOGLE_SLUGS = {
 // Re-probe architecture with claude-sonnet-5 occasionally; swap everything
 // back once it holds.
 const MODEL_TABLE = {
-  architecture: { model: GOOGLE_SLUGS.flash, provider: 'Google' },
+  architecture: { model: GOOGLE_SLUGS.pro, provider: 'Google' }, // flash timed out (524) repeatedly on 2026-09-17; pro already proven reliable for the sample run
   draft: { model: GOOGLE_SLUGS.pro, provider: 'Google' },
-  continuityAudit: { model: GOOGLE_SLUGS.flash, provider: 'Google' },
+  continuityAudit: { model: GOOGLE_SLUGS.pro, provider: 'Google' }, // flash timed out (524) repeatedly on 2026-09-17
   canonAudit: { model: GOOGLE_SLUGS.pro, provider: 'Google' },
   redTeam: { model: GOOGLE_SLUGS.pro, provider: 'Google' },
   revision: { model: GOOGLE_SLUGS.pro, provider: 'Google' },
