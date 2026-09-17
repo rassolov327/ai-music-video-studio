@@ -38,7 +38,7 @@ function estimateCost({ targetWords, mode = 'full' }) {
   if (mode === 'sample') {
     // One chapter, no audits/revision passes — just draft + a light proofread.
     const items = [
-      { label: 'Архитектура (только глава 1)', model: 'gemini-3-8-flash-openai', cost: lineCost('gemini-3-8-flash-openai', 1000, 400) },
+      { label: 'Архитектура (только глава 1)', model: 'gemini-3-pro', cost: lineCost('gemini-3-pro', 1000, 400) },
       { label: 'Черновик главы 1', model: 'gemini-3-pro', cost: lineCost('gemini-3-pro', 3000, targetWords) },
       { label: 'Финальная вычитка', model: 'gpt-5-6-luna', cost: lineCost('gpt-5-6-luna', targetWords, targetWords) },
     ];
@@ -60,9 +60,9 @@ function estimateCost({ targetWords, mode = 'full' }) {
   const revisedWords = Math.round(chapterCount * 0.2) * chapterWords;
 
   const items = [
-    { label: 'Архитектура романа', model: 'gemini-3-8-flash-openai', cost: lineCost('gemini-3-8-flash-openai', 1500, 1900) },
+    { label: 'Архитектура романа', model: 'gemini-3-pro', cost: lineCost('gemini-3-pro', 1500, 1900) },
     { label: 'Черновик глав', model: 'gemini-3-pro', cost: lineCost('gemini-3-pro', chapterCount * 3000, manuscriptWords) },
-    { label: 'Проверка непрерывности', model: 'gemini-3-8-flash-openai', cost: lineCost('gemini-3-8-flash-openai', manuscriptWords, 300) },
+    { label: 'Проверка непрерывности', model: 'gemini-3-pro', cost: lineCost('gemini-3-pro', manuscriptWords, 300) },
     { label: 'Проверка канона', model: 'gemini-3-pro', cost: lineCost('gemini-3-pro', manuscriptWords + 1000, 400) },
     { label: 'Red team (1)', model: 'gemini-3-pro', cost: lineCost('gemini-3-pro', manuscriptWords, 500) },
     { label: 'Правки по критике', model: 'gemini-3-pro', cost: lineCost('gemini-3-pro', revisedWords, revisedWords) },
@@ -98,7 +98,7 @@ function estimateBatchCost({ batchChapters, chapterWords = 2500, isFirstBatch = 
     { label: `Черновик (${batchChapters} гл.)`, model: 'gemini-3-pro', cost: lineCost('gemini-3-pro', batchChapters * 3000, batchWords) },
     { label: 'Дневник состояния', model: 'gpt-5-6-luna', cost: lineCost('gpt-5-6-luna', batchChapters * 900, batchChapters * 350) },
     { label: 'Проверка каждой главы', model: 'gpt-5-6-luna', cost: lineCost('gpt-5-6-luna', batchChapters * 900, batchChapters * 120) },
-    { label: 'Проверка непрерывности блока', model: 'gemini-3-8-flash-openai', cost: lineCost('gemini-3-8-flash-openai', batchWords, 250) },
+    { label: 'Проверка непрерывности блока', model: 'gemini-3-pro', cost: lineCost('gemini-3-pro', batchWords, 250) },
     { label: 'Проверка канона блока', model: 'gemini-3-pro', cost: lineCost('gemini-3-pro', batchWords + 1000, 300) },
     { label: 'Red team блока', model: 'gemini-3-pro', cost: lineCost('gemini-3-pro', batchWords, 350) },
     { label: 'Правки блока (худший случай)', model: 'gemini-3-pro', cost: lineCost('gemini-3-pro', batchWords, batchWords) },

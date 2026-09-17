@@ -126,25 +126,53 @@ async function chatComplete({ phase, system, prompt, targetWords = 300 }) {
 
   // Upstream providers occasionally return a transient 5xx ("internal
   // error, try again later") — retry a few times with backoff before
-  // giving up, rather than failing the whole job over a blip.
+  // giving up, rather than failing the whole job over a blip. A request
+  // can also just hang with no response at all (observed in production,
+  // 2026-09-17 — a revision call sat for 5+ minutes with nothing coming
+  // back) — fetch has no default timeout, so that would block forever
+  // without the AbortController below.
+  const REQUEST_TIMEOUT_MS = 90000;
   const MAX_ATTEMPTS = 4;
   let lastErr;
+
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${KIE_API_KEY}`,
-      },
-      body: JSON.stringify(body),
-    });
+    const isFinalAttempt = attempt === MAX_ATTEMPTS;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    let res;
+    let networkErr = null;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${KIE_API_KEY}`,
+        },
+        body: JSON.stringify(body),
+      });
+    } catch (err) {
+      networkErr =
+        err.name === 'AbortError'
+          ? new Error(`kie.ai request timed out after ${REQUEST_TIMEOUT_MS / 1000}s for phase ${phase}`)
+          : new Error(`kie.ai request errored for phase ${phase}: ${err.message}`);
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    if (networkErr) {
+      lastErr = networkErr;
+      if (isFinalAttempt) throw lastErr;
+      await new Promise((r) => setTimeout(r, 2000 * attempt));
+      continue;
+    }
+
     if (!res.ok) {
       const errBody = await res.text().catch(() => '');
       lastErr = new Error(`kie.ai request failed (${res.status}) for phase ${phase}: ${errBody.slice(0, 500)}`);
       const retryable = res.status >= 500 || res.status === 429;
-      if (retryable && attempt < MAX_ATTEMPTS) {
-        const delay = res.status === 429 ? 8000 * attempt : 2000 * attempt;
-        await new Promise((r) => setTimeout(r, delay));
+      if (retryable && !isFinalAttempt) {
+        await new Promise((r) => setTimeout(r, res.status === 429 ? 8000 * attempt : 2000 * attempt));
         continue;
       }
       throw lastErr;
@@ -158,7 +186,7 @@ async function chatComplete({ phase, system, prompt, targetWords = 300 }) {
     // unambiguously means a gateway error, not a real model response.
     if (typeof data.code === 'number' && data.code !== 200) {
       lastErr = new Error(`kie.ai error (code ${data.code}) for phase ${phase}: ${data.msg || 'unknown error'}`);
-      if (data.code >= 500 && attempt < MAX_ATTEMPTS) {
+      if (data.code >= 500 && !isFinalAttempt) {
         await new Promise((r) => setTimeout(r, 2000 * attempt));
         continue;
       }
@@ -168,12 +196,13 @@ async function chatComplete({ phase, system, prompt, targetWords = 300 }) {
     const text = extractText(data);
     if (!text) {
       lastErr = new Error(`kie.ai returned an empty response for phase ${phase} (model ${route.model}) — check response shape: ${JSON.stringify(data).slice(0, 300)}`);
-      if (attempt < MAX_ATTEMPTS) {
+      if (!isFinalAttempt) {
         await new Promise((r) => setTimeout(r, 2000 * attempt));
         continue;
       }
       throw lastErr;
     }
+
     return { text, model: route.model, dryRun: false };
   }
   throw lastErr;
