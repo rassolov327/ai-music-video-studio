@@ -135,7 +135,13 @@ async function chatComplete({ phase, system, prompt, targetWords = 300 }) {
   // attempt also races against a plain timer promise: whichever settles
   // first wins, so a truly stuck fetch can never block the loop from
   // moving on and retrying, even if the abort itself doesn't take effect.
-  const REQUEST_TIMEOUT_MS = 60000;
+  // Draft genuinely generates a full ~2500-word chapter against a large
+  // prompt (Story Bible + architecture + ledger) — chapter 7 timed out on
+  // all 4 attempts, all 60s, three retries running (2026-09-17), which
+  // looks like real generation time exceeding the timeout rather than a
+  // hang. Give it more room; keep the shorter timeout for the cheap/short
+  // audit-style calls where a stall really is a stall.
+  const REQUEST_TIMEOUT_MS = phase === 'draft' ? 120000 : 60000;
   const MAX_ATTEMPTS = 4;
   let lastErr;
 
