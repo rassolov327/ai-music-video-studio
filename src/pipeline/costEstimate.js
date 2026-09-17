@@ -89,4 +89,39 @@ function estimateCost({ targetWords, mode = 'full' }) {
   };
 }
 
-module.exports = { estimateCost };
+// Cost of writing+checking ONE batch of chapters — shown before every
+// batch (not just once for the whole book), so spend stays predictable.
+function estimateBatchCost({ batchChapters, chapterWords = 2500, isFirstBatch = false, isLastBatch = false }) {
+  const batchWords = batchChapters * chapterWords;
+
+  const items = [
+    { label: `Черновик (${batchChapters} гл.)`, model: 'gemini-3-pro', cost: lineCost('gemini-3-pro', batchChapters * 3000, batchWords) },
+    { label: 'Дневник состояния', model: 'gpt-5-6-luna', cost: lineCost('gpt-5-6-luna', batchChapters * 900, batchChapters * 350) },
+    { label: 'Проверка каждой главы', model: 'gpt-5-6-luna', cost: lineCost('gpt-5-6-luna', batchChapters * 900, batchChapters * 120) },
+    { label: 'Проверка непрерывности блока', model: 'gemini-3-8-flash-openai', cost: lineCost('gemini-3-8-flash-openai', batchWords, 250) },
+    { label: 'Проверка канона блока', model: 'gemini-3-pro', cost: lineCost('gemini-3-pro', batchWords + 1000, 300) },
+    { label: 'Red team блока', model: 'gemini-3-pro', cost: lineCost('gemini-3-pro', batchWords, 350) },
+    { label: 'Правки блока (худший случай)', model: 'gemini-3-pro', cost: lineCost('gemini-3-pro', batchWords, batchWords) },
+    { label: 'Литературная редактура блока', model: 'gemini-3-pro', cost: lineCost('gemini-3-pro', batchWords, 250) },
+    { label: 'Точечные проверки блока', model: 'gpt-5-6-luna', cost: lineCost('gpt-5-6-luna', batchWords * 2 + 500, 240) },
+    { label: 'Вычитка блока', model: 'gpt-5-6-luna', cost: lineCost('gpt-5-6-luna', batchWords, batchWords) },
+  ];
+
+  // Low = revision phase finds nothing to fix (common case); high = it
+  // rewrites the whole batch (worst case) — the two ends of a realistic range.
+  const revisionCost = items[6].cost;
+  const subtotalLow = items.reduce((s, i) => s + i.cost, 0) - revisionCost;
+  const subtotalHigh = items.reduce((s, i) => s + i.cost, 0);
+
+  return {
+    batchChapters,
+    batchWords,
+    items: items.map((i) => ({ ...i, cost: Math.round(i.cost * 100) / 100 })),
+    lowUsd: Math.round(subtotalLow * 100) / 100,
+    highUsd: Math.round(subtotalHigh * 100) / 100,
+    lowCredits: Math.round(subtotalLow * CREDITS_PER_USD),
+    highCredits: Math.round(subtotalHigh * CREDITS_PER_USD),
+  };
+}
+
+module.exports = { estimateCost, estimateBatchCost };

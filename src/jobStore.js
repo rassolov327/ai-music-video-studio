@@ -51,6 +51,13 @@ function createJob(input) {
     finalPdfPath: null,
     finalTxtPath: null,
     emailSent: false,
+    // Batched (full-mode) generation: the book is planned once, then written
+    // a few chapters at a time, each batch re-confirmed for spend before it
+    // starts. Unused/null for 'sample' mode (single chapter, no batching).
+    totalChapters: null,
+    totalBatches: null,
+    currentBatch: 0,
+    batches: [], // [{ index, fromChapter, toChapter, pdfPath, txtPath, emailSent }]
   };
   fs.writeFileSync(statePath(id), JSON.stringify(state, null, 2), 'utf8');
   fs.writeFileSync(jobDir(id, 'logs', 'progress.log'), '', 'utf8');

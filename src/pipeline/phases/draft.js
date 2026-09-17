@@ -1,14 +1,40 @@
 const jobStore = require('../../jobStore');
 const { chatComplete } = require('../kieClient');
+const stateLedger = require('../stateLedger');
+const { chapterFileName } = require('../manuscript');
 
-function chapterFileName(index) {
-  return `chapter_${String(index).padStart(3, '0')}.md`;
+async function checkChapter(job, chapterIndex, chapterText, storyBible, ledger) {
+  const { text } = await chatComplete({
+    phase: 'chapterCheck',
+    system:
+      'Сверь главу с дневником состояния и Story Bible. Если есть явные противоречия ' +
+      '(имена, факты, хронология, кто что знает) — перечисли их кратко, по одному на строку. ' +
+      'Если противоречий нет, ответь ровно одним словом: OK.',
+    prompt: `Story Bible:\n${storyBible}\n\nДневник состояния:\n${ledger || '(пусто)'}\n\nГлава ${chapterIndex}:\n${chapterText}`,
+    targetWords: 120,
+  });
+  const trimmed = text.trim();
+  if (!/^ok\.?$/i.test(trimmed)) {
+    jobStore.writeFile(
+      job.id,
+      `quality/batch_${String(job.currentBatch).padStart(2, '0')}_flags.md`,
+      `${jobStore.exists(job.id, `quality/batch_${String(job.currentBatch).padStart(2, '0')}_flags.md`)
+        ? jobStore.readFile(job.id, `quality/batch_${String(job.currentBatch).padStart(2, '0')}_flags.md`) + '\n\n'
+        : ''}## Глава ${chapterIndex}\n${trimmed}`
+    );
+    jobStore.appendLog(job.id, `Draft: проверка главы ${chapterIndex} нашла возможные нестыковки — учтётся при правках блока`);
+  }
 }
 
-// Writes the manuscript chapter by chapter. Resumable: chapters already
-// present on disk (from a previous run that crashed/restarted) are skipped.
-async function run(job) {
+// Writes chapters [fromChapter..toChapter] (one batch). Resumable: chapters
+// already present on disk are skipped, so retrying a crashed batch doesn't
+// redo (and re-pay for) chapters already written.
+async function run(job, { fromChapter, toChapter } = {}) {
   const chapters = JSON.parse(jobStore.readFile(job.id, 'planning/chapters.json'));
+  const from = fromChapter ?? chapters[0].index;
+  const to = toChapter ?? chapters[chapters.length - 1].index;
+  const batchChapters = chapters.filter((c) => c.index >= from && c.index <= to);
+
   const architecture = jobStore.readFile(job.id, 'planning/novel_architecture.md');
   const storyBible = jobStore.exists(job.id, 'canon/story_bible.md')
     ? jobStore.readFile(job.id, 'canon/story_bible.md')
@@ -16,16 +42,15 @@ async function run(job) {
 
   jobStore.updateJob(job.id, { chaptersTotal: chapters.length });
 
-  let recap = '';
-  for (const ch of chapters) {
+  for (const ch of batchChapters) {
     const file = chapterFileName(ch.index);
     if (jobStore.exists(job.id, `manuscript/${file}`)) {
-      recap = jobStore.readFile(job.id, `manuscript/${file}`).slice(-1500);
       jobStore.updateJob(job.id, { chaptersWritten: ch.index });
-      continue; // already written in a previous attempt
+      continue; // already written in a previous attempt at this batch
     }
 
     jobStore.appendLog(job.id, `Draft: пишу главу ${ch.index}/${chapters.length}`);
+    const ledger = stateLedger.readLedger(job.id);
 
     const { text, model } = await chatComplete({
       phase: 'draft',
@@ -34,18 +59,23 @@ async function run(job) {
         `фирменных фраз), психологический хоррор, язык — ${job.input.language}.`,
       prompt:
         `Story Bible:\n${storyBible}\n\nПлан романа:\n${architecture}\n\n` +
-        `Глава ${ch.index} из ${chapters.length}. Конец предыдущей главы:\n${recap}\n\n` +
+        `Дневник состояния (что уже произошло к этому моменту):\n${ledger || '(это первая глава романа)'}\n\n` +
+        `Глава ${ch.index} из ${chapters.length}. О чём эта глава: ${ch.brief}\n\n` +
         `Напиши главу ${ch.index} целиком, ~${ch.targetWords} слов.`,
       targetWords: ch.targetWords,
     });
 
     jobStore.writeFile(job.id, `manuscript/${file}`, text);
-    recap = text.slice(-1500);
     jobStore.updateJob(job.id, { chaptersWritten: ch.index });
     jobStore.appendLog(job.id, `Draft: глава ${ch.index} готова (модель ${model}, ${text.split(/\s+/).length} слов)`);
+
+    if (chapters.length > 1) {
+      await stateLedger.updateLedger(job.id, ch.index, text);
+      await checkChapter(job, ch.index, text, storyBible, stateLedger.readLedger(job.id));
+    }
   }
 
-  return { chapters: chapters.length };
+  return { chapters: batchChapters.length };
 }
 
-module.exports = { run, chapterFileName };
+module.exports = { run };

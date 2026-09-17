@@ -1,14 +1,16 @@
 const jobStore = require('../../jobStore');
 const { chatComplete } = require('../kieClient');
-const { chapterFiles, wordCount } = require('../manuscript');
+const { chapterFileName, wordCount } = require('../manuscript');
 
-// Mechanical final pass (typos, spacing, obvious slips) on the cheapest
-// model in the table. Runs per-chapter so it stays resumable.
-async function run(job) {
-  const files = chapterFiles(job.id);
-  jobStore.appendLog(job.id, `Proofread: финальная вычитка ${files.length} глав`);
+// Mechanical final pass (typos, spacing, obvious slips) on this batch's
+// chapters, on the cheapest model in the table.
+async function run(job, { fromChapter, toChapter }) {
+  jobStore.appendLog(job.id, `Proofread: финальная вычитка глав ${fromChapter}-${toChapter}`);
 
-  for (const file of files) {
+  for (let i = fromChapter; i <= toChapter; i++) {
+    const file = chapterFileName(i);
+    if (!jobStore.exists(job.id, `manuscript/${file}`)) continue;
+
     const original = jobStore.readFile(job.id, `manuscript/${file}`);
     const originalWords = wordCount(original);
     const { text, model } = await chatComplete({
@@ -21,23 +23,19 @@ async function run(job) {
       targetWords: originalWords,
     });
 
-    // A proofread pass should return prose of roughly the same length —
-    // a model answering with commentary/a diff instead of the corrected
-    // text produces something much shorter. Guard against silently
-    // clobbering a good chapter with that.
     if (wordCount(text) < originalWords * 0.6) {
       jobStore.appendLog(
         job.id,
-        `Proofread: ответ модели (${model}) подозрительно короткий (${wordCount(text)} vs ${originalWords} слов) — похоже на комментарий, а не текст. Оставляю ${file} без изменений.`
+        `Proofread: ответ модели (${model}) подозрительно короткий для главы ${i} — похоже на комментарий, а не текст. Оставляю без изменений.`
       );
       continue;
     }
 
     jobStore.writeFile(job.id, `manuscript/${file}`, text);
-    jobStore.appendLog(job.id, `Proofread: ${file} готова (модель ${model})`);
+    jobStore.appendLog(job.id, `Proofread: глава ${i} готова (модель ${model})`);
   }
 
-  return { proofread: files.length };
+  return {};
 }
 
 module.exports = { run };

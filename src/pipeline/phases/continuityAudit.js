@@ -1,23 +1,24 @@
 const jobStore = require('../../jobStore');
 const { chatComplete } = require('../kieClient');
-const { readFullManuscript } = require('../manuscript');
+const { readBatchManuscript } = require('../manuscript');
 
-// Cheap, incremental-style pass: checks names/dates/objects/relationships
-// stay consistent across chapters. Uses a lighter model since it runs often.
-async function run(job) {
-  jobStore.appendLog(job.id, 'Continuity: проверяю имена, даты, предметы, отношения персонажей');
-  const manuscript = readFullManuscript(job.id);
+// Scoped to just this batch's chapters — cheap, and errors cluster locally
+// (see project notes on long-form LLM consistency research), so catching
+// them per-batch beats one pass over the whole growing manuscript.
+async function run(job, { fromChapter, toChapter }) {
+  jobStore.appendLog(job.id, `Continuity: проверяю главы ${fromChapter}-${toChapter}`);
+  const batchText = readBatchManuscript(job.id, fromChapter, toChapter);
 
   const { text, model } = await chatComplete({
     phase: 'continuityAudit',
     system:
       'Ты — редактор по непрерывности повествования. Найди несоответствия в именах, датах, ' +
-      'возрасте, географии, знаниях персонажей. Формат: список находок или "Проблем не найдено".',
-    prompt: manuscript,
-    targetWords: 300,
+      'возрасте, географии, знаниях персонажей в пределах этих глав. Формат: список находок или "Проблем не найдено".',
+    prompt: batchText,
+    targetWords: 250,
   });
 
-  jobStore.writeFile(job.id, 'quality/continuity_database.md', text);
+  jobStore.writeFile(job.id, `quality/batch_${String(job.currentBatch).padStart(2, '0')}_continuity.md`, text);
   jobStore.appendLog(job.id, `Continuity: отчёт готов (модель ${model})`);
   return {};
 }

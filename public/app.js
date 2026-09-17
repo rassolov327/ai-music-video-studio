@@ -6,6 +6,8 @@ const phaseLabel = document.getElementById('phaseLabel');
 const chapterProgress = document.getElementById('chapterProgress');
 const downloadBox = document.getElementById('downloadBox');
 const downloadLink = document.getElementById('downloadLink');
+const batchesBox = document.getElementById('batchesBox');
+const batchesList = document.getElementById('batchesList');
 const confirmBox = document.getElementById('confirmBox');
 const costEstimateText = document.getElementById('costEstimateText');
 const confirmBtn = document.getElementById('confirmBtn');
@@ -75,26 +77,46 @@ function showStatus(jobId) {
 function renderState(job) {
   statusTitle.textContent = `${job.input.game} — ${job.input.style}`;
   progressBar.style.width = `${job.progressPercent || 0}%`;
-  phaseLabel.textContent = job.phaseLabel ? `Этап: ${job.phaseLabel}` : '—';
+
+  const batchInfo = job.totalBatches
+    ? ` (блок ${Math.min(job.currentBatch + 1, job.totalBatches)} из ${job.totalBatches})`
+    : '';
+  phaseLabel.textContent = job.phaseLabel ? `Этап: ${job.phaseLabel}${batchInfo}` : '—';
   chapterProgress.textContent = job.chaptersTotal
     ? `Глав написано: ${job.chaptersWritten || 0} / ${job.chaptersTotal}`
     : '';
 
   if (job.status === 'awaiting_confirmation' && job.costEstimate) {
     const e = job.costEstimate;
+    const chapters = e.batchChapters ?? e.chapterCount;
+    const words = e.batchWords ?? e.manuscriptWords;
+    const label = e.batchChapters ? 'этот блок' : 'вся книга (ориентировочно)';
     costEstimateText.textContent =
-      `Примерная стоимость: $${e.lowUsd}–$${e.highUsd} (~${e.lowCredits}–${e.highCredits} кредитов kie.ai), ` +
-      `${e.chapterCount} глав, ~${e.manuscriptWords.toLocaleString('ru-RU')} слов черновика.`;
+      `Примерная стоимость (${label}): $${e.lowUsd}–$${e.highUsd} (~${e.lowCredits}–${e.highCredits} кредитов kie.ai), ` +
+      `${chapters} глав, ~${words.toLocaleString('ru-RU')} слов.`;
     confirmBox.classList.remove('hidden');
   } else {
     confirmBox.classList.add('hidden');
   }
 
-  if (job.status === 'done') {
+  if (job.status === 'done' && job.input.mode === 'sample') {
     downloadBox.classList.remove('hidden');
     downloadLink.href = `/api/jobs/${job.id}/download`;
   } else {
     downloadBox.classList.add('hidden');
+  }
+
+  if (job.batches && job.batches.length) {
+    batchesBox.classList.remove('hidden');
+    batchesList.innerHTML = job.batches
+      .map(
+        (b, i) =>
+          `<li><a href="/api/jobs/${job.id}/download/${i}">Главы ${b.fromChapter}-${b.toChapter}</a>` +
+          `${b.emailSent ? ' · отправлено на почту' : ''}</li>`
+      )
+      .join('');
+  } else {
+    batchesBox.classList.add('hidden');
   }
 
   if (job.status === 'error') {

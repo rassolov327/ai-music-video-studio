@@ -1,7 +1,9 @@
 const jobStore = require('../jobStore');
 const { isDryRun } = require('./kieClient');
+const { estimateBatchCost } = require('./costEstimate');
 const research = require('./phases/research');
 const architecture = require('./phases/architecture');
+const { BATCH_CHAPTERS, CHAPTER_WORDS } = architecture;
 const draft = require('./phases/draft');
 const continuityAudit = require('./phases/continuityAudit');
 const canonAudit = require('./phases/canonAudit');
@@ -13,50 +15,50 @@ const proofread = require('./phases/proofread');
 const pdfPhase = require('./phases/pdf');
 const { sendPdfEmail } = require('../email/send');
 
-// Ordered pipeline. Each entry's `run` receives the job state and may throw
-// to fail the whole job. State is persisted after every phase so a server
-// restart resumes from the next phase (phases like draft/proofread are
-// internally resumable per-chapter too).
-const FULL_PHASES = [
-  { key: 'research', label: 'Исследование', run: research.run },
-  { key: 'architecture', label: 'Архитектура романа', run: architecture.run },
-  { key: 'draft', label: 'Черновик', run: draft.run },
-  { key: 'continuityAudit', label: 'Проверка непрерывности', run: continuityAudit.run },
-  { key: 'canonAudit', label: 'Проверка канона', run: canonAudit.run },
-  { key: 'redTeam1', label: 'Red team (1)', run: (job) => redTeam.run(job, { pass: 1 }) },
-  { key: 'revision', label: 'Правки по критике', run: (job) => revision.run(job, { reportPath: 'quality/red_team_report.md' }) },
-  { key: 'redTeam2', label: 'Red team (2)', run: (job) => redTeam.run(job, { pass: 2 }) },
-  { key: 'literaryEdit', label: 'Литературная редактура', run: literaryEdit.run },
-  { key: 'microAudits', label: 'Точечные проверки', run: microAudits.run },
-  { key: 'proofread', label: 'Финальная вычитка', run: proofread.run },
-  { key: 'pdf', label: 'Сборка PDF', run: pdfPhase.run },
-  { key: 'deliver', label: 'Отправка', run: deliverPhase },
-];
-
-// A short preview fragment (one chapter): research + a light plan + the
-// chapter itself + proofread + PDF. No audits/revision — those only make
-// sense once there's a full manuscript to check for consistency.
+// --- Sample mode: one throwaway preview chapter, no batching needed ---
 const SAMPLE_PHASES = [
   { key: 'research', label: 'Исследование', run: research.run },
   { key: 'architecture', label: 'Архитектура (глава 1)', run: architecture.run },
-  { key: 'draft', label: 'Черновик главы 1', run: draft.run },
-  { key: 'proofread', label: 'Финальная вычитка', run: proofread.run },
-  { key: 'pdf', label: 'Сборка PDF', run: pdfPhase.run },
-  { key: 'deliver', label: 'Отправка', run: deliverPhase },
+  { key: 'draft', label: 'Черновик главы 1', run: (job) => draft.run(job, { fromChapter: 1, toChapter: 1 }) },
+  { key: 'proofread', label: 'Финальная вычитка', run: (job) => proofread.run(job, { fromChapter: 1, toChapter: 1 }) },
+  { key: 'pdf', label: 'Сборка PDF', run: (job) => pdfPhase.run(job, { fromChapter: 1, toChapter: 1, isSample: true }) },
+  { key: 'deliver', label: 'Отправка', run: (job) => deliverSample(job) },
 ];
 
-function phasesFor(job) {
-  return job.input.mode === 'sample' ? SAMPLE_PHASES : FULL_PHASES;
+// --- Full mode: plan once, then write/check/deliver a batch at a time ---
+const SETUP_PHASES = [
+  { key: 'research', label: 'Исследование', run: research.run },
+  { key: 'architecture', label: 'Архитектура романа', run: architecture.run },
+];
+
+function batchPhases(fromChapter, toChapter) {
+  return [
+    { key: 'draft', label: `Черновик (главы ${fromChapter}-${toChapter})`, run: (job) => draft.run(job, { fromChapter, toChapter }) },
+    { key: 'continuityAudit', label: 'Проверка непрерывности блока', run: (job) => continuityAudit.run(job, { fromChapter, toChapter }) },
+    { key: 'canonAudit', label: 'Проверка канона блока', run: (job) => canonAudit.run(job, { fromChapter, toChapter }) },
+    { key: 'redTeam', label: 'Red team блока', run: (job) => redTeam.run(job, { fromChapter, toChapter }) },
+    { key: 'revision', label: 'Правки блока', run: (job) => revision.run(job, { fromChapter, toChapter }) },
+    { key: 'literaryEdit', label: 'Литературная редактура блока', run: (job) => literaryEdit.run(job, { fromChapter, toChapter }) },
+    { key: 'microAudits', label: 'Точечные проверки блока', run: (job) => microAudits.run(job, { fromChapter, toChapter }) },
+    { key: 'proofread', label: 'Вычитка блока', run: (job) => proofread.run(job, { fromChapter, toChapter }) },
+    { key: 'pdf', label: 'Сборка PDF блока', run: (job) => pdfPhase.run(job, { fromChapter, toChapter, isSample: false }) },
+    { key: 'deliverBatch', label: 'Отправка блока', run: (job) => deliverBatch(job) },
+  ];
 }
 
-async function deliverPhase(job) {
-  const to = job.input.email;
-  if (to) {
-    jobStore.appendLog(job.id, `Deliver: отправляю PDF на ${to}`);
+function batchRange(currentBatch, totalChapters) {
+  const fromChapter = currentBatch * BATCH_CHAPTERS + 1;
+  const toChapter = Math.min(totalChapters, fromChapter + BATCH_CHAPTERS - 1);
+  return { fromChapter, toChapter };
+}
+
+async function deliverSample(job) {
+  if (job.input.email) {
+    jobStore.appendLog(job.id, `Deliver: отправляю PDF на ${job.input.email}`);
     const result = await sendPdfEmail({
-      to,
-      subject: `Готово: роман по мотивам «${job.input.game}»`,
-      text: 'Ваш роман готов. Файл во вложении, также доступен для скачивания на сайте.',
+      to: job.input.email,
+      subject: `Готово: ознакомительный фрагмент «${job.input.game}»`,
+      text: 'Фрагмент готов. Файл во вложении, также доступен для скачивания на сайте.',
       attachmentPath: job.finalPdfPath,
     });
     jobStore.updateJob(job.id, { emailSent: result.sent });
@@ -65,7 +67,65 @@ async function deliverPhase(job) {
   return {};
 }
 
+async function deliverBatch(job) {
+  const batches = [...(job.batches || [])];
+  const last = batches[batches.length - 1];
+  if (last && job.input.email) {
+    jobStore.appendLog(job.id, `Deliver: отправляю главы ${last.fromChapter}-${last.toChapter} на ${job.input.email}`);
+    const result = await sendPdfEmail({
+      to: job.input.email,
+      subject: `Готовы главы ${last.fromChapter}-${last.toChapter}: «${job.input.game}»`,
+      text: 'Очередной блок глав готов. Файл во вложении, также доступен для скачивания на сайте.',
+      attachmentPath: last.pdfPath,
+    });
+    last.emailSent = result.sent;
+    jobStore.updateJob(job.id, { batches });
+    jobStore.appendLog(job.id, result.sent ? 'Deliver: письмо отправлено' : `Deliver: письмо пропущено (${result.reason})`);
+  }
+  return {};
+}
+
 const running = new Set();
+
+function scheduleNextBatchConfirmation(jobId, nextBatch, totalChapters, totalBatches) {
+  const { fromChapter, toChapter } = batchRange(nextBatch, totalChapters);
+  const costEstimate = estimateBatchCost({
+    batchChapters: toChapter - fromChapter + 1,
+    chapterWords: CHAPTER_WORDS,
+    isFirstBatch: nextBatch === 0,
+    isLastBatch: nextBatch + 1 >= totalBatches,
+  });
+  jobStore.updateJob(jobId, {
+    currentBatch: nextBatch,
+    phaseIndex: 0,
+    status: 'awaiting_confirmation',
+    confirmed: false,
+    costEstimate,
+    progressPercent: Math.round((nextBatch / totalBatches) * 100),
+  });
+  jobStore.appendLog(
+    jobId,
+    `Следующий блок (главы ${fromChapter}-${toChapter} из ${totalChapters}): ` +
+      `~$${costEstimate.lowUsd}–$${costEstimate.highUsd} (~${costEstimate.lowCredits}–${costEstimate.highCredits} кредитов). Жду подтверждения.`
+  );
+}
+
+async function runPhaseList(jobId, phases) {
+  let job = jobStore.getJob(jobId);
+  const startIndex = job.phaseIndex || 0;
+  for (let i = startIndex; i < phases.length; i++) {
+    const phase = phases[i];
+    job = jobStore.updateJob(jobId, {
+      phaseIndex: i,
+      phaseKey: phase.key,
+      phaseLabel: phase.label,
+    });
+    jobStore.appendLog(jobId, `>>> Фаза: ${phase.label}`);
+    await phase.run(job);
+    job = jobStore.getJob(jobId);
+  }
+  return job;
+}
 
 async function runJob(jobId) {
   if (running.has(jobId)) return; // already in flight
@@ -75,34 +135,58 @@ async function runJob(jobId) {
     if (!job) throw new Error(`Job ${jobId} not found`);
 
     // Real (non-dry-run) generation spends real kie.ai credits and must be
-    // explicitly confirmed by the user first — see POST /api/jobs/:id/confirm.
-    // This check is deliberately re-verified here (not just in the route)
-    // so a server restart can never auto-resume an unconfirmed real job.
+    // explicitly confirmed first — for full-mode books, this check gates
+    // BOTH the initial setup and every subsequent batch (confirmed resets
+    // to false after each batch). Re-verified here (not just in the route)
+    // so a server restart can never auto-resume an unconfirmed spend.
     if (!isDryRun() && !job.confirmed) {
-      jobStore.appendLog(jobId, 'Запуск отклонён: реальная генерация требует подтверждения траты кредитов.');
+      jobStore.appendLog(jobId, 'Запуск отклонён: требуется подтверждение траты кредитов.');
       return;
     }
 
     jobStore.updateJob(jobId, { status: 'running', error: null });
-    jobStore.appendLog(jobId, `Запуск (${job.input.mode || 'full'}): игра="${job.input.game}", стиль="${job.input.style}", объём=${job.input.targetWords} слов`);
 
-    const phases = phasesFor(job);
-    const startIndex = job.phaseIndex || 0;
-    for (let i = startIndex; i < phases.length; i++) {
-      const phase = phases[i];
-      job = jobStore.updateJob(jobId, {
-        phaseIndex: i,
-        phaseKey: phase.key,
-        phaseLabel: phase.label,
-        progressPercent: Math.round((i / phases.length) * 100),
-      });
-      jobStore.appendLog(jobId, `>>> Фаза: ${phase.label}`);
-      await phase.run(job);
-      job = jobStore.getJob(jobId);
+    if (job.input.mode === 'sample') {
+      jobStore.appendLog(jobId, `Запуск (sample): игра="${job.input.game}", стиль="${job.input.style}"`);
+      await runPhaseList(jobId, SAMPLE_PHASES);
+      jobStore.updateJob(jobId, { status: 'done', progressPercent: 100, phaseKey: 'done', phaseLabel: 'Готово' });
+      jobStore.appendLog(jobId, 'Готово: фрагмент завершён.');
+      return;
     }
 
-    jobStore.updateJob(jobId, { status: 'done', progressPercent: 100, phaseKey: 'done', phaseLabel: 'Готово' });
-    jobStore.appendLog(jobId, 'Готово: роман завершён.');
+    // --- Full mode: plan once, then confirm+write one batch at a time.
+    // In DRY_RUN, nothing costs anything, so the loop just keeps going
+    // instead of stopping for a confirmation that would never arrive
+    // (server.js never auto-confirms a dry-run job past its first call).
+    for (;;) {
+      job = jobStore.getJob(jobId);
+
+      if (!job.totalChapters) {
+        jobStore.appendLog(jobId, `Запуск: игра="${job.input.game}", стиль="${job.input.style}", объём=${job.input.targetWords} слов`);
+        job = await runPhaseList(jobId, SETUP_PHASES);
+        // architecture.run() has just set totalChapters/totalBatches/currentBatch=0.
+        job = jobStore.updateJob(jobId, { phaseIndex: 0 });
+      } else {
+        const { fromChapter, toChapter } = batchRange(job.currentBatch, job.totalChapters);
+        job = await runPhaseList(jobId, batchPhases(fromChapter, toChapter));
+
+        if (job.currentBatch + 1 >= job.totalBatches) {
+          jobStore.updateJob(jobId, { status: 'done', progressPercent: 100, phaseKey: 'done', phaseLabel: 'Готово' });
+          jobStore.appendLog(jobId, 'Готово: все блоки написаны.');
+          return;
+        }
+        job = jobStore.updateJob(jobId, { currentBatch: job.currentBatch + 1, phaseIndex: 0 });
+      }
+
+      // job.currentBatch now points at the batch that's ready to start next.
+      if (isDryRun()) {
+        continue; // nothing to confirm — keep writing straight through
+      }
+      // Every batch gets its own "how much will this cost" checkpoint,
+      // including the first one right after setup — stop and wait.
+      scheduleNextBatchConfirmation(jobId, job.currentBatch, job.totalChapters, job.totalBatches);
+      return;
+    }
   } catch (err) {
     jobStore.updateJob(jobId, { status: 'error', error: String((err && err.message) || err) });
     jobStore.appendLog(jobId, `ОШИБКА: ${(err && err.message) || err}`);
@@ -121,4 +205,4 @@ function resumeUnfinishedJobs() {
   }
 }
 
-module.exports = { FULL_PHASES, SAMPLE_PHASES, runJob, resumeUnfinishedJobs };
+module.exports = { runJob, resumeUnfinishedJobs, batchRange };

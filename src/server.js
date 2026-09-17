@@ -157,6 +157,15 @@ app.get('/api/jobs/:id/download', (req, res) => {
   res.download(job.finalPdfPath, `${job.input.game} — роман.pdf`);
 });
 
+// One PDF per batch (full-mode books) — downloads that specific batch's
+// chapters, not the whole book.
+app.get('/api/jobs/:id/download/:batchIndex', (req, res) => {
+  const job = jobStore.getJob(req.params.id);
+  const batch = job && job.batches && job.batches[Number(req.params.batchIndex)];
+  if (!batch) return res.status(404).end();
+  res.download(batch.pdfPath, `${job.input.game} — главы ${batch.fromChapter}-${batch.toChapter}.pdf`);
+});
+
 app.get('/api/status', (req, res) => {
   res.json({ dryRun: isDryRun(), emailConfigured: smtpConfigured() });
 });
