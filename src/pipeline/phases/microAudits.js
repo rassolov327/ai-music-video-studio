@@ -30,6 +30,7 @@ async function run(job, { fromChapter, toChapter }) {
   const results = {};
   for (const c of checks) {
     if (!c.prompt.trim()) continue;
+    jobStore.appendLog(job.id, `Micro-audits: запускаю проверку "${c.key}"`);
     const { text, model } = await chatComplete({ phase: 'microAudits', system: c.note, prompt: c.prompt, targetWords: 120 });
     results[c.key] = text;
     jobStore.appendLog(job.id, `Micro-audits: ${c.key} готов (модель ${model})`);

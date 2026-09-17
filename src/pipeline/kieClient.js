@@ -35,7 +35,7 @@ const MODEL_TABLE = {
   redTeam: { model: GOOGLE_SLUGS.pro, provider: 'Google' },
   revision: { model: GOOGLE_SLUGS.pro, provider: 'Google' },
   literaryEdit: { model: GOOGLE_SLUGS.pro, provider: 'Google' },
-  microAudits: { model: 'gpt-5-6-luna', provider: 'OpenAI' },
+  microAudits: { model: GOOGLE_SLUGS.pro, provider: 'Google' }, // gpt-5-6-luna hung repeatedly on the ~10k-word batch-scale prompts here (fine on the much shorter stateLedger/chapterCheck prompts) — gemini-3-pro already handles this scale fine elsewhere
   proofread: { model: 'gpt-5-6-luna', provider: 'OpenAI' }, // confirmed exact slug from docs.kie.ai — dots become hyphens here, unlike Claude/Gemini names
   stateLedger: { model: 'gpt-5-6-luna', provider: 'OpenAI' }, // cheap — runs once per chapter
   chapterCheck: { model: 'gpt-5-6-luna', provider: 'OpenAI' }, // cheap — runs once per chapter

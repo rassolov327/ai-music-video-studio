@@ -27,6 +27,7 @@ async function run(job, { fromChapter, toChapter }) {
 
     const original = jobStore.readFile(job.id, `manuscript/${file}`);
     const originalWords = wordCount(original);
+    jobStore.appendLog(job.id, `Revision: переписываю главу ${i}`);
     const { text, model } = await chatComplete({
       phase: 'revision',
       system:
