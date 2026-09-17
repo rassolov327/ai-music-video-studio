@@ -10,6 +10,13 @@ const PRICING_USD_PER_M_TOKENS = {
   'Gemini 3.1 Pro': { in: 0.5, out: 3.5 },
   'Claude-Haiku-4-5': { in: 0.275, out: 1.425 },
   'gpt-5.6-luna': { in: 0.056, out: 0.336 },
+  // Actual slugs kieClient.js currently routes through (Claude's kie.ai
+  // proxy was unstable 2026-09-16/17 — see kieClient.js comments). Same
+  // price tier as their display-name siblings above; gemini-3-pro's exact
+  // rate wasn't scraped, approximated from Gemini 3.1 Pro.
+  'gemini-3-8-flash-openai': { in: 0.225, out: 1.125 },
+  'gemini-3-pro': { in: 0.5, out: 3.5 },
+  'gpt-5-6-luna': { in: 0.056, out: 0.336 },
 };
 
 // Cyrillic prose tokenizes at roughly 2 tokens/word — a working estimate,
@@ -31,9 +38,9 @@ function estimateCost({ targetWords, mode = 'full' }) {
   if (mode === 'sample') {
     // One chapter, no audits/revision passes — just draft + a light proofread.
     const items = [
-      { label: 'Архитектура (только глава 1)', model: 'claude-opus-5', cost: lineCost('claude-opus-5', 1000, 400) },
-      { label: 'Черновик главы 1', model: 'claude-sonnet-5', cost: lineCost('claude-sonnet-5', 3000, targetWords) },
-      { label: 'Финальная вычитка', model: 'gpt-5.6-luna', cost: lineCost('gpt-5.6-luna', targetWords, targetWords) },
+      { label: 'Архитектура (только глава 1)', model: 'gemini-3-8-flash-openai', cost: lineCost('gemini-3-8-flash-openai', 1000, 400) },
+      { label: 'Черновик главы 1', model: 'gemini-3-pro', cost: lineCost('gemini-3-pro', 3000, targetWords) },
+      { label: 'Финальная вычитка', model: 'gpt-5-6-luna', cost: lineCost('gpt-5-6-luna', targetWords, targetWords) },
     ];
     const subtotalUsd = items.reduce((s, i) => s + i.cost, 0);
     return {
