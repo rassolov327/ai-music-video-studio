@@ -127,88 +127,92 @@ async function chatComplete({ phase, system, prompt, targetWords = 300 }) {
   // Upstream providers occasionally return a transient 5xx ("internal
   // error, try again later") — retry a few times with backoff before
   // giving up, rather than failing the whole job over a blip. A request
-  // can also just hang with no response at all (observed in production,
-  // 2026-09-17 — a revision call sat for 5+ minutes with nothing coming
-  // back) — fetch has no default timeout, so that would block forever
-  // without the AbortController below.
-  const REQUEST_TIMEOUT_MS = 90000;
+  // can also just hang with no response at all (observed repeatedly in
+  // production, 2026-09-17 — sat for 5-18+ minutes with nothing coming
+  // back, across different phases and models). fetch has no default
+  // timeout, and even an AbortController-based one wasn't reliably
+  // cutting these off in this environment — so on top of that, every
+  // attempt also races against a plain timer promise: whichever settles
+  // first wins, so a truly stuck fetch can never block the loop from
+  // moving on and retrying, even if the abort itself doesn't take effect.
+  const REQUEST_TIMEOUT_MS = 60000;
   const MAX_ATTEMPTS = 4;
   let lastErr;
+
+  async function attemptOnce(controller) {
+    const res = await fetch(url, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${KIE_API_KEY}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      return {
+        error: new Error(`kie.ai request failed (${res.status}) for phase ${phase}: ${errBody.slice(0, 500)}`),
+        retryable: res.status >= 500 || res.status === 429,
+        rateLimited: res.status === 429,
+      };
+    }
+
+    const data = await res.json();
+    // kie.ai's gateway returns HTTP 200 even on its own errors (bad key,
+    // rate limit, transient upstream failure) — the real outcome is in a
+    // numeric top-level `code` field (200 = ok). Native provider success
+    // responses never have this field, so its presence+non-200 value
+    // unambiguously means a gateway error, not a real model response.
+    if (typeof data.code === 'number' && data.code !== 200) {
+      return {
+        error: new Error(`kie.ai error (code ${data.code}) for phase ${phase}: ${data.msg || 'unknown error'}`),
+        retryable: data.code >= 500,
+      };
+    }
+
+    const text = extractText(data);
+    if (!text) {
+      return {
+        error: new Error(`kie.ai returned an empty response for phase ${phase} (model ${route.model}) — check response shape: ${JSON.stringify(data).slice(0, 300)}`),
+        retryable: true,
+      };
+    }
+    return { text };
+  }
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     const isFinalAttempt = attempt === MAX_ATTEMPTS;
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    let timedOut = false;
+    const timeoutPromise = new Promise((resolve) => {
+      setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+        resolve({
+          error: new Error(`kie.ai request timed out after ${REQUEST_TIMEOUT_MS / 1000}s for phase ${phase} (attempt ${attempt})`),
+          retryable: true,
+        });
+      }, REQUEST_TIMEOUT_MS);
+    });
 
-    // Everything network-related — the request AND reading the response
-    // body — happens inside this one try block, guarded by the same
-    // timeout. A response whose headers arrive fine but whose body then
-    // stalls mid-stream is just as much a hang as never getting a response
-    // at all, and needs the same protection (this is what actually hung
-    // for 5+ minutes in production: clearing the timeout right after
-    // `fetch()` resolved left the body read completely unguarded).
     let outcome;
     try {
-      const res = await fetch(url, {
-        method: 'POST',
-        signal: controller.signal,
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${KIE_API_KEY}`,
-        },
-        body: JSON.stringify(body),
-      });
-
-      if (!res.ok) {
-        const errBody = await res.text().catch(() => '');
-        outcome = {
-          error: new Error(`kie.ai request failed (${res.status}) for phase ${phase}: ${errBody.slice(0, 500)}`),
-          retryable: res.status >= 500 || res.status === 429,
-          delay: res.status === 429 ? 8000 * attempt : 2000 * attempt,
-        };
-      } else {
-        const data = await res.json();
-        // kie.ai's gateway returns HTTP 200 even on its own errors (bad
-        // key, rate limit, transient upstream failure) — the real outcome
-        // is in a numeric top-level `code` field (200 = ok). Native
-        // provider success responses never have this field, so its
-        // presence+non-200 value unambiguously means a gateway error, not
-        // a real model response.
-        if (typeof data.code === 'number' && data.code !== 200) {
-          outcome = {
-            error: new Error(`kie.ai error (code ${data.code}) for phase ${phase}: ${data.msg || 'unknown error'}`),
-            retryable: data.code >= 500,
-            delay: 2000 * attempt,
-          };
-        } else {
-          const text = extractText(data);
-          if (!text) {
-            outcome = {
-              error: new Error(`kie.ai returned an empty response for phase ${phase} (model ${route.model}) — check response shape: ${JSON.stringify(data).slice(0, 300)}`),
-              retryable: true,
-              delay: 2000 * attempt,
-            };
-          } else {
-            return { text, model: route.model, dryRun: false };
-          }
-        }
-      }
+      outcome = await Promise.race([attemptOnce(controller), timeoutPromise]);
     } catch (err) {
       outcome = {
-        error:
-          err.name === 'AbortError'
-            ? new Error(`kie.ai request timed out after ${REQUEST_TIMEOUT_MS / 1000}s for phase ${phase}`)
-            : new Error(`kie.ai request errored for phase ${phase}: ${err.message}`),
+        error: new Error(`kie.ai request errored for phase ${phase}: ${err.message}`),
         retryable: true,
-        delay: 2000 * attempt,
       };
-    } finally {
-      clearTimeout(timeout);
     }
+
+    if (outcome.text) return { text: outcome.text, model: route.model, dryRun: false };
 
     lastErr = outcome.error;
     if (outcome.retryable && !isFinalAttempt) {
-      await new Promise((r) => setTimeout(r, outcome.delay));
+      const delay = timedOut ? 2000 * attempt : outcome.rateLimited ? 8000 * attempt : 2000 * attempt;
+      await new Promise((r) => setTimeout(r, delay));
       continue;
     }
     throw lastErr;
