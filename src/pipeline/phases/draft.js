@@ -70,8 +70,20 @@ async function run(job, { fromChapter, toChapter } = {}) {
     jobStore.appendLog(job.id, `Draft: глава ${ch.index} готова (модель ${model}, ${text.split(/\s+/).length} слов)`);
 
     if (chapters.length > 1) {
-      await stateLedger.updateLedger(job.id, ch.index, text);
-      await checkChapter(job, ch.index, text, storyBible, stateLedger.readLedger(job.id));
+      // Best-effort: the chapter itself is already written and saved above.
+      // The ledger/consistency-check are memory aids for later chapters and
+      // the batch-level audits, not a reason to lose an already-paid-for
+      // chapter to a transient kie.ai error.
+      try {
+        await stateLedger.updateLedger(job.id, ch.index, text);
+      } catch (err) {
+        jobStore.appendLog(job.id, `Draft: не удалось обновить дневник состояния после главы ${ch.index} (${err.message}) — продолжаю без обновления.`);
+      }
+      try {
+        await checkChapter(job, ch.index, text, storyBible, stateLedger.readLedger(job.id));
+      } catch (err) {
+        jobStore.appendLog(job.id, `Draft: проверка главы ${ch.index} не удалась (${err.message}) — пропускаю.`);
+      }
     }
   }
 
