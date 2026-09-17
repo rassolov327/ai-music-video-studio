@@ -60,16 +60,16 @@ function estimateCost({ targetWords, mode = 'full' }) {
   const revisedWords = Math.round(chapterCount * 0.2) * chapterWords;
 
   const items = [
-    { label: 'Архитектура романа', model: 'claude-opus-5', cost: lineCost('claude-opus-5', 1500, 1900) },
-    { label: 'Черновик глав', model: 'claude-sonnet-5', cost: lineCost('claude-sonnet-5', chapterCount * 3000, manuscriptWords) },
-    { label: 'Проверка непрерывности', model: 'Gemini 3.6 Flash', cost: lineCost('Gemini 3.6 Flash', manuscriptWords, 300) },
-    { label: 'Проверка канона', model: 'Gemini 3.1 Pro', cost: lineCost('Gemini 3.1 Pro', manuscriptWords + 1000, 400) },
-    { label: 'Red team (1)', model: 'claude-opus-5', cost: lineCost('claude-opus-5', manuscriptWords, 500) },
-    { label: 'Правки по критике', model: 'claude-sonnet-5', cost: lineCost('claude-sonnet-5', revisedWords, revisedWords) },
-    { label: 'Red team (2)', model: 'claude-opus-5', cost: lineCost('claude-opus-5', manuscriptWords, 500) },
-    { label: 'Литературная редактура', model: 'claude-opus-5', cost: lineCost('claude-opus-5', manuscriptWords, 400) },
-    { label: 'Точечные проверки', model: 'Claude-Haiku-4-5', cost: lineCost('Claude-Haiku-4-5', manuscriptWords * 2 + 500, 600) },
-    { label: 'Финальная вычитка', model: 'gpt-5.6-luna', cost: lineCost('gpt-5.6-luna', manuscriptWords, manuscriptWords) },
+    { label: 'Архитектура романа', model: 'gemini-3-8-flash-openai', cost: lineCost('gemini-3-8-flash-openai', 1500, 1900) },
+    { label: 'Черновик глав', model: 'gemini-3-pro', cost: lineCost('gemini-3-pro', chapterCount * 3000, manuscriptWords) },
+    { label: 'Проверка непрерывности', model: 'gemini-3-8-flash-openai', cost: lineCost('gemini-3-8-flash-openai', manuscriptWords, 300) },
+    { label: 'Проверка канона', model: 'gemini-3-pro', cost: lineCost('gemini-3-pro', manuscriptWords + 1000, 400) },
+    { label: 'Red team (1)', model: 'gemini-3-pro', cost: lineCost('gemini-3-pro', manuscriptWords, 500) },
+    { label: 'Правки по критике', model: 'gemini-3-pro', cost: lineCost('gemini-3-pro', revisedWords, revisedWords) },
+    { label: 'Red team (2)', model: 'gemini-3-pro', cost: lineCost('gemini-3-pro', manuscriptWords, 500) },
+    { label: 'Литературная редактура', model: 'gemini-3-pro', cost: lineCost('gemini-3-pro', manuscriptWords, 400) },
+    { label: 'Точечные проверки', model: 'gpt-5-6-luna', cost: lineCost('gpt-5-6-luna', manuscriptWords * 2 + 500, 600) },
+    { label: 'Финальная вычитка', model: 'gpt-5-6-luna', cost: lineCost('gpt-5-6-luna', manuscriptWords, manuscriptWords) },
   ];
 
   const subtotalUsd = items.reduce((s, i) => s + i.cost, 0);

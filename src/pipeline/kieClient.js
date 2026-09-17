@@ -18,23 +18,24 @@ const GOOGLE_SLUGS = {
   pro: 'gemini-3-pro',
 };
 
+// kie.ai's Claude proxy (/claude/v1/messages) has been failing every
+// request — claude-opus-5 AND claude-sonnet-5, across 2026-09-16 through
+// 2026-09-17 (re-probed 24h later, still 429/503 "Internal error, please
+// try again later") — with a confirmed-correct request format. Reads as a
+// sustained kie.ai/Anthropic-side outage, not a one-off blip. Every phase
+// below is temporarily off Claude entirely so a full-book run doesn't fail
+// partway through on redTeam/revision/etc after already spending on draft.
+// Re-probe architecture with claude-sonnet-5 occasionally; swap everything
+// back once it holds.
 const MODEL_TABLE = {
-  // claude-opus-5 and claude-sonnet-5 both hit repeated identical 503
-  // "Internal error, please try again later" from kie.ai's /claude/v1/messages
-  // during the first real run (2026-09-16/17); the request format itself is
-  // confirmed correct (matches kie.ai's documented Anthropic Messages shape),
-  // so this reads as a transient kie.ai/Anthropic-side issue, not a bug here.
-  // Architecture AND draft routed to Gemini as a working fallback while
-  // Claude's kie.ai proxy is flaky (confirmed failing on both models, both
-  // phases, across many minutes — not a one-off blip). Revisit once stable.
-  architecture: { model: 'claude-sonnet-5', provider: 'Anthropic' }, // TEMP probe: is kie.ai's Claude proxy back up? revert to GOOGLE_SLUGS.flash if not
+  architecture: { model: GOOGLE_SLUGS.flash, provider: 'Google' },
   draft: { model: GOOGLE_SLUGS.pro, provider: 'Google' },
   continuityAudit: { model: GOOGLE_SLUGS.flash, provider: 'Google' },
   canonAudit: { model: GOOGLE_SLUGS.pro, provider: 'Google' },
-  redTeam: { model: 'claude-opus-5', provider: 'Anthropic' },
-  revision: { model: 'claude-sonnet-5', provider: 'Anthropic' },
-  literaryEdit: { model: 'claude-opus-5', provider: 'Anthropic' },
-  microAudits: { model: 'Claude-Haiku-4-5', provider: 'Anthropic' },
+  redTeam: { model: GOOGLE_SLUGS.pro, provider: 'Google' },
+  revision: { model: GOOGLE_SLUGS.pro, provider: 'Google' },
+  literaryEdit: { model: GOOGLE_SLUGS.pro, provider: 'Google' },
+  microAudits: { model: 'gpt-5-6-luna', provider: 'OpenAI' },
   proofread: { model: 'gpt-5-6-luna', provider: 'OpenAI' }, // confirmed exact slug from docs.kie.ai — dots become hyphens here, unlike Claude/Gemini names
 };
 
